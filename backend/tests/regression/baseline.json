@@ -1,0 +1,152 @@
+{
+ "AMZN": {
+  "action": "WATCH",
+  "changes": [
+   "first analysis for this ticker"
+  ],
+  "components": {
+   "catalyst": 0.3247,
+   "earnings_revision": 0.2419,
+   "entry_rr": 0.706,
+   "fundamental": 0.1916,
+   "macro": 0.4359,
+   "risk": 0.606,
+   "technical": 0.9148,
+   "valuation": 0.0
+  },
+  "entry": [
+   6.28,
+   6.54,
+   7.04,
+   1.95
+  ],
+  "issues": {
+   "ISSUE_AI_0eb0d7d4": 4.43,
+   "ISSUE_EXPORT_CONTROL_4ab502c7": -12.93
+  },
+  "raw_action": "WATCH",
+  "scoring_model_version": "scoring-1.0.0",
+  "total": 38.02,
+  "vetoes": []
+ },
+ "JPM": {
+  "action": "WAIT",
+  "changes": [
+   "first analysis for this ticker"
+  ],
+  "components": {
+   "catalyst": 0.4086,
+   "earnings_revision": 0.2776,
+   "entry_rr": 0.2327,
+   "fundamental": 0.4161,
+   "macro": 0.5761,
+   "risk": 0.7949,
+   "technical": 0.927,
+   "valuation": 0.83
+  },
+  "entry": [
+   112.74,
+   115.75,
+   121.77,
+   0.68
+  ],
+  "issues": {
+   "ISSUE_INFLATION_e6a97115": 3.97
+  },
+  "raw_action": "WATCH",
+  "scoring_model_version": "scoring-1.0.0",
+  "total": 52.34,
+  "vetoes": [
+   "THESIS_INVALIDATED"
+  ]
+ },
+ "NVDA": {
+  "action": "BUY SMALL",
+  "changes": [
+   "first analysis for this ticker"
+  ],
+  "components": {
+   "catalyst": 0.4356,
+   "earnings_revision": 0.7472,
+   "entry_rr": 1.0,
+   "fundamental": 0.8101,
+   "macro": 0.6504,
+   "risk": 0.7736,
+   "technical": 0.7726,
+   "valuation": 0.997
+  },
+  "entry": [
+   370.77,
+   378.16,
+   392.93,
+   10.21
+  ],
+  "issues": {
+   "ISSUE_AI_0eb0d7d4": 11.47,
+   "ISSUE_EXPORT_CONTROL_4ab502c7": -30.39
+  },
+  "raw_action": "BUY SMALL",
+  "scoring_model_version": "scoring-1.0.0",
+  "total": 79.76,
+  "vetoes": []
+ },
+ "TSM": {
+  "action": "WATCH",
+  "changes": [
+   "first analysis for this ticker"
+  ],
+  "components": {
+   "catalyst": 0.4633,
+   "earnings_revision": 0.2915,
+   "entry_rr": 0.477,
+   "fundamental": 0.3543,
+   "macro": 0.5897,
+   "risk": 0.7976,
+   "technical": 0.3669,
+   "valuation": 1.0
+  },
+  "entry": [
+   3.29,
+   3.53,
+   4.03,
+   1.37
+  ],
+  "issues": {
+   "ISSUE_AI_0eb0d7d4": 5.48,
+   "ISSUE_EXPORT_CONTROL_4ab502c7": -17.4
+  },
+  "raw_action": "WATCH",
+  "scoring_model_version": "scoring-1.0.0",
+  "total": 52.33,
+  "vetoes": []
+ },
+ "XOM": {
+  "action": "WATCH",
+  "changes": [
+   "first analysis for this ticker"
+  ],
+  "components": {
+   "catalyst": 0.5177,
+   "earnings_revision": 0.4702,
+   "entry_rr": 0.7928,
+   "fundamental": 0.7888,
+   "macro": 0.6766,
+   "risk": 0.9236,
+   "technical": 0.4714,
+   "valuation": 0.4915
+  },
+  "entry": [
+   306.08,
+   311.27,
+   321.65,
+   2.26
+  ],
+  "issues": {
+   "ISSUE_OIL_fa0811d0": 9.68
+  },
+  "raw_action": "WATCH",
+  "scoring_model_version": "scoring-1.0.0",
+  "total": 65.39,
+  "vetoes": []
+ }
+}
