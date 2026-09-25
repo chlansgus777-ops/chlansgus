@@ -10,14 +10,28 @@
     "beforeBuildCommand": "npm run build:desktop"
   },
   "app": {
-    "windows": [{ "title": "MarketLens", "width": 1500, "height": 950, "minWidth": 1100, "minHeight": 700 }],
-    "security": { "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8765; style-src 'self' 'unsafe-inline'" }
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+    }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
-    "externalBin": ["binaries/marketlens-backend"],
-    "icon": ["icons/icon.ico", "icons/icon.png"],
-    "windows": { "webviewInstallMode": { "type": "downloadBootstrapper" } }
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "externalBin": [
+      "binaries/marketlens-backend"
+    ],
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
   }
 }

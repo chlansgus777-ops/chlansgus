@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 
-export function useApi<T>(path: string | null, deps: unknown[] = []): { data: T | null; error: string | null; loading: boolean; reload: () => void } {
+export type LoadState = "idle" | "loading" | "ready" | "error";
+
+export interface ApiState<T> {
+  data: T | null;
+  error: string | null;
+  loading: boolean;
+  state: LoadState;
+  reload: () => void;
+}
+
+/** Fetch ``path`` (null = don't fetch). Keeps the last good data while reloading, exposes a retry. */
+export function useApi<T>(path: string | null, deps: unknown[] = []): ApiState<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(path !== null);
@@ -19,5 +30,6 @@ export function useApi<T>(path: string | null, deps: unknown[] = []): { data: T 
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, tick, ...deps]);
-  return { data, error, loading, reload };
+  const state: LoadState = path === null ? "idle" : loading && data === null ? "loading" : error && data === null ? "error" : "ready";
+  return { data, error, loading, state, reload };
 }

@@ -15,8 +15,10 @@ jobs:
         with:
           node-version: "22"
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install backend
-        run: pip install -e "./backend[anthropic,windows]"
+      - name: Install backend (pinned lock file, reproducible)
+        run: |
+          pip install -r backend/requirements-windows.lock
+          pip install --no-deps -e ./backend
       - name: Backend tests
         run: |
           pip install pytest
@@ -29,6 +31,32 @@ jobs:
       - name: PyInstaller sidecar
         working-directory: backend
         run: pyinstaller --noconfirm packaging/marketlens-backend.spec
+      - name: Sidecar smoke test (start, readiness, single instance, port conflict)
+        shell: pwsh
+        env:
+          MARKETLENS_MODE: MOCK
+          MOCK_UNIVERSE_SIZE: "40"
+          MARKETLENS_DATA_DIR: ${{ runner.temp }}\ml-smoke
+        run: |
+          $exe = "backend/dist/marketlens-backend.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "serve","--port","8799" -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\smoke.out" -RedirectStandardError "$env:RUNNER_TEMP\smoke.err"
+          $ready = $false
+          for ($i = 0; $i -lt 90; $i++) {
+            try { $r = Invoke-RestMethod http://127.0.0.1:8799/api/health/ready; if ($r.ready) { $ready = $true; break } } catch { }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ready) { Get-Content "$env:RUNNER_TEMP\smoke.err"; throw "backend never became ready" }
+          $sys = Invoke-RestMethod http://127.0.0.1:8799/api/system
+          if ($sys.mode -ne "MOCK") { throw "unexpected mode $($sys.mode)" }
+          # a second instance on the same data dir must refuse to start (exit 4)
+          $second = Start-Process -FilePath $exe -ArgumentList "serve","--port","0" -PassThru -Wait
+          if ($second.ExitCode -ne 4) { throw "second instance exit $($second.ExitCode), expected 4" }
+          # another data dir asking for the busy port must fail clearly (exit 3)
+          $env:MARKETLENS_DATA_DIR = "$env:RUNNER_TEMP\ml-smoke-2"
+          $busy = Start-Process -FilePath $exe -ArgumentList "serve","--port","8799" -PassThru -Wait
+          if ($busy.ExitCode -ne 3) { throw "busy-port exit $($busy.ExitCode), expected 3" }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "sidecar smoke test passed"
       - name: Place sidecar
         run: Copy-Item backend/dist/marketlens-backend.exe frontend/src-tauri/binaries/marketlens-backend-x86_64-pc-windows-msvc.exe
       - name: Icons

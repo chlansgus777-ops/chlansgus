@@ -4,7 +4,11 @@ export interface OppRow {
   score: number; confidence: number; action: string; deterministic_action: string; committee_status: string;
   ideal_entry: number | null; max_buy: number | null; target: number | null; stop: number | null; downside: number | null; rr: number | null;
   catalyst: string | null; catalyst_date: string | null; risk: string | null; data_quality: string; mode: string; vetoes: string[]; as_of: string;
+  current_status: string | null; current_status_reason: string | null; sessions_since: number | null; actionable_now: boolean | null;
+  action_ko: string; valuation_price_basis: string | null; sector_known: boolean;
 }
+
+export interface FreshnessCheck { data_type: string; quality: string; effective: string | null; published: string | null; age: number | null; unit: string; fresh_max: number; usable_max: number; reason_ko: string }
 
 export interface Stage { stage: string; input_count: number; output_count: number; note: string }
 export interface ScanInfo { id: number; as_of: string; mode: string; stages: Stage[]; excluded: number; scoring_model_version: string }
@@ -18,7 +22,7 @@ export interface SystemInfo {
 
 export interface Reason { text: string; sign: number; refs: string[] }
 export interface Component { name: string; weight: number; subscore: number; available: boolean; reasons: Reason[]; missing: string[] }
-export interface Evidence { evidence_id: string; category: string; label: string; value: number | string | null; source: string; source_ts: string | null; quality: string }
+export interface Evidence { evidence_id: string; category: string; label: string; value: number | string | null; source: string; source_ts: string | null; quality: string; metric?: string; ticker?: string | null; unit?: string | null; period?: string | null }
 export interface HorizonImpact { horizon: string; direction: number; impact_score: number; confidence: number; mechanism: string[] }
 export interface CompanyIssueImpact { issue_id: string; ticker: string; hops: number; exposure_path: string[]; horizons: HorizonImpact[]; priced_in: number | null }
 
@@ -50,7 +54,8 @@ export interface Analysis {
   technicals: Record<string, unknown> | null;
   thesis_conditions: { condition_id: string; description: string }[];
   thesis_invalidated: boolean; thesis_breaches: string[];
-  data_quality: { fields: [string, string][]; core_missing: string[]; conflicts: string[]; stale: string[] };
+  data_quality: { fields: [string, string][]; core_missing: string[]; conflicts: string[]; stale: string[]; checks: FreshnessCheck[] };
+  sector_known: boolean; short_interest_pct: number | null; valuation_price_basis: string;
   changes: { kind: string; text: string; material: boolean; magnitude: number | null }[];
   scenarios: { name: string; trigger: string; mechanism: string; price_low: number; price_high: number; invalidation: string; probability: number | null }[];
   evidence: Evidence[];
@@ -67,7 +72,7 @@ export interface CommitteeResult {
   synthesis: { committee_agreement: string; strongest_bull_argument: string; strongest_bear_argument: string; unresolved_uncertainty: string[]; advisory_stance: string; confidence_adjustment: number } | null;
   risk_review: { risk_level: string; recommended_action: string | null; concerns: string[]; summary: string } | null;
   portfolio_advice: { portfolio_fit: string; suggested_size: string; concentration_warning: string | null; overlap_risk: string | null; summary: string } | null;
-  consensus_pct: number | null; divergence: string | null; guard: Record<string, { rejected_claims: string[]; invalid_evidence_ids: string[] }>; injection_flags: string[]; prompt_version: string;
+  consensus_pct: number | null; divergence: string | null; guard: Record<string, { rejected_claims: string[]; invalid_evidence_ids: string[]; confidence_scale?: number }>; injection_flags: string[]; prompt_version: string;
 }
 
-export interface StockDetail { recommendation: OppRow; analysis: Analysis; committee: CommitteeResult | null; history: { id: number; as_of: string; score: number; action: string }[]; versions: Record<string, string> }
+export interface StockDetail { recommendation: OppRow; analysis: Analysis; price_history?: { day: string; close: number }[]; committee: CommitteeResult | null; history: { id: number; as_of: string; score: number; action: string }[]; versions: Record<string, string> }

@@ -1,64 +1,64 @@
 # Thesis invalidation conditions — separate from the price stop.
 # Machine-checkable conditions use a metric (see SECTOR_MODELS.md); issue-driven conditions trigger when an
 # issue of the given category has a FUNDAMENTAL-horizon impact at or below issue_threshold.
-version = "theses-1.0.0"
+version = "theses-1.1.0"  # 1.1.0: Korean descriptions (no condition change)
 
 [[default]]
 id = "revenue_collapse"
-description = "Revenue contraction worse than -15% YoY"
+description = "매출이 전년 대비 15% 넘게 감소"
 metric = "revenue_growth_yoy"
 operator = "<"
 threshold = -0.15
 
 [[default]]
 id = "margin_structural_decline"
-description = "Gross margin down more than 8pp YoY (structural decline)"
+description = "매출총이익률이 전년 대비 8%p 넘게 하락(구조적 악화)"
 metric = "gross_margin_change_yoy"
 operator = "<"
 threshold = -0.08
 
 [[ticker.NVDA]]
 id = "hyperscaler_capex_cut"
-description = "Hyperscaler AI capex cut"
+description = "대형 클라우드 기업의 AI 설비투자 축소"
 issue_category = "AI"
 issue_threshold = -40
 
 [[ticker.NVDA]]
 id = "datacenter_growth_collapse"
-description = "Data-center growth collapse (total revenue growth < 0)"
+description = "데이터센터 성장 붕괴(전체 매출 성장률 0% 미만)"
 metric = "revenue_growth_yoy"
 operator = "<"
 threshold = 0.0
 
 [[ticker.NVDA]]
 id = "gm_structural"
-description = "Structural gross margin decline (> 5pp YoY)"
+description = "매출총이익률의 구조적 하락(전년 대비 5%p 초과)"
 metric = "gross_margin_change_yoy"
 operator = "<"
 threshold = -0.05
 
 [[ticker.NVDA]]
 id = "regulation_worse"
-description = "Export regulation materially worse"
+description = "수출 규제가 크게 강화"
 issue_category = "Export Control"
 issue_threshold = -60
 
 [[ticker.JPM]]
 id = "credit_deterioration"
-description = "Credit deterioration: net charge-offs above 1.2%"
+description = "신용 악화: 순대손상각률 1.2% 초과"
 metric = "charge_off_rate"
 operator = ">"
 threshold = 0.012
 
 [[ticker.JPM]]
 id = "capital_shortfall"
-description = "CET1 below 11%"
+description = "CET1 비율 11% 미만"
 metric = "cet1"
 operator = "<"
 threshold = 0.11
 
 [[ticker.XOM]]
 id = "oil_collapse"
-description = "Oil price collapse transmitted to the company"
+description = "유가 급락이 회사 실적으로 전이"
 issue_category = "Oil"
 issue_threshold = -45

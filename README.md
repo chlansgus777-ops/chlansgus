@@ -126,11 +126,13 @@ BUY/BUY SMALL/ADD 추천 → 추천 시각 **이후 첫 거래 가능한 시가*
 모든 추천에 point-in-time 입력 스냅샷, 설정 TOML 원문, 가중치, 입력 지문, scoring/decision/prompt/provider/config/schema 버전을 저장.
 `replay`는 현재 데이터를 다시 가져오지 않고 스냅샷만으로 재계산해 일치 여부를 확인합니다.
 
-## 화면
-Dashboard(가장 먼저 "지금 가장 매력적인 종목") · Opportunities · Market · Stocks(최종 추천 화면: Action/Score/Confidence/현재가·세션·시각·출처,
-Price Plan, Why, 이슈 타임라인 Today/1–5D/2–6W/1–4Q, Thesis Invalidation, What Changed, Score Breakdown, 재무·실적·리비전·밸류에이션·거시·기술·이슈·Priced-in·
-카탈리스트·옵션·리스크, 시나리오, AI 위원회, 근거 소스) · Watchlist · Portfolio · Issues · Macro · Calendar · AI Committee(View Full Debate) ·
-Model Performance · System Health · Settings. 시간은 사용자 현지 시각 + ET 병기.
+## 화면 (한국어, 초보자 우선 — `docs/UI_UX_GUIDELINES.md`)
+메뉴: 대시보드 · 기회 찾기 · 종목 분석 · 포트폴리오 · 시장/거시 · 이슈/캘린더 · AI 위원회 · 성과 분석 · 시스템 상태 · 설정 (+ 용어·판정 설명).
+- **대시보드**: 3×3 카드 — 시장 분위기 · 지금 가장 유망한 종목 · 가장 조심할 위험 / 다가오는 일정 · 내 포트폴리오 · 시스템 상태 / 모의투자 성과 · 추천이 바뀐 종목 · 관심 종목 알림.
+- **종목 분석**: 맨 위에 판정·점수·신뢰도·현재가·세션·가격 기준 시각(ET + KST)과 한 줄 결론 → 매수 계획 · 좋은 이유 · 주의할 이유 →
+  현재 이슈 영향(오늘/1~5일/2~6주) · 투자 논리가 깨지는 조건 · 내 포트폴리오 적합성 → 가격 차트 → “왜 이런 판단이 나왔나요?” → AI 위원회 요약 → 상세 데이터.
+- **쉽게 보기 / 자세히 보기**: 기본은 쉽게 보기(원본 표·근거 ID는 접힘). 전문 용어는 밑줄 ⓘ 툴팁으로 뜻·중요성·좋은 방향을 설명.
+- 가격은 USD 명시, 큰 수는 한국식 단위 병기(`$2.55T (약 2조 5,500억 달러)`). 디자인·문구 규칙: `docs/DESIGN_SYSTEM.md`, `docs/COPYWRITING_GUIDE.md`.
 
 ## 프로젝트 구조
 ```
@@ -147,6 +149,7 @@ docs/                ARCHITECTURE · DATA_SOURCES · SCORING_MODEL · SECTOR_MOD
 ```bash
 cd backend && python -m pytest            # 백엔드 (unit / contract / architecture / ai_safety / golden / regression / backtest / integration)
 cd frontend && npm run typecheck && npm test && npm run build
+cd backend && python -m pytest tests/e2e   # 빌드된 UI를 실제 백엔드(MOCK)에 띄워 headless Chromium으로 확인 (Playwright 없으면 skip)
 ```
 의도한 모델 변경 시: `config/scoring_model.toml`의 `scoring_model_version`을 올리고 `UPDATE_BASELINE=1 python -m pytest tests/regression`.
 

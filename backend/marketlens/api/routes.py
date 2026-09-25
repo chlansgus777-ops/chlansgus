@@ -131,9 +131,11 @@ def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
             raise HTTPException(404, f"{t}: 분석 결과 없음")
         com = repo.committee_for(ss, row.id)
         history = [{"id": h.id, "as_of": h.as_of.isoformat(), "score": h.score, "action": h.final_action} for h in repo.recommendation_history(ss, t, 30, mode=mode)]
+        bars = (row.inputs or {}).get("bars") or []
         return {
             "recommendation": _row_summary(row, s),
             "analysis": row.result,
+            "price_history": [{"day": b["day"], "close": b["close"]} for b in bars[-130:]],
             "committee": com.payload if com else None,
             "history": history,
             "versions": {"scoring": row.scoring_model_version, "decision": row.decision_model_version, "prompt": row.agent_prompt_version, "config": row.config_version,
@@ -224,9 +226,38 @@ def dashboard(req: Request) -> dict[str, Any]:
             risks.append({"ticker": r["ticker"], "text": f"이벤트 위험 {r['risk']}"})
     m = macro(req)
     cal = calendar(req, 21)
+    changes = []
+    for r in rows:
+        with s.sf() as ss:
+            rec = repo.get_recommendation(ss, r["id"])
+            items = [c for c in ((rec.result or {}).get("changes") or []) if c.get("kind") == "action"] if rec else []
+        if items:
+            changes.append({"ticker": r["ticker"], "text": items[0]["text"], "action": r["action"]})
+    alerts = []
     with s.sf() as ss:
         pf = s.portfolio(ss)
+        for w in repo.watchlist(ss):
+            rec = repo.latest_recommendation(ss, w.ticker, mode=s.mode.value)
+            if rec is None:
+                alerts.append({"ticker": w.ticker, "level": "info", "text": "아직 분석하지 않은 관심 종목입니다."})
+                continue
+            row = _row_summary(rec, s)
+            if row["action"] in {a.value for a in BULLISH_ACTIONS} and row["actionable_now"]:
+                alerts.append({"ticker": w.ticker, "level": "positive", "text": f"{row['action_ko']} 신호 — 최대 매수가 {row['max_buy']}달러 이하에서 유효"})
+            elif row["current_status"] != "CURRENT":
+                alerts.append({"ticker": w.ticker, "level": "info", "text": "마지막 분석이 오래되었습니다. 다시 분석해 보세요."})
+            elif row["vetoes"]:
+                alerts.append({"ticker": w.ticker, "level": "warning", "text": "주의: " + ", ".join(row["vetoes"])})
+    acct = EvaluationService(s).paper_account()
+    perf = None
+    if acct and acct.get("equity"):
+        last = acct["equity"][-1][1]
+        perf = {"equity": last, "starting_capital": acct.get("starting_capital"), "return": (last / acct["starting_capital"] - 1) if acct.get("starting_capital") else None,
+                "max_drawdown": acct.get("max_drawdown"), "as_of": acct.get("as_of"), "curve": [v for _, v in acct["equity"][-60:]]}
     return {
+        "performance": perf,
+        "recommendation_changes": changes[:8],
+        "watchlist_alerts": alerts[:8],
         "scan": opp["scan"],
         "regime": {"primary": m.get("primary_regime"), "readings": [x for x in m.get("regimes", []) if x.get("active")]},
         "top_opportunities": top,

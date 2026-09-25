@@ -22,6 +22,8 @@ from marketlens.domain.macro import MacroImpact
 from marketlens.domain.sector_models import RuleScore
 from marketlens.domain.valuation import RelativeValuation
 
+MULTIPLE_KO = {"forward_pe": "선행 PER", "trailing_pe": "PER", "ev_sales": "EV/매출", "ev_ebitda": "EV/EBITDA", "p_tbv": "P/TBV", "p_ffo": "P/FFO", "p_b": "PBR", "price_sales": "PSR", "price_fcf": "P/FCF"}
+
 COMPONENTS = ("fundamental", "valuation", "earnings_revision", "catalyst", "macro", "technical", "risk", "entry_rr")
 COMPONENT_KO = {
     "fundamental": "펀더멘털", "valuation": "밸류에이션", "earnings_revision": "실적·추정치", "catalyst": "촉매·이슈",
@@ -189,11 +191,11 @@ def _valuation(inp: ScoringInputs) -> Calc:
     sub, cov = _wavg([(absolute, 0.45), (hist, 0.2), (peer, 0.15), (rate, 0.2)])
     if rv is not None:
         if rv.primary_value is not None:
-            reasons.append(Reason(f"{rv.primary_multiple} {rv.primary_value:.1f}", 0, (f"val.{rv.primary_multiple}",)))
+            reasons.append(Reason(f"{MULTIPLE_KO.get(rv.primary_multiple, rv.primary_multiple)} {rv.primary_value:.1f}배", 0, (f"val.{rv.primary_multiple}",)))
         if hist is not None:
-            reasons.append(Reason(f"{rv.primary_multiple} 자체 과거 대비 {rv.history_percentile:.0%} 분위", +1 if hist >= 0.5 else -1, ("val.history",)))
+            reasons.append(Reason(f"{MULTIPLE_KO.get(rv.primary_multiple, rv.primary_multiple)}가 자기 과거 대비 {'싼' if hist >= 0.5 else '비싼'} 편(백분위 {rv.history_percentile:.0%})", +1 if hist >= 0.5 else -1, ("val.history",)))
         if rv.premium_to_peers is not None:
-            reasons.append(Reason(f"동종업계 중앙값 대비 {_pct(rv.premium_to_peers)}", +1 if rv.premium_to_peers < 0 else -1, ("val.peers",)))
+            reasons.append(Reason(f"동종업계 중앙값 대비 {_pct(rv.premium_to_peers)} ({'할인' if rv.premium_to_peers < 0 else '프리미엄'})", +1 if rv.premium_to_peers < 0 else -1, ("val.peers",)))
         if rv.equity_risk_spread is not None:
             reasons.append(Reason(f"선행 이익수익률 − 미 10년물 = {_pct(rv.equity_risk_spread)}", +1 if rv.equity_risk_spread > 0 else -1, ("val.rate_spread", "macro.US10Y")))
         if rv.growth_adjusted is not None:

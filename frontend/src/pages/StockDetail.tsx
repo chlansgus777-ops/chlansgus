@@ -1,195 +1,273 @@
-import { Fragment } from "react";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { advise, priceZone } from "../advice";
 import { api } from "../api";
 import { CommitteeView } from "../components/CommitteeView";
-import { Action, Bar, Card, Err, EvidenceChips, Loading, Quality } from "../components/ui";
+import { Action, Bar, Card, Empty, Err, EvidenceChips, FreshnessTable, Loading, Notice, PriceChart, PriceLadder, Quality, StatusBadge, Term } from "../components/ui";
 import { useApi } from "../components/useApi";
-import { big, num, pct, price, stamp } from "../format";
+import { day, krwAux, num, pct, price, stamp, usdWithKo } from "../format";
+import { GLOSSARY } from "../glossary";
+import { COMPONENT_KO, DATA_TYPE_KO, REGIME_KO, RISK_KO, SESSION_KO, SIZE_KO, STATUS_INFO, VETO_KO, ko } from "../i18n";
+import { More } from "../mode";
 import type { CommitteeResult, Evidence, StockDetail as SD } from "../types";
 
-const COMP_LABEL: Record<string, string> = { fundamental: "Fundamental", valuation: "Valuation", earnings_revision: "Earnings & Revision", catalyst: "Catalyst", macro: "Macro", technical: "Technical", risk: "Risk", entry_rr: "Entry R/R" };
-const HORIZON: [string, string][] = [["IMMEDIATE", "Today"], ["SHORT", "1–5D"], ["SWING", "2–6W"], ["FUNDAMENTAL", "1–4Q"]];
+const RESULT_KO: Record<string, string> = {
+  BEAT_AND_RAISE: "예상 상회 + 가이던스 상향", BEAT: "예상 상회", BEAT_WEAK_GUIDE: "예상 상회했으나 가이던스 부진", GUIDE_UP: "예상 부합 + 가이던스 상향",
+  INLINE: "예상 부합", GUIDE_DOWN: "예상 부합했으나 가이던스 하향", MISS_STRONG_GUIDE: "예상 하회했으나 가이던스 양호", MISS: "예상 하회", MISS_AND_LOWER: "예상 하회 + 가이던스 하향", UNKNOWN: "판단 불가",
+};
+const BAR_KO: Record<string, string> = { LOW: "낮음", NORMAL: "보통", HIGH: "높음(서프라이즈 부담)", UNKNOWN: "판단 불가" };
+const SCEN_KO: Record<string, string> = { Bull: "강세", Base: "기본", Bear: "약세" };
+const FIT_KO: Record<string, string> = { GOOD: "잘 맞음", NEUTRAL: "보통", POOR: "쏠림 주의" };
+
+function Metric({ k, label }: { k: string; label: string }) {
+  return GLOSSARY[k] ? <Term k={k}>{label}</Term> : <>{label}</>;
+}
 
 export default function StockDetail() {
   const { ticker = "" } = useParams();
   const [refreshTick, setRefreshTick] = useState(0);
   const d = useApi<SD>(`/stocks/${ticker}${refreshTick ? "?refresh=true" : ""}`, [refreshTick]);
   const [committee, setCommittee] = useState<CommitteeResult | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [replay, setReplay] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [actionErr, setActionErr] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const evIndex = useMemo(() => new Map<string, Evidence>((d.data?.analysis.evidence ?? []).map((e) => [e.evidence_id, e])), [d.data]);
-  if (d.loading && !d.data) return <Loading what={ticker} />;
-  if (!d.data) return <Err error={d.error} />;
+  if (d.state === "loading") return <Loading what={`${ticker} 분석`} steps={["가격·재무 데이터 확인", "업종 모델 적용", "이슈·거시 반영", "가격 계획 계산"]} />;
+  if (!d.data) return <Err error={d.error} retry={d.reload} />;
   const { recommendation: rec, analysis: a } = d.data;
   const com = committee ?? d.data.committee;
   const comps = a.scorecard.components;
   const positives = comps.flatMap((c) => c.reasons.filter((r) => r.sign > 0)).slice(0, 5);
   const negatives = comps.flatMap((c) => c.reasons.filter((r) => r.sign < 0)).slice(0, 5);
-  const runCommittee = async () => {
-    setBusy(true);
-    try { setCommittee(await api.post<CommitteeResult>(`/recommendations/${rec.id}/committee`)); } finally { setBusy(false); }
-  };
-  const doReplay = async () => {
-    const r = await api.get<{ matches: boolean; replay_score: number; replay_action: string }>(`/recommendations/${rec.id}/replay`);
-    setReplay(r.matches ? `Replay matches: ${r.replay_score} / ${r.replay_action}` : `Replay MISMATCH: ${r.replay_score} / ${r.replay_action}`);
-  };
+  const usdkrw = a.evidence.find((e) => e.metric === "macro.USDKRW" && typeof e.value === "number")?.value as number | undefined;
+  const checks = a.data_quality.checks ?? [];
+  const missing = checks.filter((c) => c.quality !== "FRESH" && c.quality !== "DELAYED");
+  const unavailableComps = comps.filter((c) => !c.available);
   const e = a.entry;
+  const finalAction = com && !["UNAVAILABLE", "SKIPPED"].includes(com.status) ? com.final_action : rec.action;
+  const adv = advise({ action: finalAction, price: a.price, maxBuy: e?.max_buy, idealEntry: e?.ideal_entry, stop: e?.stop, rr: e?.rr_at_current, eventRisk: a.event_risk.level, vetoes: a.decision.vetoes, sizeLimit: a.decision.size_limit, status: rec.current_status, sectorKnown: a.sector_known });
+  const zone = priceZone({ action: finalAction, price: a.price, maxBuy: e?.max_buy, stop: e?.stop });
+  const cautions: string[] = [
+    ...a.decision.vetoes.map((v) => `하드 거부권: ${VETO_KO[v] ?? v}`),
+    ...(a.event_risk.level === "HIGH" || a.event_risk.level === "EXTREME" ? [`이벤트 위험 ${ko(RISK_KO, a.event_risk.level)}: ${a.event_risk.reasons.join("; ")}`] : []),
+    ...negatives.map((r) => r.text),
+    ...(a.portfolio_review?.warnings ?? []),
+    ...(missing.length ? [`데이터 주의: ${missing.map((c) => DATA_TYPE_KO[c.data_type] ?? c.data_type).join(", ")}`] : []),
+  ].slice(0, 6);
+  const run = async (label: string, f: () => Promise<void>) => {
+    setBusy(label);
+    setActionErr(null);
+    try { await f(); } catch (err) { setActionErr(err instanceof Error ? err.message : String(err)); } finally { setBusy(null); }
+  };
+  const closes = (d.data.price_history ?? []).map((p) => p.close);
   return (
     <div className="grid">
-      <div className="row spread">
-        <div>
-          <h1 style={{ marginBottom: 2 }}>{a.ticker} · {a.security.company_name}</h1>
-          <div className="muted">{a.security.exchange} · {a.security.sector} / {a.security.industry}{a.security.is_adr ? ` · ADR (${a.security.country_of_incorporation})` : ""} · mkt cap {big(a.security.market_cap)}</div>
-        </div>
-        <div className="row">
-          <button onClick={() => setRefreshTick((t) => t + 1)}>Re-analyze now</button>
-          <button onClick={doReplay}>Replay snapshot</button>
-          <Link to={`/committee?ticker=${a.ticker}`}>Committee tab →</Link>
-        </div>
-      </div>
-      {replay && <div className={replay.includes("MISMATCH") ? "neg" : "pos"}>{replay}</div>}
-
-      <div className="grid g4">
-        <Card title="Action">
-          <div className="big-action"><Action a={com && com.status !== "UNAVAILABLE" ? com.final_action : rec.action} /></div>
-          <div className="muted">deterministic: {a.decision.action} {a.decision.suppressed_change ? "(held — no material change)" : ""}</div>
-          {a.decision.vetoes.length > 0 && <div className="neg">Hard veto: {a.decision.vetoes.join(", ")}</div>}
-          {a.decision.size_limit && <div className="warn">Size limit: {a.decision.size_limit}</div>}
-        </Card>
-        <Card title="Score / Confidence">
-          <div className="big-action">{num(rec.score, 1)}<span className="muted">/100</span></div>
-          <div>Confidence {num(rec.confidence, 0)}%</div>
-        </Card>
-        <Card title="Current price">
-          <div className="big-action">{price(a.price)}</div>
-          <div>{a.session} · <Quality q={a.price_quality} /></div>
-          <div className="muted">{stamp(a.price_timestamp)} · source: {a.price_source}</div>
-        </Card>
-        <Card title="Data quality">
-          <div><Quality q={rec.data_quality} /> · mode {a.mode}</div>
-          <div className="muted">{a.data_quality.fields.filter(([, q]) => q !== "FRESH").map(([f, q]) => `${f}: ${q}`).join(" · ") || "all core fields fresh"}</div>
-        </Card>
-      </div>
-
-      <div className="grid g2">
-        <Card title="Price plan">
-          {e ? (
-            <div className="kv">
-              <span className="k">Ideal entry</span><span>{price(e.ideal_entry)}</span>
-              <span className="k">Acceptable range</span><span>{price(e.acceptable_low)} – {price(e.acceptable_high)}</span>
-              <span className="k">Max buy</span><b>{price(e.max_buy)}</b>
-              <span className="k">Add zone</span><span>{price(e.add_zone_low)} – {price(e.add_zone_high)}</span>
-              <span className="k">Price stop</span><span className="neg">{price(e.stop)} ({pct(e.downside_pct)})</span>
-              <span className="k">Target 1 / 2</span><span className="pos">{price(e.target1)} ({pct(e.upside_t1_pct)}) / {price(e.target2)}</span>
-              <span className="k">R/R now / at ideal</span><span>{num(e.rr_at_current)} / {num(e.rr_at_ideal)}</span>
+      {/* ---------------- hero: the answer first ---------------- */}
+      <section className="card hero">
+        <div className="row spread" style={{ alignItems: "flex-start" }}>
+          <div>
+            <div className="caption"><Link to="/stocks">종목 분석</Link> / {a.security.exchange} · {a.sector_known === false ? <span className="warn">업종 분류 불명확</span> : a.security.industry}{a.security.is_adr ? ` · 해외 발행사(${a.security.country_of_incorporation})` : ""}</div>
+            <h1 style={{ marginTop: 4 }}>{a.ticker} <span className="t-sub" style={{ fontWeight: 500 }}>{a.security.company_name}</span></h1>
+            <div className="row" style={{ marginTop: 6, alignItems: "baseline" }}>
+              <span className="t-key">{price(a.price)}</span>
+              {usdkrw && a.price !== null && <span className="caption" title={`원/달러 ${num(usdkrw, 1)} 기준 참고 환산`}>{krwAux(a.price, usdkrw)}</span>}
+              <span className="tag neutral" title={GLOSSARY.session?.short}>{ko(SESSION_KO, a.session, "세션 정보 없음")}</span>
+              <Quality q={a.price_quality} />
             </div>
-          ) : <div className="muted">No valid price plan (price or ATR missing).</div>}
-          {e && <details><summary>How the plan was derived</summary><ul className="list">{e.rationale.map((r, i) => <li key={i}>{r}</li>)}</ul></details>}
+            <div className="caption">가격 기준 시각 {stamp(a.price_timestamp)} · 출처 {a.price_source ?? "N/A"}</div>
+          </div>
+          <div className="stack" style={{ alignItems: "flex-end", minWidth: 220 }}>
+            <Action a={finalAction} status={rec.current_status} quality={rec.data_quality} lg />
+            <div className="row">
+              <div className="stat" style={{ alignItems: "flex-end" }}><span className="label"><Term k="score">점수</Term></span><span className="value">{num(rec.score, 1)}<span className="caption">/100</span></span></div>
+              <div className="stat" style={{ alignItems: "flex-end" }}><span className="label"><Term k="confidence">신뢰도</Term></span><span className="value">{num(rec.confidence, 0)}%</span></div>
+            </div>
+            <StatusBadge s={rec.current_status} reason={rec.current_status_reason} />
+          </div>
+        </div>
+        <div className="subtle" style={{ marginTop: 14 }}>
+          <b style={{ fontSize: 15 }}>{adv.headline}</b>
+          {adv.details.map((t, i) => <div key={i} className="explain">· {t}</div>)}
+        </div>
+        <div className="row" style={{ marginTop: 12 }}>
+          <button className="primary" disabled={!!busy} onClick={() => setRefreshTick((t) => t + 1)}>분석 다시하기</button>
+          <button disabled={!!busy} onClick={() => run("watch", async () => { await api.post(`/watchlist/${a.ticker}`); setNote("관심종목에 추가했습니다."); })}>관심종목 추가</button>
+          <button className="ghost" disabled={!!busy} onClick={() => run("replay", async () => {
+            const r = await api.get<{ matches: boolean; replay_score: number; replay_action: string }>(`/recommendations/${rec.id}/replay`);
+            setNote(r.matches ? `당시 분석을 저장된 데이터로 다시 계산해도 같은 결과입니다(점수 ${r.replay_score}, ${r.replay_action}).` : `재계산 결과가 다릅니다: 점수 ${r.replay_score}, ${r.replay_action}`);
+          })}>당시 분석 다시보기</button>
+        </div>
+        {note && <div className="explain">{note}</div>}
+        <Err error={actionErr} />
+      </section>
+      {rec.current_status && rec.current_status !== "CURRENT" && <Notice tone="warn">{STATUS_INFO[rec.current_status]?.label}: {rec.current_status_reason}</Notice>}
+      {a.mode === "MOCK" && <Notice tone="neg">모의 데이터(MOCK)로 만든 분석입니다. 실제 투자 판단에 사용하지 마세요.</Notice>}
+
+      {/* ---------------- key cards ---------------- */}
+      <div className="g3">
+        <Card title="매수 계획" icon="⌖" explain={zone.text} tone={zone.tone === "pos" ? "pos" : zone.tone === "neg" ? "neg" : zone.tone === "warn" ? "warn" : undefined}>
+          {e && a.price !== null ? (
+            <>
+              <PriceLadder now={a.price} stop={e.stop} ideal={e.ideal_entry} maxBuy={e.max_buy} t1={e.target1} t2={e.target2} />
+              <div className="kv">
+                <span className="k"><Term k="ideal_entry" /></span><span>{price(e.ideal_entry)}</span>
+                <span className="k"><Term k="max_buy" /></span><span className="warn">{price(e.max_buy)}</span>
+                <span className="k"><Term k="add_zone" /></span><span>{price(e.add_zone_low)} – {price(e.add_zone_high)}</span>
+                <span className="k"><Term k="stop" /></span><span className="neg">{price(e.stop)} ({pct(e.downside_pct)})</span>
+                <span className="k"><Term k="target" /></span><span className="pos">{price(e.target1)} ({pct(e.upside_t1_pct)}) / {price(e.target2)}</span>
+                <span className="k"><Term k="rr" /></span><span>{num(e.rr_at_current)} <span className="caption">(2 이상이 기준)</span></span>
+              </div>
+            </>
+          ) : <Empty hint="현재가·가격 이력이 부족하거나, 손절가 < 현재가 < 목표가 순서를 만족하는 계획을 만들 수 없을 때 표시하지 않습니다.">지금은 가격 계획을 제시하지 않습니다.</Empty>}
         </Card>
-        <Card title="Why">
-          <div className="grid g2">
-            <div><b className="pos">Top positive factors</b><ul className="list">{positives.map((r, i) => <li key={i}>{r.text} <EvidenceChips ids={a.reason_evidence[r.text]} index={evIndex} /></li>)}</ul></div>
-            <div><b className="neg">Top negative factors</b><ul className="list">{negatives.map((r, i) => <li key={i}>{r.text} <EvidenceChips ids={a.reason_evidence[r.text]} index={evIndex} /></li>)}</ul></div>
+        <Card title="좋은 이유" icon="↑" tone={positives.length ? "pos" : undefined}>
+          {positives.length ? <ul className="list">{positives.map((r, i) => <li key={i}><span className="dot pos">+</span><span>{r.text} <EvidenceChips ids={a.reason_evidence[r.text]} index={evIndex} /></span></li>)}</ul> : <Empty>뚜렷한 긍정 요인이 없습니다.</Empty>}
+        </Card>
+        <Card title="주의할 이유" icon="⚠" tone={cautions.length ? "warn" : undefined}>
+          {cautions.length ? <ul className="list">{cautions.map((t, i) => <li key={i}><span className="dot warn">!</span><span>{t}</span></li>)}</ul> : <Empty>눈에 띄는 주의 요인이 없습니다.</Empty>}
+        </Card>
+      </div>
+      <div className="g3">
+        <Card title="현재 이슈 영향" icon="▤" explain="뉴스·사건이 이 종목에 주는 영향(−100~+100)">
+          <div className="horizon">
+            {[["IMMEDIATE", "오늘"], ["SHORT", "1~5일"], ["SWING", "2~6주"]].map(([h, l]) => {
+              const v = a.horizon_view[h!];
+              const none = v === null || v === undefined;
+              return <div key={h} className="h"><div className="caption">{l}</div><div className={`t-key-sm ${none ? "" : v > 0 ? "pos" : v < 0 ? "neg" : ""}`}>{none ? "—" : `${v > 0 ? "▲" : v < 0 ? "▼" : "■"} ${num(v, 1)}`}</div><div className="caption">{none ? "뉴스 수집 실패" : v > 3 ? "긍정적" : v < -3 ? "부정적" : "영향 작음"}</div></div>;
+            })}
           </div>
         </Card>
+        <Card title="투자 논리가 깨지는 조건" icon="✕">
+          <ul className="list">
+            {e && <li><span className="dot neg">↓</span><span>종가가 <b className="neg">{price(e.stop)}</b> 아래로 마감하면 가격 기준으로 매수 근거가 깨집니다.</span></li>}
+            {a.thesis_conditions.map((c) => <li key={c.condition_id}><span className={`dot ${a.thesis_breaches.some((b) => b.startsWith(c.description)) ? "neg" : "info"}`}>•</span><span>{c.description}</span></li>)}
+            {!e && !a.thesis_conditions.length && <li className="caption">등록된 조건이 없습니다.</li>}
+          </ul>
+          {a.thesis_invalidated && <Notice tone="neg">이미 투자 논리가 훼손되었습니다: {a.thesis_breaches.join("; ")}</Notice>}
+        </Card>
+        <Card title="내 포트폴리오에 넣어도 될까?" icon="◔">
+          {a.portfolio_review ? (
+            <>
+              <div className="row"><span className={`tag ${a.portfolio_review.fit === "GOOD" ? "pos" : a.portfolio_review.fit === "POOR" ? "neg" : "warn"}`}>{FIT_KO[a.portfolio_review.fit] ?? a.portfolio_review.fit}</span><span>허용 비중: <b>{ko(SIZE_KO, a.portfolio_review.size_cap)}</b></span></div>
+              {a.portfolio_review.warnings.length ? <ul className="list" style={{ marginTop: 8 }}>{a.portfolio_review.warnings.map((w, i) => <li key={i}><span className="dot warn">!</span><span>{w}</span></li>)}</ul> : <div className="explain">업종·테마 쏠림이나 높은 상관관계 문제가 없습니다.</div>}
+            </>
+          ) : <Empty hint="포트폴리오 화면에서 보유 종목을 입력하면 자동으로 확인합니다.">포트폴리오 정보가 없어 확인하지 않았습니다.</Empty>}
+        </Card>
       </div>
 
-      <Card title="Issue impact timeline">
-        <table><thead><tr>{HORIZON.map(([, l]) => <th key={l}>{l}</th>)}</tr></thead>
-          <tbody><tr>{HORIZON.map(([h]) => { const v = a.horizon_view[h] ?? 0; return <td key={h} className={v > 0 ? "pos" : v < 0 ? "neg" : "muted"}>{num(v, 1)}</td>; })}</tr></tbody></table>
+      {closes.length > 1 && e && (
+        <Card title="가격 흐름과 매수 계획" icon="∿" explain="최근 약 6개월 종가 · 점선은 손절가·최대 매수가·목표가">
+          <PriceChart closes={closes} levels={[["손절", e.stop, "var(--neg)"], ["최대 매수", e.max_buy, "var(--warn)"], ["1차 목표", e.target1, "var(--pos)"]]} />
+        </Card>
+      )}
+
+      <Card title="왜 이런 판단이 나왔나요?" icon="?">
+        <ul className="list">{a.decision.reasons.map((r, i) => <li key={i}><span className="dot info">{i + 1}</span><span>{r}</span></li>)}</ul>
+        {a.decision.notes.length > 0 && <ul className="list" style={{ marginTop: 8 }}>{a.decision.notes.map((n, i) => <li key={i}><span className="dot warn">!</span><span>{n}</span></li>)}</ul>}
+        <details style={{ marginTop: 8 }}><summary>왜 바뀌었나요? (지난 분석과 비교)</summary>
+          {a.changes.length ? <ul className="list">{a.changes.map((c, i) => <li key={i} className={c.material ? "" : "caption"}><span className={`dot ${c.material ? "warn" : "info"}`}>{c.material ? "●" : "○"}</span><span>{c.text}</span></li>)}</ul> : <Empty>지난 분석 이후 달라진 점이 없습니다.</Empty>}
+        </details>
       </Card>
 
-      <div className="grid g2">
-        <Card title="Thesis invalidation (separate from the price stop)">
-          <ul className="list">{a.thesis_conditions.map((c) => <li key={c.condition_id} className={a.thesis_breaches.some((b) => b.startsWith(c.description)) ? "neg" : ""}>{c.description}</li>)}</ul>
-          {a.thesis_invalidated && <div className="neg">THESIS INVALIDATED: {a.thesis_breaches.join("; ")}</div>}
-        </Card>
-        <Card title="What changed">
-          {a.changes.length ? <ul className="list">{a.changes.map((c, i) => <li key={i} className={c.material ? "" : "muted"}>{c.material ? "● " : "○ "}{c.text}</li>)}</ul> : <div className="muted">No change since the previous analysis.</div>}
-        </Card>
-      </div>
+      <Card title="부족하거나 오래된 데이터" icon="◌" explain="없는 데이터는 다른 값으로 채우지 않고, 판단에서 보수적으로 처리합니다.">
+        {missing.length === 0 && unavailableComps.length === 0 ? <div className="explain">판단에 필요한 데이터가 모두 최신이거나 사용 가능한 상태입니다.</div> : (
+          <ul className="list">
+            {missing.map((c) => <li key={c.data_type}><span className="dot warn">!</span><span><Quality q={c.quality} /> {c.reason_ko}</span></li>)}
+            {unavailableComps.map((c) => <li key={c.name}><span className="dot info">i</span><span>{COMPONENT_KO[c.name] ?? c.name}: 데이터가 부족해 중립보다 낮은 보수적 점수를 적용했습니다.</span></li>)}
+          </ul>
+        )}
+      </Card>
 
-      <Card title="Score breakdown" right={<span className="muted">{a.scorecard.model_version} · sector model: {a.sector_model_name}</span>}>
-        <div className="muted" style={{ marginBottom: 8 }}>Sector model reason: {a.sector_model_reason}</div>
-        <table><thead><tr><th>Component</th><th>Points</th><th style={{ width: "25%" }}></th><th>Reasons</th></tr></thead>
+      <Card title="AI 투자위원회" icon="◈" explain="7명의 AI 분석가 요약 — 결정론적 판단을 올릴 수는 없고 낮추기만 할 수 있습니다." right={<button disabled={!!busy} onClick={() => run("com", async () => { setCommittee(await api.post<CommitteeResult>(`/recommendations/${rec.id}/committee`)); })}>{busy === "com" ? "AI 위원회 분석 중…" : com ? "결과 새로 보기" : "AI 위원회 실행"}</button>}>
+        {busy === "com" && <Loading what="AI 위원회" steps={["분석가 7명 의견", "강세·약세 토론 2라운드", "리스크 검토", "근거 수치 검증"]} />}
+        {com ? <CommitteeView c={com} evidence={evIndex} /> : <Empty hint="스캔 상위 후보에는 자동으로 실행됩니다. 이 종목은 버튼을 눌러 실행할 수 있습니다.">아직 실행하지 않았습니다.</Empty>}
+      </Card>
+
+      {/* ---------------- details: folded in beginner mode ---------------- */}
+      <h3>세부 데이터</h3>
+      <More title="데이터 종류별 신선도" hint="각 데이터가 언제 기준인지">
+        <FreshnessTable checks={checks} />
+      </More>
+      <More title="점수 구성" hint={`${a.scorecard.model_version} · 업종 모델: ${a.sector_model_name}`}>
+        <div className="explain" style={{ marginBottom: 8 }}>업종 모델 선택 이유: {a.sector_model_reason}</div>
+        <table><thead><tr><th>구성요소</th><th>점수</th><th style={{ width: "25%" }}></th><th>근거</th></tr></thead>
           <tbody>{comps.map((c) => (
             <tr key={c.name}>
-              <td>{COMP_LABEL[c.name] ?? c.name}{!c.available && <span className="warn"> (missing → conservative)</span>}</td>
+              <td>{COMPONENT_KO[c.name] ?? c.name}{!c.available && <span className="warn"> (데이터 부족 → 보수적)</span>}</td>
               <td>{(c.subscore * c.weight).toFixed(1)} / {c.weight}</td>
               <td><Bar value={c.subscore} /></td>
-              <td style={{ whiteSpace: "normal" }}>{c.reasons.map((r) => r.text).join(" · ") || "—"}{c.missing.length ? <span className="muted"> · missing: {c.missing.join(", ")}</span> : null}</td>
+              <td style={{ whiteSpace: "normal" }}>{c.reasons.map((r) => r.text).join(" · ") || "—"}</td>
             </tr>))}</tbody></table>
-      </Card>
-
-      <div className="grid g2">
-        <Card title="Fundamentals (sector model metrics)">
-          <table><tbody>{(a.fundamental_rules?.items ?? []).map((i) => <tr key={i.metric}><td>{i.label}</td><td>{i.value === null ? <span className="muted">MISSING</span> : num(i.value, 3)}</td><td style={{ width: "30%" }}>{i.subscore !== null && <Bar value={i.subscore} />}</td></tr>)}</tbody></table>
-        </Card>
-        <Card title="Valuation">
-          <table><tbody>{(a.valuation_rules?.items ?? []).map((i) => <tr key={i.metric}><td>{i.label}</td><td>{i.value === null ? <span className="muted">N/A</span> : num(i.value, 2)}</td><td style={{ width: "30%" }}>{i.subscore !== null && <Bar value={i.subscore} />}</td></tr>)}</tbody></table>
-          {a.relative_valuation && <div className="kv" style={{ marginTop: 8 }}>
-            <span className="k">vs own history</span><span>{a.relative_valuation.history_percentile === null ? "N/A" : `${(a.relative_valuation.history_percentile * 100).toFixed(0)}th pct`}</span>
-            <span className="k">vs peers</span><span>{pct(a.relative_valuation.premium_to_peers)}</span>
-            <span className="k">Fwd EY − 10Y</span><span>{pct(a.relative_valuation.equity_risk_spread, 2)}</span>
-          </div>}
-        </Card>
-        <Card title="Earnings (actual vs expected)">
-          {a.earnings ? <div className="kv">
-            <span className="k">Result quality</span><b>{a.earnings.result_quality}</b>
-            <span className="k">Revenue surprise</span><span>{pct(a.earnings.revenue_surprise)}</span>
-            <span className="k">EPS surprise</span><span>{pct(a.earnings.eps_surprise)}</span>
-            <span className="k">Guide vs consensus</span><span>{pct(a.earnings.guide_rev_vs_cons)}</span>
-            <span className="k">Expectation bar</span><span>{a.earnings.expectation_bar}</span>
-            <span className="k">Beat streak</span><span>{a.earnings.beat_streak}</span>
-          </div> : <div className="muted">MISSING</div>}
-        </Card>
-        <Card title="Analyst revisions">
-          {a.analyst ? <div className="kv">
-            {["eps_revision_7d", "eps_revision_30d", "eps_revision_90d", "revenue_revision_30d", "revenue_revision_90d"].map((k) => <Fragment key={k}><span className="k">{k}</span><span>{pct(a.analyst?.[k] as number | null)}</span></Fragment>)}
-            <span className="k">Analysts</span><span>{String(a.analyst["analyst_count"] ?? "N/A")}</span>
-            <span className="k">Dispersion</span><span>{num(a.analyst["estimate_dispersion"] as number | null, 3)}</span>
-            <span className="k">Target (secondary)</span><span>{price(a.analyst["target_price_consensus"] as number | null)}</span>
-          </div> : <div className="muted">MISSING — no licensed estimates provider</div>}
-        </Card>
-        <Card title="Macro transmission">
-          <div>Regime: <b>{a.primary_regime}</b> · net {num(a.macro_impact?.net ?? null)}</div>
-          <ul className="list">{(a.macro_impact?.contributions ?? []).map(([f, v, t]) => <li key={f} className={v > 0 ? "pos" : "neg"}>{t}</li>)}</ul>
-        </Card>
-        <Card title="Technical (timing only)">
-          {a.technicals ? <div className="kv">{["sma20", "sma50", "sma200", "rsi14", "atr14", "anchored_vwap", "high_52w", "low_52w", "volume_ratio", "rs_6m"].map((k) => <Fragment key={k}><span className="k">{k}</span><span>{num(a.technicals?.[k] as number | null)}</span></Fragment>)}</div> : <div className="muted">MISSING</div>}
-        </Card>
-        <Card title="Issues & priced-in">
-          {a.issue_impacts.length ? <table><thead><tr><th>Issue</th><th>Path</th><th>2–6W</th><th>Priced-in (est.)</th></tr></thead><tbody>
-            {a.issue_impacts.map((i) => { const sw = i.horizons.find((h) => h.horizon === "SWING"); const pi = a.priced_in[i.issue_id]; return <tr key={i.issue_id}><td>{i.issue_id}</td><td>{i.exposure_path.join(" → ")}</td><td className={(sw?.impact_score ?? 0) > 0 ? "pos" : "neg"}>{num(sw?.impact_score ?? null, 1)}</td><td>{pi?.value ?? "N/A"} <span className="muted">(conf {num(pi?.confidence ?? null)})</span></td></tr>; })}
-          </tbody></table> : <div className="muted">No issues reach this company.</div>}
-          {a.issue_impacts.map((i) => <details key={i.issue_id}><summary>Causal chain: {i.issue_id}</summary><ul className="list">{(i.horizons[3]?.mechanism ?? []).map((m, j) => <li key={j}>{m}</li>)}</ul></details>)}
-        </Card>
-        <Card title="Catalysts & options & risk">
-          <div>Event risk: <b className={a.event_risk.level === "EXTREME" || a.event_risk.level === "HIGH" ? "neg" : ""}>{a.event_risk.level}</b> {a.event_risk.reasons.join("; ")}</div>
-          <ul className="list">{a.upcoming_events.slice(0, 5).map((ev) => <li key={ev.event_id}>{ev.event_date} · {ev.title}</li>)}</ul>
-          {a.options ? <div className="muted">IV {pct(a.options["atm_iv"] ?? null, 1, false)} · IV rank {num(a.options["iv_rank"] ?? null)} · expected move ±{pct(a.options["expected_move"] ?? null, 1, false)}</div> : <div className="muted">Options: MISSING</div>}
-          {a.portfolio_review && <div>Portfolio cap: <b>{a.portfolio_review.size_cap}</b> {a.portfolio_review.warnings.join("; ")}</div>}
-        </Card>
-      </div>
-
-      <Card title="Scenarios (probability shown only once calibrated)">
-        <table><thead><tr><th>Scenario</th><th>Trigger</th><th>Mechanism</th><th>Range</th><th>Invalidation</th><th>Probability</th></tr></thead>
-          <tbody>{a.scenarios.map((s) => <tr key={s.name}><td>{s.name}</td><td>{s.trigger}</td><td>{s.mechanism}</td><td>{price(s.price_low)} – {price(s.price_high)}</td><td>{s.invalidation}</td><td>{s.probability ?? "N/A"}</td></tr>)}</tbody></table>
-      </Card>
-
-      <Card title="AI Investment Committee" right={<button disabled={busy} onClick={runCommittee}>{busy ? "Running…" : com ? "Show / re-run committee" : "Run committee"}</button>}>
-        {com ? <CommitteeView c={com} evidence={evIndex} /> : <div className="muted">Not run for this recommendation (runs automatically only for the top scan candidates).</div>}
-      </Card>
-
-      <Card title="Sources & versions">
-        <details><summary>{a.evidence.length} evidence items</summary>
-          <div className="scroll"><table><thead><tr><th>ID</th><th>Label</th><th>Value</th><th>Source</th><th>Quality</th></tr></thead>
-            <tbody>{a.evidence.map((x) => <tr key={x.evidence_id}><td>{x.evidence_id}</td><td>{x.label}</td><td>{typeof x.value === "number" ? num(x.value, 4) : String(x.value)}</td><td>{x.source}</td><td><Quality q={x.quality} /></td></tr>)}</tbody></table></div>
-        </details>
-        <div className="muted">{Object.entries(d.data.versions).map(([k, v]) => `${k}: ${v}`).join(" · ")}</div>
-        <div className="muted">History: {d.data.history.map((h) => `${h.as_of.slice(0, 10)} ${h.action} ${h.score.toFixed(0)}`).join(" | ")}</div>
-      </Card>
+      </More>
+      <More title="재무 · 밸류에이션 · 실적">
+        <div className="g2">
+          <div>
+            <h2>업종별 핵심 재무 지표</h2>
+            {(a.fundamental_rules?.items ?? []).length ? <table><tbody>{(a.fundamental_rules?.items ?? []).map((i) => <tr key={i.metric}><td><Metric k={i.metric} label={i.label} /></td><td>{i.value === null ? <span className="caption">데이터 없음</span> : num(i.value, 3)}</td><td style={{ width: "30%" }}>{i.subscore !== null && <Bar value={i.subscore} />}</td></tr>)}</tbody></table> : <Empty>재무 데이터 없음</Empty>}
+          </div>
+          <div>
+            <h2>밸류에이션 <span className="caption">(가격 기준: {a.valuation_price_basis})</span></h2>
+            {(a.valuation_rules?.items ?? []).length ? <table><tbody>{(a.valuation_rules?.items ?? []).map((i) => <tr key={i.metric}><td><Metric k={i.metric} label={i.label} /></td><td>{i.value === null ? <span className="caption">계산 불가</span> : num(i.value, 2)}</td><td style={{ width: "30%" }}>{i.subscore !== null && <Bar value={i.subscore} />}</td></tr>)}</tbody></table> : <Empty>밸류에이션 계산 불가</Empty>}
+            {a.relative_valuation && <div className="kv" style={{ marginTop: 8 }}>
+              <span className="k">자기 과거 대비</span><span>{a.relative_valuation.history_percentile === null ? "N/A" : `백분위 ${(a.relative_valuation.history_percentile * 100).toFixed(0)}% (높을수록 비쌈)`}</span>
+              <span className="k">동종업계 대비</span><span>{pct(a.relative_valuation.premium_to_peers)}</span>
+              <span className="k">선행 이익수익률 − 미 10년물</span><span>{pct(a.relative_valuation.equity_risk_spread, 2)}</span>
+            </div>}
+            <div className="caption">시가총액 {usdWithKo(a.security.market_cap)}</div>
+          </div>
+          <div>
+            <h2><Term k="surprise">실적 (실제 vs 예상)</Term></h2>
+            {a.earnings ? <div className="kv">
+              <span className="k">결과 판정</span><b>{RESULT_KO[a.earnings.result_quality] ?? a.earnings.result_quality}</b>
+              <span className="k">매출 서프라이즈</span><span>{pct(a.earnings.revenue_surprise)}</span>
+              <span className="k">EPS 서프라이즈</span><span>{pct(a.earnings.eps_surprise)}</span>
+              <span className="k"><Term k="guidance">가이던스 vs 컨센서스</Term></span><span>{pct(a.earnings.guide_rev_vs_cons)}</span>
+              <span className="k">시장 기대 수준</span><span>{BAR_KO[a.earnings.expectation_bar] ?? a.earnings.expectation_bar}</span>
+            </div> : <Empty>최근 실적 데이터가 없거나 오래되었습니다.</Empty>}
+          </div>
+          <div>
+            <h2><Term k="revision">애널리스트 추정치 변화</Term></h2>
+            {a.analyst ? <div className="kv">
+              {[["eps_revision_30d", "EPS 30일 변화"], ["eps_revision_90d", "EPS 90일 변화"], ["revenue_revision_30d", "매출 30일 변화"]].map(([k, l]) => <Fragment key={k}><span className="k">{l}</span><span>{pct(a.analyst?.[k!] as number | null)}</span></Fragment>)}
+              <span className="k">애널리스트 수</span><span>{String(a.analyst["analyst_count"] ?? "N/A")}</span>
+            </div> : <Empty hint="무료 데이터에는 추정치 변화가 없어 이 항목은 점수에서 가산점 없이 보수적으로 처리됩니다.">현재 연결된 데이터 제공자에서 이 종목의 최신 추정치 변화를 받지 못했습니다.</Empty>}
+          </div>
+        </div>
+      </More>
+      <More title="거시 · 기술적 흐름 · 이벤트">
+        <div className="g3">
+          <div>
+            <h2>거시 영향</h2>
+            <div className="caption">시장 국면: {ko(REGIME_KO, a.primary_regime)} · 순영향 {num(a.macro_impact?.net ?? null)}</div>
+            <ul className="list">{(a.macro_impact?.contributions ?? []).map(([f, v, t]) => <li key={f}><span className={`dot ${v > 0 ? "pos" : "neg"}`}>{v > 0 ? "↑" : "↓"}</span><span>{t}</span></li>)}</ul>
+          </div>
+          <div>
+            <h2>기술적 흐름 <span className="caption">(진입 타이밍 참고)</span></h2>
+            {a.technicals ? <div className="kv">{[["sma50", "50일 이동평균", "sma"], ["sma200", "200일 이동평균", "sma"], ["rsi14", "RSI(14)", "rsi14"], ["atr14", "ATR(14)", "atr14"], ["rs_6m", "6개월 상대강도", "rs_6m"]].map(([k, l, g]) => <Fragment key={k}><span className="k"><Term k={g!}>{l}</Term></span><span>{num(a.technicals?.[k!] as number | null)}</span></Fragment>)}</div> : <Empty>가격 이력 부족</Empty>}
+          </div>
+          <div>
+            <h2>이벤트 · 옵션</h2>
+            <div>이벤트 위험: <b className={a.event_risk.level === "EXTREME" || a.event_risk.level === "HIGH" ? "neg" : ""}>{ko(RISK_KO, a.event_risk.level)}</b></div>
+            <ul className="list">{a.upcoming_events.slice(0, 4).map((ev) => <li key={ev.event_id}><span className="dot info">▦</span><span>{day(ev.event_date)} · {ev.title}</span></li>)}</ul>
+            {a.options ? <div className="caption"><Term k="iv_rank">IV 순위</Term> {num(a.options["iv_rank"] ?? null)} · <Term k="expected_move">예상 변동폭</Term> ±{pct(a.options["expected_move"] ?? null, 1, false)}</div> : <div className="caption">옵션 데이터 없음(무료 공급원 없음)</div>}
+            {a.short_interest_pct != null && <div className="caption"><Term k="short_interest" /> {pct(a.short_interest_pct, 1, false)}</div>}
+          </div>
+        </div>
+      </More>
+      <More title="이슈 상세 · 선반영 정도 · 시나리오">
+        {a.issue_impacts.length ? <table><thead><tr><th>이슈</th><th>전달 경로</th><th>2~6주 영향</th><th><Term k="priced_in" /></th></tr></thead><tbody>
+          {a.issue_impacts.map((i) => { const sw = i.horizons.find((h) => h.horizon === "SWING"); const pi = a.priced_in[i.issue_id]; return <tr key={i.issue_id}><td>{i.issue_id}</td><td>{i.exposure_path.join(" → ")}</td><td className={(sw?.impact_score ?? 0) > 0 ? "pos" : "neg"}>{num(sw?.impact_score ?? null, 1)}</td><td>{pi?.value ?? "N/A"} <span className="caption">(신뢰 {num(pi?.confidence ?? null)})</span></td></tr>; })}
+        </tbody></table> : <Empty>이 종목에 영향을 주는 이슈가 없습니다.</Empty>}
+        <h2 style={{ marginTop: 14 }}>시나리오 <span className="caption">(확률은 보정 데이터가 쌓이기 전까지 표시하지 않음)</span></h2>
+        <table><thead><tr><th>시나리오</th><th>촉발 요인</th><th>가격 범위</th><th>무효화 조건</th></tr></thead>
+          <tbody>{a.scenarios.map((s) => <tr key={s.name}><td>{SCEN_KO[s.name] ?? s.name}</td><td style={{ whiteSpace: "normal" }}>{s.trigger}</td><td>{price(s.price_low)} – {price(s.price_high)}</td><td style={{ whiteSpace: "normal" }}>{s.invalidation}</td></tr>)}</tbody></table>
+      </More>
+      <More title="근거 원본 · 버전 · 추천 이력" hint="감사·재현용">
+        <div className="scroll"><table><thead><tr><th>ID</th><th>항목</th><th>값</th><th>단위</th><th>출처</th><th>시점</th><th>품질</th></tr></thead>
+          <tbody>{a.evidence.map((x) => <tr key={x.evidence_id}><td>{x.evidence_id}</td><td>{x.label}</td><td>{typeof x.value === "number" ? num(x.value, 4) : String(x.value)}</td><td>{x.unit ?? ""}</td><td>{x.source}</td><td>{stamp(x.source_ts)}</td><td><Quality q={x.quality} /></td></tr>)}</tbody></table></div>
+        <div className="caption">{Object.entries(d.data.versions).map(([k, v]) => `${k}: ${v ?? "N/A"}`).join(" · ")}</div>
+        <div className="caption">추천 이력: {d.data.history.map((h) => `${day(h.as_of)} ${h.action} ${h.score.toFixed(0)}`).join(" | ")}</div>
+      </More>
     </div>
   );
 }

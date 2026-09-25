@@ -1,6 +1,6 @@
 # MarketLens sector models — version controlled. Values are fractions (0.20 = 20%).
 # bad → subscore 0, good → subscore 1 (linear). If good < bad, lower is better.
-version = "sector-models-1.1.0"  # 1.1.0: energy keywords no longer capture "Utilities—Regulated Gas"
+version = "sector-models-1.2.0"  # 1.2.0: Korean metric labels (no scoring change); 1.1.0: energy keywords  # 1.1.0: energy keywords no longer capture "Utilities—Regulated Gas"
 
 [[model]]
 id = "semiconductor"
@@ -10,20 +10,20 @@ industry_keywords = ["semiconductor"]
 primary_multiple = "forward_pe"
 rationale = "cyclical, capex/inventory driven; margins and end-market demand dominate"
 fundamental = [
-  { metric = "revenue_growth_yoy", label = "Revenue growth YoY", weight = 3, bad = -0.10, good = 0.40 },
-  { metric = "eps_growth_yoy", label = "EPS growth YoY", weight = 2, bad = -0.20, good = 0.50 },
-  { metric = "gross_margin", label = "Gross margin", weight = 2, bad = 0.35, good = 0.65 },
-  { metric = "gross_margin_change_yoy", label = "Gross margin change YoY", weight = 1, bad = -0.05, good = 0.05 },
-  { metric = "fcf_margin", label = "FCF margin", weight = 2, bad = 0.0, good = 0.35 },
-  { metric = "inventory_vs_revenue_growth", label = "Inventory growth minus revenue growth", weight = 1.5, bad = 0.25, good = -0.10 },
-  { metric = "capex_to_revenue", label = "CapEx / revenue", weight = 0.5, bad = 0.35, good = 0.05 },
-  { metric = "ai_revenue_share", label = "AI end-market share of revenue", weight = 1, bad = 0.0, good = 0.5 },
+  { metric = "revenue_growth_yoy", label = "매출 성장률(전년비)", weight = 3, bad = -0.10, good = 0.40 },
+  { metric = "eps_growth_yoy", label = "EPS 성장률(전년비)", weight = 2, bad = -0.20, good = 0.50 },
+  { metric = "gross_margin", label = "매출총이익률", weight = 2, bad = 0.35, good = 0.65 },
+  { metric = "gross_margin_change_yoy", label = "매출총이익률 변화(전년비)", weight = 1, bad = -0.05, good = 0.05 },
+  { metric = "fcf_margin", label = "FCF 마진", weight = 2, bad = 0.0, good = 0.35 },
+  { metric = "inventory_vs_revenue_growth", label = "재고 증가율 − 매출 증가율", weight = 1.5, bad = 0.25, good = -0.10 },
+  { metric = "capex_to_revenue", label = "설비투자/매출", weight = 0.5, bad = 0.35, good = 0.05 },
+  { metric = "ai_revenue_share", label = "AI 관련 매출 비중", weight = 1, bad = 0.0, good = 0.5 },
 ]
 valuation = [
-  { metric = "forward_pe", label = "Forward P/E", weight = 3, bad = 60, good = 15 },
+  { metric = "forward_pe", label = "선행 PER", weight = 3, bad = 60, good = 15 },
   { metric = "peg", label = "PEG", weight = 3, bad = 3.0, good = 0.8 },
-  { metric = "ev_sales", label = "EV/Sales", weight = 1, bad = 25, good = 3 },
-  { metric = "fcf_yield", label = "FCF yield", weight = 1, bad = 0.005, good = 0.06 },
+  { metric = "ev_sales", label = "EV/매출", weight = 1, bad = 25, good = 3 },
+  { metric = "fcf_yield", label = "FCF 수익률", weight = 1, bad = 0.005, good = 0.06 },
 ]
 
 [[model]]
@@ -34,20 +34,20 @@ industry_keywords = ["software", "application", "saas"]
 primary_multiple = "ev_sales"
 rationale = "recurring revenue; growth + FCF (Rule of 40), SBC dilution and backlog matter"
 fundamental = [
-  { metric = "revenue_growth_yoy", label = "Revenue growth YoY", weight = 3, bad = 0.0, good = 0.35 },
-  { metric = "rule_of_40", label = "Rule of 40", weight = 3, bad = 10, good = 60 },
-  { metric = "gross_margin", label = "Gross margin", weight = 1.5, bad = 0.60, good = 0.85 },
-  { metric = "fcf_margin", label = "FCF margin", weight = 2, bad = 0.0, good = 0.35 },
-  { metric = "sbc_pct_revenue", label = "SBC / revenue", weight = 1.5, bad = 0.30, good = 0.05 },
-  { metric = "rpo_growth", label = "RPO growth", weight = 1.5, bad = 0.0, good = 0.35 },
-  { metric = "arr_growth", label = "ARR growth", weight = 1, bad = 0.0, good = 0.35 },
-  { metric = "nrr", label = "Net revenue retention", weight = 1, bad = 1.0, good = 1.30 },
-  { metric = "share_dilution_yoy", label = "Share dilution YoY", weight = 1, bad = 0.05, good = -0.01 },
+  { metric = "revenue_growth_yoy", label = "매출 성장률(전년비)", weight = 3, bad = 0.0, good = 0.35 },
+  { metric = "rule_of_40", label = "Rule of 40(성장률+이익률)", weight = 3, bad = 10, good = 60 },
+  { metric = "gross_margin", label = "매출총이익률", weight = 1.5, bad = 0.60, good = 0.85 },
+  { metric = "fcf_margin", label = "FCF 마진", weight = 2, bad = 0.0, good = 0.35 },
+  { metric = "sbc_pct_revenue", label = "주식보상비용/매출", weight = 1.5, bad = 0.30, good = 0.05 },
+  { metric = "rpo_growth", label = "잔여계약금액(RPO) 성장률", weight = 1.5, bad = 0.0, good = 0.35 },
+  { metric = "arr_growth", label = "연간반복매출(ARR) 성장률", weight = 1, bad = 0.0, good = 0.35 },
+  { metric = "nrr", label = "순매출유지율(NRR)", weight = 1, bad = 1.0, good = 1.30 },
+  { metric = "share_dilution_yoy", label = "주식 희석률(전년비)", weight = 1, bad = 0.05, good = -0.01 },
 ]
 valuation = [
-  { metric = "ev_sales", label = "EV/Sales", weight = 3, bad = 20, good = 4 },
-  { metric = "forward_pe", label = "Forward P/E", weight = 2, bad = 70, good = 20 },
-  { metric = "fcf_yield", label = "FCF yield", weight = 2, bad = 0.005, good = 0.06 },
+  { metric = "ev_sales", label = "EV/매출", weight = 3, bad = 20, good = 4 },
+  { metric = "forward_pe", label = "선행 PER", weight = 2, bad = 70, good = 20 },
+  { metric = "fcf_yield", label = "FCF 수익률", weight = 2, bad = 0.005, good = 0.06 },
   { metric = "peg", label = "PEG", weight = 1, bad = 3.0, good = 1.0 },
 ]
 
@@ -59,17 +59,17 @@ industry_keywords = ["internet", "interactive media", "e-commerce", "internet re
 primary_multiple = "forward_pe"
 rationale = "scale platforms; operating leverage, FCF and ad/commerce growth"
 fundamental = [
-  { metric = "revenue_growth_yoy", label = "Revenue growth YoY", weight = 3, bad = 0.0, good = 0.25 },
-  { metric = "operating_margin", label = "Operating margin", weight = 2, bad = 0.0, good = 0.35 },
-  { metric = "operating_margin_change_yoy", label = "Operating margin change YoY", weight = 1.5, bad = -0.05, good = 0.05 },
-  { metric = "fcf_margin", label = "FCF margin", weight = 2, bad = 0.0, good = 0.30 },
-  { metric = "eps_growth_yoy", label = "EPS growth YoY", weight = 2, bad = -0.10, good = 0.40 },
-  { metric = "sbc_pct_revenue", label = "SBC / revenue", weight = 1, bad = 0.20, good = 0.03 },
+  { metric = "revenue_growth_yoy", label = "매출 성장률(전년비)", weight = 3, bad = 0.0, good = 0.25 },
+  { metric = "operating_margin", label = "영업이익률", weight = 2, bad = 0.0, good = 0.35 },
+  { metric = "operating_margin_change_yoy", label = "영업이익률 변화(전년비)", weight = 1.5, bad = -0.05, good = 0.05 },
+  { metric = "fcf_margin", label = "FCF 마진", weight = 2, bad = 0.0, good = 0.30 },
+  { metric = "eps_growth_yoy", label = "EPS 성장률(전년비)", weight = 2, bad = -0.10, good = 0.40 },
+  { metric = "sbc_pct_revenue", label = "주식보상비용/매출", weight = 1, bad = 0.20, good = 0.03 },
 ]
 valuation = [
-  { metric = "forward_pe", label = "Forward P/E", weight = 3, bad = 45, good = 15 },
+  { metric = "forward_pe", label = "선행 PER", weight = 3, bad = 45, good = 15 },
   { metric = "ev_ebitda", label = "EV/EBITDA", weight = 2, bad = 35, good = 10 },
-  { metric = "fcf_yield", label = "FCF yield", weight = 2, bad = 0.01, good = 0.06 },
+  { metric = "fcf_yield", label = "FCF 수익률", weight = 2, bad = 0.01, good = 0.06 },
   { metric = "peg", label = "PEG", weight = 1, bad = 3.0, good = 1.0 },
 ]
 
@@ -81,18 +81,18 @@ industry_keywords = []
 primary_multiple = "forward_pe"
 rationale = "demand and pricing power; margin stability, inventory discipline, cash returns"
 fundamental = [
-  { metric = "revenue_growth_yoy", label = "Revenue growth YoY", weight = 2, bad = -0.03, good = 0.12 },
-  { metric = "gross_margin_change_yoy", label = "Gross margin change YoY", weight = 2, bad = -0.02, good = 0.02 },
-  { metric = "operating_margin", label = "Operating margin", weight = 2, bad = 0.03, good = 0.20 },
-  { metric = "inventory_vs_revenue_growth", label = "Inventory growth minus revenue growth", weight = 1.5, bad = 0.15, good = -0.05 },
-  { metric = "fcf_margin", label = "FCF margin", weight = 1.5, bad = 0.0, good = 0.15 },
-  { metric = "roic", label = "ROIC", weight = 2, bad = 0.05, good = 0.25 },
-  { metric = "net_debt_to_ebitda", label = "Net debt / EBITDA", weight = 1, bad = 4.0, good = 0.5 },
+  { metric = "revenue_growth_yoy", label = "매출 성장률(전년비)", weight = 2, bad = -0.03, good = 0.12 },
+  { metric = "gross_margin_change_yoy", label = "매출총이익률 변화(전년비)", weight = 2, bad = -0.02, good = 0.02 },
+  { metric = "operating_margin", label = "영업이익률", weight = 2, bad = 0.03, good = 0.20 },
+  { metric = "inventory_vs_revenue_growth", label = "재고 증가율 − 매출 증가율", weight = 1.5, bad = 0.15, good = -0.05 },
+  { metric = "fcf_margin", label = "FCF 마진", weight = 1.5, bad = 0.0, good = 0.15 },
+  { metric = "roic", label = "ROIC(투하자본이익률)", weight = 2, bad = 0.05, good = 0.25 },
+  { metric = "net_debt_to_ebitda", label = "순부채/EBITDA", weight = 1, bad = 4.0, good = 0.5 },
 ]
 valuation = [
-  { metric = "forward_pe", label = "Forward P/E", weight = 3, bad = 35, good = 12 },
+  { metric = "forward_pe", label = "선행 PER", weight = 3, bad = 35, good = 12 },
   { metric = "ev_ebitda", label = "EV/EBITDA", weight = 2, bad = 25, good = 8 },
-  { metric = "fcf_yield", label = "FCF yield", weight = 2, bad = 0.01, good = 0.07 },
+  { metric = "fcf_yield", label = "FCF 수익률", weight = 2, bad = 0.01, good = 0.07 },
 ]
 
 [[model]]
@@ -103,20 +103,20 @@ industry_keywords = ["bank", "credit services", "capital markets", "insurance"]
 primary_multiple = "p_tbv"
 rationale = "balance-sheet businesses: capital (CET1), returns on tangible equity, NIM and credit quality — revenue growth/FCF are not meaningful"
 fundamental = [
-  { metric = "rotce", label = "ROTCE", weight = 3, bad = 0.06, good = 0.18 },
-  { metric = "cet1", label = "CET1 ratio", weight = 2, bad = 0.095, good = 0.14 },
-  { metric = "nim", label = "Net interest margin", weight = 1.5, bad = 0.020, good = 0.035 },
-  { metric = "loan_growth", label = "Loan growth", weight = 1, bad = -0.03, good = 0.08 },
-  { metric = "deposit_growth", label = "Deposit growth", weight = 1, bad = -0.05, good = 0.06 },
-  { metric = "charge_off_rate", label = "Net charge-off rate", weight = 2, bad = 0.012, good = 0.002 },
-  { metric = "provision_to_loans", label = "Provision / loans", weight = 1, bad = 0.015, good = 0.002 },
-  { metric = "capital_return_yield", label = "Capital return yield", weight = 1, bad = 0.0, good = 0.08 },
-  { metric = "roe", label = "ROE", weight = 1, bad = 0.06, good = 0.16 },
+  { metric = "rotce", label = "ROTCE(유형자기자본이익률)", weight = 3, bad = 0.06, good = 0.18 },
+  { metric = "cet1", label = "CET1 자본비율", weight = 2, bad = 0.095, good = 0.14 },
+  { metric = "nim", label = "순이자마진(NIM)", weight = 1.5, bad = 0.020, good = 0.035 },
+  { metric = "loan_growth", label = "대출 성장률", weight = 1, bad = -0.03, good = 0.08 },
+  { metric = "deposit_growth", label = "예금 성장률", weight = 1, bad = -0.05, good = 0.06 },
+  { metric = "charge_off_rate", label = "순대손상각률", weight = 2, bad = 0.012, good = 0.002 },
+  { metric = "provision_to_loans", label = "대손충당금/대출", weight = 1, bad = 0.015, good = 0.002 },
+  { metric = "capital_return_yield", label = "주주환원 수익률", weight = 1, bad = 0.0, good = 0.08 },
+  { metric = "roe", label = "ROE(자기자본이익률)", weight = 1, bad = 0.06, good = 0.16 },
 ]
 valuation = [
-  { metric = "p_tbv", label = "Price / tangible book", weight = 3, bad = 3.0, good = 1.0 },
-  { metric = "p_b", label = "Price / book", weight = 2, bad = 2.5, good = 0.9 },
-  { metric = "forward_pe", label = "Forward P/E", weight = 2, bad = 18, good = 8 },
+  { metric = "p_tbv", label = "P/TBV(유형자산 기준)", weight = 3, bad = 3.0, good = 1.0 },
+  { metric = "p_b", label = "PBR", weight = 2, bad = 2.5, good = 0.9 },
+  { metric = "forward_pe", label = "선행 PER", weight = 2, bad = 18, good = 8 },
 ]
 
 [[model]]
@@ -127,15 +127,15 @@ industry_keywords = ["biotechnology"]
 primary_multiple = "ev_sales"
 rationale = "binary pipeline risk; cash runway and dilution dominate, earnings often negative"
 fundamental = [
-  { metric = "cash_runway_quarters", label = "Cash runway (quarters)", weight = 3, bad = 4, good = 16 },
-  { metric = "share_dilution_yoy", label = "Share dilution YoY", weight = 2, bad = 0.15, good = 0.0 },
-  { metric = "revenue_growth_yoy", label = "Revenue growth YoY", weight = 1.5, bad = 0.0, good = 0.40 },
-  { metric = "late_stage_programs", label = "Phase 3 / filed programs", weight = 1.5, bad = 0, good = 4 },
-  { metric = "gross_margin", label = "Gross margin", weight = 0.5, bad = 0.5, good = 0.9 },
+  { metric = "cash_runway_quarters", label = "현금으로 버틸 수 있는 기간(분기)", weight = 3, bad = 4, good = 16 },
+  { metric = "share_dilution_yoy", label = "주식 희석률(전년비)", weight = 2, bad = 0.15, good = 0.0 },
+  { metric = "revenue_growth_yoy", label = "매출 성장률(전년비)", weight = 1.5, bad = 0.0, good = 0.40 },
+  { metric = "late_stage_programs", label = "임상 3상·허가 신청 파이프라인 수", weight = 1.5, bad = 0, good = 4 },
+  { metric = "gross_margin", label = "매출총이익률", weight = 0.5, bad = 0.5, good = 0.9 },
 ]
 valuation = [
-  { metric = "ev_sales", label = "EV/Sales", weight = 2, bad = 30, good = 4 },
-  { metric = "forward_pe", label = "Forward P/E", weight = 1, bad = 60, good = 15 },
+  { metric = "ev_sales", label = "EV/매출", weight = 2, bad = 30, good = 4 },
+  { metric = "forward_pe", label = "선행 PER", weight = 1, bad = 60, good = 15 },
 ]
 min_coverage = 0.4
 
@@ -147,17 +147,17 @@ industry_keywords = ["drug manufacturers", "medical", "healthcare plans", "diagn
 primary_multiple = "forward_pe"
 rationale = "defensive growth; margin durability, FCF and patent/pipeline replacement"
 fundamental = [
-  { metric = "revenue_growth_yoy", label = "Revenue growth YoY", weight = 2, bad = -0.02, good = 0.12 },
-  { metric = "eps_growth_yoy", label = "EPS growth YoY", weight = 2, bad = -0.05, good = 0.15 },
-  { metric = "operating_margin", label = "Operating margin", weight = 2, bad = 0.05, good = 0.30 },
-  { metric = "fcf_margin", label = "FCF margin", weight = 2, bad = 0.0, good = 0.25 },
-  { metric = "roic", label = "ROIC", weight = 1, bad = 0.05, good = 0.20 },
-  { metric = "net_debt_to_ebitda", label = "Net debt / EBITDA", weight = 1, bad = 4.0, good = 0.5 },
+  { metric = "revenue_growth_yoy", label = "매출 성장률(전년비)", weight = 2, bad = -0.02, good = 0.12 },
+  { metric = "eps_growth_yoy", label = "EPS 성장률(전년비)", weight = 2, bad = -0.05, good = 0.15 },
+  { metric = "operating_margin", label = "영업이익률", weight = 2, bad = 0.05, good = 0.30 },
+  { metric = "fcf_margin", label = "FCF 마진", weight = 2, bad = 0.0, good = 0.25 },
+  { metric = "roic", label = "ROIC(투하자본이익률)", weight = 1, bad = 0.05, good = 0.20 },
+  { metric = "net_debt_to_ebitda", label = "순부채/EBITDA", weight = 1, bad = 4.0, good = 0.5 },
 ]
 valuation = [
-  { metric = "forward_pe", label = "Forward P/E", weight = 3, bad = 30, good = 12 },
+  { metric = "forward_pe", label = "선행 PER", weight = 3, bad = 30, good = 12 },
   { metric = "peg", label = "PEG", weight = 2, bad = 3.0, good = 1.0 },
-  { metric = "fcf_yield", label = "FCF yield", weight = 2, bad = 0.01, good = 0.07 },
+  { metric = "fcf_yield", label = "FCF 수익률", weight = 2, bad = 0.01, good = 0.07 },
 ]
 
 [[model]]
@@ -168,17 +168,17 @@ industry_keywords = ["oil & gas", "oil and gas", "crude", "coal"]
 primary_multiple = "ev_ebitda"
 rationale = "commodity price takers; FCF through the cycle, balance sheet and capital discipline"
 fundamental = [
-  { metric = "fcf_margin", label = "FCF margin", weight = 3, bad = 0.0, good = 0.20 },
-  { metric = "net_debt_to_ebitda", label = "Net debt / EBITDA", weight = 2, bad = 2.5, good = 0.3 },
-  { metric = "roic", label = "ROIC", weight = 2, bad = 0.04, good = 0.18 },
-  { metric = "production_growth", label = "Production growth", weight = 1, bad = -0.05, good = 0.08 },
-  { metric = "capital_return_yield", label = "Capital return yield", weight = 1.5, bad = 0.0, good = 0.10 },
-  { metric = "capex_to_revenue", label = "CapEx / revenue", weight = 0.5, bad = 0.30, good = 0.08 },
+  { metric = "fcf_margin", label = "FCF 마진", weight = 3, bad = 0.0, good = 0.20 },
+  { metric = "net_debt_to_ebitda", label = "순부채/EBITDA", weight = 2, bad = 2.5, good = 0.3 },
+  { metric = "roic", label = "ROIC(투하자본이익률)", weight = 2, bad = 0.04, good = 0.18 },
+  { metric = "production_growth", label = "생산량 성장률", weight = 1, bad = -0.05, good = 0.08 },
+  { metric = "capital_return_yield", label = "주주환원 수익률", weight = 1.5, bad = 0.0, good = 0.10 },
+  { metric = "capex_to_revenue", label = "설비투자/매출", weight = 0.5, bad = 0.30, good = 0.08 },
 ]
 valuation = [
   { metric = "ev_ebitda", label = "EV/EBITDA", weight = 3, bad = 10, good = 4 },
-  { metric = "fcf_yield", label = "FCF yield", weight = 3, bad = 0.02, good = 0.12 },
-  { metric = "forward_pe", label = "Forward P/E", weight = 1, bad = 20, good = 8 },
+  { metric = "fcf_yield", label = "FCF 수익률", weight = 3, bad = 0.02, good = 0.12 },
+  { metric = "forward_pe", label = "선행 PER", weight = 1, bad = 20, good = 8 },
 ]
 
 [[model]]
@@ -189,18 +189,18 @@ industry_keywords = ["aerospace", "electrical equipment", "machinery"]
 primary_multiple = "ev_ebitda"
 rationale = "backlog/book-to-bill, margin expansion and FCF conversion"
 fundamental = [
-  { metric = "revenue_growth_yoy", label = "Revenue growth YoY", weight = 2, bad = -0.03, good = 0.15 },
-  { metric = "backlog_growth", label = "Backlog growth", weight = 2, bad = -0.05, good = 0.20 },
-  { metric = "book_to_bill", label = "Book-to-bill", weight = 1, bad = 0.9, good = 1.2 },
-  { metric = "operating_margin_change_yoy", label = "Operating margin change YoY", weight = 1.5, bad = -0.02, good = 0.03 },
-  { metric = "fcf_margin", label = "FCF margin", weight = 2, bad = 0.0, good = 0.15 },
-  { metric = "roic", label = "ROIC", weight = 1.5, bad = 0.06, good = 0.20 },
-  { metric = "net_debt_to_ebitda", label = "Net debt / EBITDA", weight = 1, bad = 3.5, good = 0.5 },
+  { metric = "revenue_growth_yoy", label = "매출 성장률(전년비)", weight = 2, bad = -0.03, good = 0.15 },
+  { metric = "backlog_growth", label = "수주잔고 성장률", weight = 2, bad = -0.05, good = 0.20 },
+  { metric = "book_to_bill", label = "수주/출하 비율(Book-to-bill)", weight = 1, bad = 0.9, good = 1.2 },
+  { metric = "operating_margin_change_yoy", label = "영업이익률 변화(전년비)", weight = 1.5, bad = -0.02, good = 0.03 },
+  { metric = "fcf_margin", label = "FCF 마진", weight = 2, bad = 0.0, good = 0.15 },
+  { metric = "roic", label = "ROIC(투하자본이익률)", weight = 1.5, bad = 0.06, good = 0.20 },
+  { metric = "net_debt_to_ebitda", label = "순부채/EBITDA", weight = 1, bad = 3.5, good = 0.5 },
 ]
 valuation = [
   { metric = "ev_ebitda", label = "EV/EBITDA", weight = 3, bad = 28, good = 10 },
-  { metric = "forward_pe", label = "Forward P/E", weight = 2, bad = 40, good = 14 },
-  { metric = "fcf_yield", label = "FCF yield", weight = 1, bad = 0.01, good = 0.06 },
+  { metric = "forward_pe", label = "선행 PER", weight = 2, bad = 40, good = 14 },
+  { metric = "fcf_yield", label = "FCF 수익률", weight = 1, bad = 0.01, good = 0.06 },
 ]
 
 [[model]]
@@ -211,16 +211,16 @@ industry_keywords = ["reit"]
 primary_multiple = "p_ffo"
 rationale = "FFO/AFFO not EPS; occupancy, leverage and interest coverage (rate sensitive)"
 fundamental = [
-  { metric = "ffo_growth", label = "FFO growth", weight = 2, bad = -0.03, good = 0.08 },
-  { metric = "affo_payout", label = "AFFO payout ratio", weight = 1.5, bad = 1.0, good = 0.70 },
-  { metric = "occupancy", label = "Occupancy", weight = 2, bad = 0.88, good = 0.97 },
-  { metric = "debt_to_ebitda", label = "Debt / EBITDA", weight = 2, bad = 8.0, good = 4.5 },
-  { metric = "interest_coverage", label = "Interest coverage", weight = 2, bad = 2.0, good = 5.0 },
-  { metric = "nav_discount", label = "Price discount to NAV", weight = 1, bad = -0.20, good = 0.15 },
+  { metric = "ffo_growth", label = "FFO 성장률", weight = 2, bad = -0.03, good = 0.08 },
+  { metric = "affo_payout", label = "AFFO 배당성향", weight = 1.5, bad = 1.0, good = 0.70 },
+  { metric = "occupancy", label = "임대율", weight = 2, bad = 0.88, good = 0.97 },
+  { metric = "debt_to_ebitda", label = "부채/EBITDA", weight = 2, bad = 8.0, good = 4.5 },
+  { metric = "interest_coverage", label = "이자보상배율", weight = 2, bad = 2.0, good = 5.0 },
+  { metric = "nav_discount", label = "순자산가치(NAV) 대비 할인율", weight = 1, bad = -0.20, good = 0.15 },
 ]
 valuation = [
-  { metric = "p_ffo", label = "Price / FFO", weight = 3, bad = 25, good = 10 },
-  { metric = "dividend_yield", label = "Dividend yield", weight = 1, bad = 0.02, good = 0.06 },
+  { metric = "p_ffo", label = "P/FFO", weight = 3, bad = 25, good = 10 },
+  { metric = "dividend_yield", label = "배당수익률", weight = 1, bad = 0.02, good = 0.06 },
 ]
 
 [[model]]
@@ -231,15 +231,15 @@ industry_keywords = ["utilities"]
 primary_multiple = "forward_pe"
 rationale = "regulated returns; rate base growth, allowed ROE and leverage (bond proxies)"
 fundamental = [
-  { metric = "rate_base_growth", label = "Rate base growth", weight = 2, bad = 0.02, good = 0.09 },
-  { metric = "eps_growth_yoy", label = "EPS growth YoY", weight = 2, bad = 0.0, good = 0.08 },
-  { metric = "allowed_roe", label = "Allowed ROE", weight = 1, bad = 0.08, good = 0.105 },
-  { metric = "net_debt_to_ebitda", label = "Net debt / EBITDA", weight = 2, bad = 7.0, good = 4.0 },
-  { metric = "roe", label = "ROE", weight = 1, bad = 0.06, good = 0.12 },
+  { metric = "rate_base_growth", label = "요금기반자산 성장률", weight = 2, bad = 0.02, good = 0.09 },
+  { metric = "eps_growth_yoy", label = "EPS 성장률(전년비)", weight = 2, bad = 0.0, good = 0.08 },
+  { metric = "allowed_roe", label = "허용 자기자본이익률(ROE)", weight = 1, bad = 0.08, good = 0.105 },
+  { metric = "net_debt_to_ebitda", label = "순부채/EBITDA", weight = 2, bad = 7.0, good = 4.0 },
+  { metric = "roe", label = "ROE(자기자본이익률)", weight = 1, bad = 0.06, good = 0.12 },
 ]
 valuation = [
-  { metric = "forward_pe", label = "Forward P/E", weight = 3, bad = 24, good = 13 },
-  { metric = "dividend_yield", label = "Dividend yield", weight = 2, bad = 0.02, good = 0.05 },
+  { metric = "forward_pe", label = "선행 PER", weight = 3, bad = 24, good = 13 },
+  { metric = "dividend_yield", label = "배당수익률", weight = 2, bad = 0.02, good = 0.05 },
   { metric = "ev_ebitda", label = "EV/EBITDA", weight = 1, bad = 16, good = 9 },
 ]
 
@@ -251,16 +251,16 @@ industry_keywords = ["hardware", "communication equipment", "electronic componen
 primary_multiple = "forward_pe"
 rationale = "product cycles; growth, margins, FCF and capital returns"
 fundamental = [
-  { metric = "revenue_growth_yoy", label = "Revenue growth YoY", weight = 2.5, bad = -0.05, good = 0.25 },
-  { metric = "eps_growth_yoy", label = "EPS growth YoY", weight = 2, bad = -0.10, good = 0.30 },
-  { metric = "gross_margin", label = "Gross margin", weight = 1.5, bad = 0.25, good = 0.55 },
-  { metric = "fcf_margin", label = "FCF margin", weight = 2, bad = 0.0, good = 0.25 },
-  { metric = "roic", label = "ROIC", weight = 1.5, bad = 0.05, good = 0.30 },
+  { metric = "revenue_growth_yoy", label = "매출 성장률(전년비)", weight = 2.5, bad = -0.05, good = 0.25 },
+  { metric = "eps_growth_yoy", label = "EPS 성장률(전년비)", weight = 2, bad = -0.10, good = 0.30 },
+  { metric = "gross_margin", label = "매출총이익률", weight = 1.5, bad = 0.25, good = 0.55 },
+  { metric = "fcf_margin", label = "FCF 마진", weight = 2, bad = 0.0, good = 0.25 },
+  { metric = "roic", label = "ROIC(투하자본이익률)", weight = 1.5, bad = 0.05, good = 0.30 },
 ]
 valuation = [
-  { metric = "forward_pe", label = "Forward P/E", weight = 3, bad = 45, good = 14 },
+  { metric = "forward_pe", label = "선행 PER", weight = 3, bad = 45, good = 14 },
   { metric = "peg", label = "PEG", weight = 2, bad = 3.0, good = 1.0 },
-  { metric = "fcf_yield", label = "FCF yield", weight = 2, bad = 0.01, good = 0.06 },
+  { metric = "fcf_yield", label = "FCF 수익률", weight = 2, bad = 0.01, good = 0.06 },
 ]
 
 [[model]]
@@ -271,16 +271,16 @@ industry_keywords = []
 primary_multiple = "forward_pe"
 rationale = "fallback model: growth, profitability, cash generation and leverage"
 fundamental = [
-  { metric = "revenue_growth_yoy", label = "Revenue growth YoY", weight = 2, bad = -0.05, good = 0.20 },
-  { metric = "eps_growth_yoy", label = "EPS growth YoY", weight = 2, bad = -0.10, good = 0.25 },
-  { metric = "operating_margin", label = "Operating margin", weight = 2, bad = 0.0, good = 0.25 },
-  { metric = "fcf_margin", label = "FCF margin", weight = 2, bad = 0.0, good = 0.20 },
-  { metric = "roic", label = "ROIC", weight = 1.5, bad = 0.04, good = 0.20 },
-  { metric = "net_debt_to_ebitda", label = "Net debt / EBITDA", weight = 1, bad = 4.0, good = 0.5 },
+  { metric = "revenue_growth_yoy", label = "매출 성장률(전년비)", weight = 2, bad = -0.05, good = 0.20 },
+  { metric = "eps_growth_yoy", label = "EPS 성장률(전년비)", weight = 2, bad = -0.10, good = 0.25 },
+  { metric = "operating_margin", label = "영업이익률", weight = 2, bad = 0.0, good = 0.25 },
+  { metric = "fcf_margin", label = "FCF 마진", weight = 2, bad = 0.0, good = 0.20 },
+  { metric = "roic", label = "ROIC(투하자본이익률)", weight = 1.5, bad = 0.04, good = 0.20 },
+  { metric = "net_debt_to_ebitda", label = "순부채/EBITDA", weight = 1, bad = 4.0, good = 0.5 },
 ]
 valuation = [
-  { metric = "forward_pe", label = "Forward P/E", weight = 3, bad = 40, good = 12 },
+  { metric = "forward_pe", label = "선행 PER", weight = 3, bad = 40, good = 12 },
   { metric = "ev_ebitda", label = "EV/EBITDA", weight = 2, bad = 30, good = 8 },
-  { metric = "fcf_yield", label = "FCF yield", weight = 2, bad = 0.01, good = 0.07 },
+  { metric = "fcf_yield", label = "FCF 수익률", weight = 2, bad = 0.01, good = 0.07 },
   { metric = "peg", label = "PEG", weight = 1, bad = 3.0, good = 1.0 },
 ]

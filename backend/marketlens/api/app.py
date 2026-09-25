@@ -91,7 +91,12 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
     @app.middleware("http")
     async def local_guard(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         origin = request.headers.get("origin")
-        if origin is not None and origin not in ALLOWED_ORIGINS:
+        host = request.headers.get("host", "")
+        # same-origin requests (e.g. the UI served by this backend on any port — Vite module scripts are
+        # loaded with ``crossorigin`` and carry an Origin header) are allowed; the Host header itself is
+        # already restricted to localhost by TrustedHostMiddleware, so this cannot be abused via DNS rebinding
+        same_origin = origin in (f"http://{host}", f"https://{host}")
+        if origin is not None and origin not in ALLOWED_ORIGINS and not same_origin:
             return JSONResponse({"detail": "허용되지 않은 출처(Origin)의 요청입니다."}, status_code=403)
         path = request.url.path
         if path.startswith("/api/"):

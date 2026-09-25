@@ -86,6 +86,16 @@ def test_foreign_origin_is_rejected(client):
     assert client.get("/api/system", headers={"origin": "http://localhost:5173"}).status_code == 200
 
 
+def test_same_origin_ui_on_any_port_is_allowed(client):
+    """Regression (found by the browser E2E test): Vite module scripts carry an Origin header; the UI served
+    by the backend on a non-default port must not be blocked as a foreign origin."""
+    h = {"host": "127.0.0.1:53111", "origin": "http://127.0.0.1:53111"}
+    assert client.get("/assets/app.js", headers=h).status_code == 200
+    assert client.get("/api/system", headers=h).status_code == 200
+    assert client.get("/api/system", headers={"host": "127.0.0.1:53111", "origin": "http://127.0.0.1:9999"}).status_code == 403
+    assert client.get("/api/system", headers={"host": "evil.example.com", "origin": "http://evil.example.com"}).status_code == 400
+
+
 def test_state_changing_requests_need_the_client_header(client):
     r = client.post("/api/watchlist/NVDA")  # a cross-site form/fetch cannot add custom headers
     assert r.status_code == 403 and "x-marketlens-client" in r.json()["detail"]
