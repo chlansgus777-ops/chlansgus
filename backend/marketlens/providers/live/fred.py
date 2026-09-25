@@ -1,7 +1,8 @@
 """FRED (Federal Reserve Bank of St. Louis) macro provider — official aggregation of Fed/Treasury/BLS/BEA.
 
-Requires FRED_API_KEY. Observations are fetched with ``observation_end`` = as_of date so historical
-queries do not see later data (vintage-aware ALFRED access is a documented future enhancement).
+Requires FRED_API_KEY (free). Point-in-time: requests set ``realtime_start = realtime_end = as_of`` (ALFRED
+vintages), so a historical analysis only sees the values *as they were published on that date* — later
+revisions (payrolls, GDP, CPI) never leak backwards.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from marketlens.domain.enums import DataMode, DataQuality
 from marketlens.domain.facts import Fact
 from marketlens.domain.macro import (
     BRENT, CORE_CPI_YOY, CORE_PCE_YOY, CPI_YOY, FED_FUNDS, GDP_QOQ_SAAR, HY_SPREAD, NASDAQ_COMP,
-    PAYROLLS_CHG, PCE_YOY, SPX, UNEMPLOYMENT, US2Y, US10Y, US30Y, USD_INDEX, VIX, WTI, MacroSeries,
+    PAYROLLS_CHG, PCE_YOY, SPX, UNEMPLOYMENT, US2Y, US10Y, US30Y, USD_INDEX, USDKRW, VIX, WTI, MacroSeries,
 )
 from marketlens.infrastructure.resilience import TokenBucket
 from marketlens.providers.contracts import ProviderDataError, ProviderUnavailable
@@ -39,23 +40,25 @@ FRED_MAP: dict[str, tuple[str, str]] = {
     HY_SPREAD: ("BAMLH0A0HYM2", "level"),
     SPX: ("SP500", "level"),
     NASDAQ_COMP: ("NASDAQCOM", "level"),
+    USDKRW: ("DEXKOUS", "level"),  # 원/달러 환율 (KRW per USD)
 }
-DAILY = {FED_FUNDS, US2Y, US10Y, US30Y, USD_INDEX, WTI, BRENT, VIX, HY_SPREAD, SPX, NASDAQ_COMP}
+DAILY = {FED_FUNDS, US2Y, US10Y, US30Y, USD_INDEX, WTI, BRENT, VIX, HY_SPREAD, SPX, NASDAQ_COMP, USDKRW}
 
 
 class FredMacroProvider:
     mode = DataMode.LIVE
 
-    def __init__(self, api_key: str | None, transport: Any = None) -> None:
+    def __init__(self, api_key: str | None, transport: Any = None, rate_per_s: float = 2.0) -> None:
         self.name = "fred"
         self.configured = bool(api_key)
         self._key = api_key
-        self._http = HttpClient("https://api.stlouisfed.org", bucket=TokenBucket(2.0, 5), transport=transport)
+        self._http = HttpClient("https://api.stlouisfed.org", bucket=TokenBucket(rate_per_s, 5), transport=transport)
 
-    def _observations(self, fred_id: str, end: date, start: date) -> list[tuple[date, float]]:
+    def _observations(self, fred_id: str, end: date, start: date, vintage: date) -> list[tuple[date, float]]:
         data = self._http.get_json(
             "/fred/series/observations",
-            {"series_id": fred_id, "api_key": self._key, "file_type": "json", "observation_start": start.isoformat(), "observation_end": end.isoformat()},
+            {"series_id": fred_id, "api_key": self._key, "file_type": "json", "observation_start": start.isoformat(), "observation_end": end.isoformat(),
+             "realtime_start": vintage.isoformat(), "realtime_end": vintage.isoformat()},
         )
         obs = data.get("observations")
         if not isinstance(obs, list):
@@ -70,7 +73,7 @@ class FredMacroProvider:
 
     def get_series(self, series_ids: Sequence[str], as_of: datetime) -> dict[str, MacroSeries]:
         if not self.configured:
-            raise ProviderUnavailable("FRED_API_KEY not set")
+            raise ProviderUnavailable("FRED_API_KEY 미설정")
         end = as_of.date()
         out: dict[str, MacroSeries] = {}
         for sid in series_ids:
@@ -78,7 +81,10 @@ class FredMacroProvider:
                 continue
             fid, transform = FRED_MAP[sid]
             lookback = timedelta(days=500 if transform == "yoy" else 400)
-            obs = self._observations(fid, end, end - lookback)
+            # release times are not in this API: monthly/quarterly releases (CPI 08:30 ET, …) on the analysis
+            # day itself may not be public yet at ``as_of`` → use the previous day's vintage for them
+            vintage = end if sid in DAILY else end - timedelta(days=1)
+            obs = self._observations(fid, end, end - lookback, vintage)
             if not obs:
                 continue
             series = [v for _, v in obs]
@@ -92,10 +98,14 @@ class FredMacroProvider:
             else:
                 vals = series
             latest = vals[-1]
-            ts = datetime(d_last.year, d_last.month, d_last.day, 21, 0, tzinfo=timezone.utc)
-            stale_days = 5 if sid in DAILY else 70 if transform != "level" or sid == GDP_QOQ_SAAR else 45
+            ts = datetime(d_last.year, d_last.month, d_last.day, tzinfo=timezone.utc)  # observation (effective) date
+            # observation dates lag releases: a monthly value dated the 1st is published 5–55 days after the
+            # month ends (PCE ~4 weeks) and GDP's quarter-start date is ~7 months old right before the next
+            # advance estimate → the newest available value is only STALE beyond these limits
+            stale_days = 5 if sid in DAILY else 220 if sid == GDP_QOQ_SAAR else 100
             quality = DataQuality.FRESH if (end - d_last).days <= stale_days else DataQuality.STALE
-            fact = Fact(latest, f"fred:{fid}", ts, datetime.now(tz=timezone.utc), quality, DataMode.LIVE)
+            fact = Fact(latest, f"fred:{fid}", ts, datetime.now(tz=timezone.utc), quality, DataMode.LIVE,
+                        note=f"발표 시각 미상 — ALFRED 빈티지 {vintage.isoformat()} 기준 공개값만 사용")
             lag = 20 if sid in DAILY else 1
             prev = vals[-1 - lag] if len(vals) > lag else None
             ch = latest - prev if prev is not None else None

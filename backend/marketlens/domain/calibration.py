@@ -14,7 +14,7 @@ from datetime import date
 from statistics import fmean
 from typing import Mapping, Sequence
 
-from marketlens.domain.evaluation import OutcomeSample, factor_ic, is_mature, spearman
+from marketlens.domain.evaluation import OutcomeSample, factor_ic, is_mature, non_overlapping, spearman
 from marketlens.domain.scoring import COMPONENTS
 
 
@@ -47,16 +47,17 @@ def propose_weights(
     cfg: CalibrationConfig | None = None,
 ) -> WeightProposal:
     cfg = cfg or CalibrationConfig()
-    mature = [s for s in samples if is_mature(s.rec_day, cfg.horizon, as_of) and s.forward_returns.get(cfg.horizon) is not None]
+    # overlapping holding periods of the same ticker are not independent → thin them first
+    mature = [s for s in non_overlapping(samples, cfg.horizon) if is_mature(s.rec_day, cfg.horizon, as_of) and s.forward_returns.get(cfg.horizon) is not None]
     if len(mature) < cfg.min_samples:
-        return WeightProposal("INSUFFICIENT_SAMPLES", dict(current), dict(current), {}, len(mature), f"{len(mature)} mature samples < {cfg.min_samples}")
+        return WeightProposal("INSUFFICIENT_SAMPLES", dict(current), dict(current), {}, len(mature), f"성숙 표본 {len(mature)}개 < 최소 {cfg.min_samples}개")
     ics: dict[str, float | None] = {}
     for f in COMPONENTS:
         r = factor_ic(mature, f, cfg.horizon, as_of, min_samples=cfg.min_samples)
         ics[f] = r.ic
     valid = {f: v for f, v in ics.items() if v is not None}
     if not valid:
-        return WeightProposal("NO_SIGNAL", dict(current), dict(current), ics, len(mature), "no factor IC could be computed")
+        return WeightProposal("NO_SIGNAL", dict(current), dict(current), ics, len(mature), "요인 IC를 계산할 수 없음")
     mean_ic = fmean(valid.values())
     # desired direction: raise factors with above-average IC, lower the others
     desired: dict[str, float] = {}
@@ -76,7 +77,7 @@ def propose_weights(
         scale = pos / neg
         desired = {f: (d * scale if d < 0 else d) for f, d in desired.items()}
     new = {f: round(current[f] + desired[f], 4) for f in current}
-    return WeightProposal("PROPOSED", dict(current), new, ics, len(mature), f"mean IC {mean_ic:.4f} over {len(mature)} samples")
+    return WeightProposal("PROPOSED", dict(current), new, ics, len(mature), f"평균 IC {mean_ic:.4f}, 표본 {len(mature)}개")
 
 
 def composite(sample: OutcomeSample, weights: Mapping[str, float]) -> float | None:
@@ -105,11 +106,19 @@ class ShadowComparison:
     reasons: tuple[str, ...]
 
 
-def _top_quintile_stats(scored: list[tuple[float, float]]) -> tuple[float | None, float | None]:
-    if len(scored) < 10:
+def _top_quintile_stats(scored: list[tuple[date, float, float]]) -> tuple[float | None, float | None]:
+    """Top-quintile hit rate and average downside, formed cross-sectionally *per recommendation date*."""
+    by_day: dict[date, list[tuple[float, float]]] = {}
+    for d, sc, r in scored:
+        by_day.setdefault(d, []).append((sc, r))
+    rets: list[float] = []
+    for rows in by_day.values():
+        if len(rows) < 5:
+            continue
+        top = sorted(rows, key=lambda x: -x[0])[: max(1, len(rows) // 5)]
+        rets.extend(r for _, r in top)
+    if len(rets) < 5:
         return None, None
-    top = sorted(scored, key=lambda x: -x[0])[: max(2, len(scored) // 5)]
-    rets = [r for _, r in top]
     hit = sum(1 for r in rets if r > 0) / len(rets)
     downside = fmean([min(0.0, r) for r in rets])
     return hit, downside
@@ -126,39 +135,39 @@ def compare_shadow(
     """Out-of-sample comparison: only recommendations made after the shadow start are used."""
     cfg = cfg or CalibrationConfig()
     oos = [
-        s for s in samples
+        s for s in non_overlapping(samples, cfg.horizon)
         if s.rec_day >= shadow_started and is_mature(s.rec_day, cfg.horizon, as_of) and s.forward_returns.get(cfg.horizon) is not None
     ]
-    prod_pts: list[tuple[float, float]] = []
-    sh_pts: list[tuple[float, float]] = []
+    prod_pts: list[tuple[date, float, float]] = []
+    sh_pts: list[tuple[date, float, float]] = []
     for s in oos:
         r = s.forward_returns[cfg.horizon]
         cp, cs = composite(s, production), composite(s, shadow)
         if r is None or cp is None or cs is None:
             continue
-        prod_pts.append((cp, r))
-        sh_pts.append((cs, r))
+        prod_pts.append((s.rec_day, cp, r))
+        sh_pts.append((s.rec_day, cs, r))
     n = len(prod_pts)
-    ic_p = spearman([a for a, _ in prod_pts], [b for _, b in prod_pts]) if n >= 3 else None
-    ic_s = spearman([a for a, _ in sh_pts], [b for _, b in sh_pts]) if n >= 3 else None
+    ic_p = spearman([a for _, a, _ in prod_pts], [b for _, _, b in prod_pts]) if n >= 3 else None
+    ic_s = spearman([a for _, a, _ in sh_pts], [b for _, _, b in sh_pts]) if n >= 3 else None
     hp, dp = _top_quintile_stats(prod_pts)
     hs, ds = _top_quintile_stats(sh_pts)
     reasons: list[str] = []
     promote = True
     if n < cfg.min_shadow_samples:
         promote = False
-        reasons.append(f"only {n} out-of-sample samples (< {cfg.min_shadow_samples})")
+        reasons.append(f"표본 외 표본 {n}개 (< {cfg.min_shadow_samples})")
     if ic_p is None or ic_s is None or ic_s - ic_p < cfg.min_ic_improvement:
         promote = False
-        reasons.append("IC improvement below threshold")
+        reasons.append("IC 개선폭이 기준 미만")
     if hp is not None and hs is not None and hs < hp - cfg.max_hit_rate_drop:
         promote = False
-        reasons.append("hit rate worse than production")
+        reasons.append("적중률이 운영 모델보다 나쁨")
     if dp is not None and ds is not None and ds < dp - cfg.max_downside_worsening:
         promote = False
-        reasons.append("downside (drawdown proxy) worse than production")
+        reasons.append("하방 위험(낙폭 대용치)이 운영 모델보다 나쁨")
     if promote:
-        reasons.append("all promotion gates passed")
+        reasons.append("모든 승격 조건 통과")
     return ShadowComparison(n, ic_p, ic_s, hp, hs, dp, ds, promote, tuple(reasons))
 
 

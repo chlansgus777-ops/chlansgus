@@ -43,6 +43,7 @@ class Issue:
     market_awareness: float  # 0..1 (repetition / coverage)
     confidence: float  # 0..1
     evidence_id: str | None = None
+    news_ids: tuple[str, ...] = ()  # source articles clustered into this issue
 
     @property
     def affected_companies(self) -> tuple[str, ...]:
@@ -145,7 +146,7 @@ def compute_issue_impacts(
                 hop_desc = " → ".join(
                     f"{a} [{et.value}] {b}" for a, b, et in zip(p.path[:-1], p.path[1:], p.edge_types)
                 )
-                mech.append(f"transmitted via {hop_desc} ({p.hops}-hop)")
+                mech.append(f"{hop_desc} 경로로 전달 ({p.hops}단계)")
             horizons: list[HorizonImpact] = []
             for h in (Horizon.IMMEDIATE, Horizon.SHORT, Horizon.SWING, Horizon.FUNDAMENTAL):
                 val = mult * base_strength * profile[h]
@@ -170,18 +171,18 @@ def aggregate_issue_score(impacts: list[CompanyIssueImpact], horizon: Horizon = 
 
 # Category → default causal chain templates used when an issue is structured by rules.
 CAUSAL_TEMPLATES: Mapping[IssueCategory, tuple[str, ...]] = {
-    IssueCategory.EXPORT_CONTROL: ("addressable market in restricted region ↓", "revenue opportunity ↓", "EPS revision risk ↑", "valuation pressure"),
-    IssueCategory.TARIFF: ("input/import cost ↑", "gross margin pressure", "EPS revision risk ↑"),
-    IssueCategory.AI: ("AI infrastructure demand ↑", "order/backlog visibility ↑", "revenue estimates ↑"),
-    IssueCategory.RATES: ("discount rate ↑", "long-duration equity multiples ↓"),
-    IssueCategory.INFLATION: ("inflation expectations ↑", "policy-rate path ↑", "multiple pressure"),
-    IssueCategory.OIL: ("energy prices ↑", "producer revenue ↑ / consumer & transport costs ↑"),
-    IssueCategory.EARNINGS: ("reported results vs consensus", "estimate revisions", "re-rating"),
-    IssueCategory.GUIDANCE: ("outlook vs consensus", "forward estimate revisions", "re-rating"),
-    IssueCategory.ANTITRUST: ("business-practice constraint risk", "long-term margin/growth risk"),
-    IssueCategory.DILUTION: ("share count ↑", "per-share value ↓"),
-    IssueCategory.BUYBACK: ("share count ↓", "per-share value ↑"),
-    IssueCategory.SUPPLY_CHAIN: ("supply constraint", "shipment timing risk", "near-term revenue risk"),
-    IssueCategory.COMPETITION: ("competitive intensity ↑", "share/pricing pressure"),
-    IssueCategory.MA: ("deal terms", "strategic fit / financing", "re-rating"),
+    IssueCategory.EXPORT_CONTROL: ("규제 지역 판매 가능 시장 ↓", "매출 기회 ↓", "EPS 하향 위험 ↑", "밸류에이션 압박"),
+    IssueCategory.TARIFF: ("원가·수입 비용 ↑", "매출총이익률 압박", "EPS 하향 위험 ↑"),
+    IssueCategory.AI: ("AI 인프라 수요 ↑", "수주·백로그 가시성 ↑", "매출 추정치 ↑"),
+    IssueCategory.RATES: ("할인율 ↑", "장기 성장주 멀티플 ↓"),
+    IssueCategory.INFLATION: ("인플레이션 기대 ↑", "정책금리 경로 ↑", "멀티플 압박"),
+    IssueCategory.OIL: ("에너지 가격 ↑", "생산자 매출 ↑ / 소비·운송 비용 ↑"),
+    IssueCategory.EARNINGS: ("실적 vs 컨센서스", "추정치 수정", "재평가"),
+    IssueCategory.GUIDANCE: ("가이던스 vs 컨센서스", "선행 추정치 수정", "재평가"),
+    IssueCategory.ANTITRUST: ("영업 관행 제약 위험", "장기 마진·성장 위험"),
+    IssueCategory.DILUTION: ("주식 수 ↑", "주당 가치 ↓"),
+    IssueCategory.BUYBACK: ("주식 수 ↓", "주당 가치 ↑"),
+    IssueCategory.SUPPLY_CHAIN: ("공급 제약", "출하 시점 위험", "단기 매출 위험"),
+    IssueCategory.COMPETITION: ("경쟁 강도 ↑", "점유율·가격 압박"),
+    IssueCategory.MA: ("거래 조건", "전략 적합성·자금 조달", "재평가"),
 }

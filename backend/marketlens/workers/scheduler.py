@@ -44,6 +44,8 @@ class BackgroundScheduler:
                 self._last_scan = now
         day = to_ny(now).date()
         if session == TradingSession.AFTER_HOURS and self._last_eval_day != day:
+            if getattr(self.svc, "store", None) is not None:
+                self.svc.sync_market()  # LIVE: pull today's grouped daily bars / shares before evaluating
             ev = EvaluationService(self.svc)
             ev.update_outcomes(now)
             ev.update_paper(now)

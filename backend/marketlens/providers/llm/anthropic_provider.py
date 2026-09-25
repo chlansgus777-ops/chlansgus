@@ -27,13 +27,24 @@ class AnthropicProvider:
             self._client = anthropic.Anthropic(api_key=api_key, max_retries=2, timeout=120.0)
         self.available = self._client is not None
 
+    def model_for(self, tier: str) -> str:
+        return self.deep_model if tier == "deep" else self.fast_model
+
+    def _effort(self, model: str, tier: str) -> str | None:
+        return None if model in _NO_EFFORT_MODELS else ("high" if tier == "deep" else "low")
+
+    def signature(self, tier: str) -> str:
+        m = self.model_for(tier)
+        return f"anthropic|{m}|effort={self._effort(m, tier)}|fallbacks={m in _FALLBACK_MODELS}"
+
     def complete_json(self, system: str, user: str, schema: dict[str, Any], tier: str, max_tokens: int = 4000) -> LLMResponse:
         if not self.available:
-            raise LLMUnavailable("ANTHROPIC_API_KEY not set")
-        model = self.deep_model if tier == "deep" else self.fast_model
+            raise LLMUnavailable("ANTHROPIC_API_KEY 미설정")
+        model = self.model_for(tier)
         output_config: dict[str, Any] = {"format": {"type": "json_schema", "schema": schema}}
-        if model not in _NO_EFFORT_MODELS:
-            output_config["effort"] = "high" if tier == "deep" else "low"
+        effort = self._effort(model, tier)
+        if effort is not None:
+            output_config["effort"] = effort
         kwargs: dict[str, Any] = dict(
             model=model,
             max_tokens=max_tokens,

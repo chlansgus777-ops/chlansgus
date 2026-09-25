@@ -34,15 +34,18 @@ def test_forward_return_none_until_mature_and_ignores_future_bars():
     assert r == pytest.approx(105 / 100 - 1)
 
 
-def samples(n_days=30, per_day=10, signal="fundamental", noise=0.0, seed=1, start=date(2026, 1, 5)):
+def samples(n_days=30, per_day=10, signal="fundamental", noise=0.0, seed=1, start=date(2026, 1, 5), repeat_tickers=False):
+    """Synthetic outcome samples. By default every sample is a different company (independent evidence);
+    ``repeat_tickers=True`` re-recommends the same 10 tickers every day (overlapping holding periods)."""
     rnd = random.Random(seed)
     out = []
     d = start
-    for _ in range(n_days):
+    for day in range(n_days):
         for i in range(per_day):
             f = {c: rnd.random() for c in COMPONENTS}
             ret = (f[signal] - 0.5) * 0.1 + rnd.gauss(0, noise)
-            out.append(OutcomeSample(f"T{i}", d, f, {1: ret, 5: ret, 20: ret, 60: ret}, "Tech" if i % 2 else "Energy", "Risk On"))
+            name = f"T{i}" if repeat_tickers else f"T{i}-{day}"
+            out.append(OutcomeSample(name, d, f, {1: ret, 5: ret, 20: ret, 60: ret}, "Tech" if i % 2 else "Energy", "Risk On"))
         d = add_trading_days(d, 1)
     return out
 
@@ -65,6 +68,15 @@ def test_ic_excludes_immature_samples():
 def test_calibration_requires_minimum_samples():
     p = propose_weights(samples(n_days=5), DEFAULT_WEIGHTS, date(2026, 9, 1), CalibrationConfig(min_samples=100))
     assert p.status == "INSUFFICIENT_SAMPLES" and p.new_weights == p.old_weights
+
+
+def test_overlapping_repeated_recommendations_do_not_count_as_independent_samples():
+    """300 daily re-recommendations of the same 10 tickers are ~20 independent 20-day observations."""
+    rep = samples(noise=0.02, repeat_tickers=True)
+    p = propose_weights(rep, DEFAULT_WEIGHTS, date(2026, 9, 1), CalibrationConfig(min_samples=100))
+    assert len(rep) == 300 and p.status == "INSUFFICIENT_SAMPLES" and p.samples <= 20
+    ind = propose_weights(samples(noise=0.02), DEFAULT_WEIGHTS, date(2026, 9, 1), CalibrationConfig(min_samples=100))
+    assert ind.status == "PROPOSED" and ind.samples == 300
 
 
 def test_calibration_changes_are_bounded_and_zero_sum():

@@ -30,6 +30,7 @@ from marketlens.providers.mock.world import ANCHOR, MockWorld, _rng
 
 MOCK = DataMode.MOCK
 SRC = "mock"
+DILUTION = 1.01  # weighted diluted shares ≈ 1% above basic shares outstanding
 
 
 class _MockBase:
@@ -157,12 +158,12 @@ class MockFundamentalProvider(_MockBase):
                 QuarterlyFinancials(
                     period_end=pe, filed_date=filed, fiscal_label=f"Q{(pe.month - 1) // 3 + 1} {pe.year}", source=SRC,
                     revenue=round(rev, 0), gross_profit=round(rev * gm, 0), operating_income=round(rev * om, 0),
-                    net_income=round(ni, 0), eps_diluted=round(ni / shares, 4), operating_cash_flow=round(ocf, 0),
+                    net_income=round(ni, 0), eps_diluted=round(ni / (shares * DILUTION), 4), operating_cash_flow=round(ocf, 0),
                     capex=round(capex, 0), sbc=round(rev * (0.12 if "Software" in s.industry else 0.03), 0),
                     depreciation_amortization=round(rev * 0.05, 0), cash=round(rev_ttm_est * (0.1 + 0.4 * s.quality), 0),
                     total_debt=round(rev_ttm_est * (0.6 - 0.4 * s.quality), 0),
                     total_equity=round(mcap_anchor / max(1.5, 3 + 8 * s.quality) * (1 + 0.02 * k), 0),
-                    shares_diluted=round(shares, 0),
+                    shares_diluted=round(shares * DILUTION, 0), shares_outstanding=round(shares, 0),
                     inventory=round(rev * (0.5 - 0.2 * s.quality) * (1 + r.gauss(0, 0.03)), 0), extras=extras,
                 )
             )
@@ -289,10 +290,10 @@ class MockNewsProvider(_MockBase):
         now = self.world.now
         items = [
             NewsItem("MOCKNEWS-001", now - timedelta(hours=20), "(MOCK) Hyperscaler raises AI data-center capex plan",
-                     "Synthetic: a large cloud provider lifts its capital expenditure outlook for AI infrastructure.",
+                     "Synthetic: Microsoft (MSFT) lifts its capital expenditure outlook for AI infrastructure.",
                      "https://example.invalid/mock/1", "mock-wire", "WIRE", ("MSFT",), body="Synthetic article body."),
             NewsItem("MOCKNEWS-002", now - timedelta(hours=30), "(MOCK) New export restrictions on advanced AI chips to China",
-                     "Synthetic: government expands export licensing for advanced accelerators.",
+                     "Synthetic: government expands export licensing for advanced accelerators sold by NVIDIA and AMD.",
                      "https://example.invalid/mock/2", "mock-gov", "OFFICIAL", ("NVDA", "AMD"), body=INJECTION_TEXT),
             NewsItem("MOCKNEWS-003", now - timedelta(hours=10), "(MOCK) Oil jumps on supply disruption",
                      "Synthetic: crude prices rise after a pipeline outage.", "https://example.invalid/mock/3",
@@ -342,11 +343,24 @@ class MockOptionsProvider(_MockBase):
         hist = tuple(round(s.vol * math.exp(r.gauss(0, 0.2)), 4) for _ in range(252))
         iv = round(s.vol * (1 + r.gauss(0.05, 0.15)), 4)
         return OptionsSnapshot(
-            source=SRC, atm_iv=iv, iv_history_1y=hist, put_call_volume=round(r.uniform(0.5, 1.4), 2),
+            source=SRC, as_of=self.world.last_session, atm_iv=iv, iv_history_1y=hist, put_call_volume=round(r.uniform(0.5, 1.4), 2),
             put_call_oi=round(r.uniform(0.6, 1.3), 2), skew_25d=round(r.gauss(0.03, 0.02), 4),
             atm_straddle_price=round(px * iv * math.sqrt(30 / 365) / 0.85 * 0.85, 2), underlying_price=px,
             days_to_expiry=30, call_wall=round(px * 1.1, 0), put_wall=round(px * 0.9, 0),
         )
+
+
+def _settlement_before(d: date) -> date:
+    """FINRA settlement dates are mid-month and month-end; publication follows ~7 business days later."""
+    pub_lag = timedelta(days=11)
+    cands = []
+    for back in range(0, 3):
+        y, m = d.year, d.month - back
+        while m <= 0:
+            y, m = y - 1, m + 12
+        nxt = date(y + (m == 12), m % 12 + 1, 1)
+        cands += [date(y, m, 15), nxt - timedelta(days=1)]
+    return max(c for c in cands if c + pub_lag <= d)
 
 
 class MockOwnershipProvider(_MockBase):
@@ -358,6 +372,7 @@ class MockOwnershipProvider(_MockBase):
         return OwnershipSnapshot(
             source=SRC,
             short_interest_pct_float=round(max(0.005, 0.12 * (1 - s.quality) + r.gauss(0, 0.02)), 4),
+            short_interest_settlement=_settlement_before(self.world.last_session),
             days_to_cover=round(r.uniform(0.8, 6.0), 2),
             short_interest_change=round(r.gauss(0, 0.1), 4),
             insider_net_buy_value_90d=round(r.gauss(-2e6, 5e6), 0),

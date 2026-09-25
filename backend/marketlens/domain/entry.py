@@ -73,8 +73,10 @@ def build_entry_plan(
     notes: list[str] = []
 
     # --- structural support: nearest level below price within max_stop_atr ATRs
-    candidates: list[tuple[float, str]] = [(s, "swing low") for s in tech.supports]
-    for lvl, name in ((tech.sma50, "SMA50"), (tech.sma20, "SMA20"), (tech.anchored_vwap, "anchored VWAP"), (tech.sma200, "SMA200")):
+    # every support candidate must lie below the CURRENT price (swing levels were computed from the last
+    # close, which differs from the current price after a gap)
+    candidates: list[tuple[float, str]] = [(s, "스윙 저점") for s in tech.supports if s < price]
+    for lvl, name in ((tech.sma50, "SMA50"), (tech.sma20, "SMA20"), (tech.anchored_vwap, "앵커드 VWAP"), (tech.sma200, "SMA200")):
         if lvl is not None and lvl < price:
             candidates.append((lvl, name))
     near = [(lvl, n) for lvl, n in candidates if price - lvl <= cfg.max_stop_atr * a]
@@ -82,10 +84,10 @@ def build_entry_plan(
     if near:
         support, sname = max(near, key=lambda x: x[0])
         stop = support - cfg.stop_atr_buffer * a
-        notes.append(f"stop {cfg.stop_atr_buffer} ATR below {sname} {support:.2f}")
+        notes.append(f"손절가: {sname} {support:.2f} 아래 {cfg.stop_atr_buffer} ATR")
     else:
         stop = price - cfg.fallback_stop_atr * a
-        notes.append(f"no support within {cfg.max_stop_atr} ATR → volatility stop {cfg.fallback_stop_atr} ATR")
+        notes.append(f"{cfg.max_stop_atr} ATR 이내 지지선 없음 → 변동성 손절 {cfg.fallback_stop_atr} ATR")
 
     # --- targets: resistances at least min_target_atr above price
     res = sorted(r for r in tech.resistances if r >= price + cfg.min_target_atr * a)
@@ -95,16 +97,16 @@ def build_entry_plan(
     if res:
         resistance = res[0]
         t1 = res[0]
-        notes.append(f"target 1 at resistance {t1:.2f}")
+        notes.append(f"1차 목표가: 저항선 {t1:.2f}")
     else:
         t1 = price + cfg.fallback_target1_atr * a
-        notes.append(f"no overhead resistance → target 1 = {cfg.fallback_target1_atr} ATR (price discovery)")
-    if len(res) >= 2:
+        notes.append(f"상단 저항 없음 → 1차 목표가 = 현재가 + {cfg.fallback_target1_atr} ATR (신고가 구간)")
+    if len(res) >= 2 and res[1] > t1:
         t2 = res[1]
     else:
         t2 = max(t1 + 1.5 * a, price + cfg.fallback_target2_atr * a)
     if expected_move is not None and expected_move > 0:
-        notes.append(f"options-implied move ±{expected_move:.1%} (context for target realism)")
+        notes.append(f"옵션 내재 예상변동폭 ±{expected_move:.1%} (목표가 현실성 참고)")
 
     max_buy = (t1 + cfg.min_rr * stop) / (1 + cfg.min_rr)
     ideal = (support + cfg.ideal_entry_atr_above_support * a) if support is not None else min(price, max_buy)
@@ -112,7 +114,10 @@ def build_entry_plan(
     low = min(ideal, max_buy)
     add_low = support if support is not None else stop + 0.5 * a
     add_high = add_low + cfg.add_zone_atr * a
-    notes.append(f"max buy {max_buy:.2f} derived from min R/R {cfg.min_rr}")
+    notes.append(f"최대 매수가 {max_buy:.2f} = 최소 손익비 {cfg.min_rr} 에서 역산")
+    # price-plan invariant: stop < current price < target1 < target2 (never publish an inconsistent plan)
+    if not (stop < price < t1 < t2 and stop < max_buy < t1):
+        return None
     return EntryPlan(
         current_price=price,
         ideal_entry=round(ideal, 2),

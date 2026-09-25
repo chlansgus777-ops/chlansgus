@@ -46,9 +46,11 @@ def test_scan_persists_audit_trail(mock_svc):
     with mock_svc.sf() as s:
         scan = repo.latest_scan(s)
         recs = repo.recommendations_for_scan(s, scan.id)
-        assert scan.stages[0]["input_count"] == 200 and len(recs) > 0
+        as_of_universe = mock_svc.registry.chain("universe").call("list_securities", NOW.date()).value
+        assert scan.stages[0]["input_count"] == len(as_of_universe) and len(recs) > 0
+        assert all(x.delisted_at is None or x.delisted_at > NOW.date() for x in as_of_universe)  # historical universe
         r = recs[0]
-        for f in ("scoring_model_version", "decision_model_version", "agent_prompt_version", "provider_version", "config_version", "schema_version", "input_fingerprint"):
+        for f in ("scoring_model_version", "decision_model_version", "agent_prompt_version", "provider_version", "config_version", "schema_version", "input_fingerprint", "code_version", "app_version"):
             assert getattr(r, f)
         assert r.mode == "MOCK" and r.inputs and r.result and r.model_config_snapshot["scoring_model.toml"]
         assert r.price_source == "mock" and r.session
@@ -94,7 +96,7 @@ def test_rescan_with_unchanged_data_is_stable(mock_svc):
 
 def test_api_endpoints_and_mock_banner(mock_svc):
     app = create_app(mock_svc.settings, service=mock_svc, run_migrations=False)
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-MarketLens-Client": "test"}) as c:
         sys = c.get("/api/system").json()
         assert sys["mode"] == "MOCK" and sys["mock_banner"] is True
         opp = c.get("/api/opportunities").json()
@@ -168,6 +170,37 @@ def test_universe_and_history_are_persisted(mock_svc):
     from marketlens.infrastructure.db.models import FundamentalVintageRow, PriceBarRow, SecurityRow
 
     with mock_svc.sf() as s:
-        assert s.scalar(select(func.count()).select_from(SecurityRow)) == 200
+        assert s.scalar(select(func.count()).select_from(SecurityRow)) == 200  # delisted names stay in history
+        assert s.scalar(select(func.count()).select_from(SecurityRow).where(SecurityRow.active.is_(False))) >= 1
         assert s.scalar(select(func.count()).select_from(FundamentalVintageRow)) > 0
         assert s.scalar(select(func.count()).select_from(PriceBarRow)) > 0
+
+
+def test_stored_recommendations_are_rejudged_for_current_freshness():
+    """A BUY stored last week must not look like an actionable BUY today (저장 추천의 현재 freshness 재판정)."""
+    svc = make_service(universe=80)
+    svc.run_scan(run_committee=False)
+    app = create_app(svc.settings, service=svc, run_migrations=False)
+    with TestClient(app, headers={"X-MarketLens-Client": "test"}) as c:
+        rows = c.get("/api/opportunities").json()["rows"]
+        assert rows and all(r["current_status"] == "CURRENT" for r in rows)
+        svc._clock["t"] = NOW + timedelta(days=7)  # a week later, nothing re-run
+        later = c.get("/api/opportunities").json()["rows"]
+        assert all(r["current_status"] == "EXPIRED" and r["sessions_since"] >= 3 for r in later)
+        assert all(r["actionable_now"] in (False, None) for r in later)
+        assert all("추천 당시" in r["current_status_reason"] for r in later)
+        d = c.get(f"/api/stocks/{later[0]['ticker']}").json()
+        assert d["recommendation"]["current_status"] == "EXPIRED"
+        assert d["versions"]["code"] and d["versions"]["input_fingerprint"]
+
+
+def test_portfolio_snapshot_uses_one_valuation_session():
+    svc = make_service(universe=80)
+    app = create_app(svc.settings, service=svc, run_migrations=False)
+    with TestClient(app, headers={"X-MarketLens-Client": "test"}) as c:
+        body = c.put("/api/portfolio", json={"cash": 50000, "holdings": [{"ticker": "NVDA", "quantity": 10, "cost_basis": 100}, {"ticker": "JPM", "quantity": 20, "cost_basis": 150}]}).json()
+        assert body["valuation_day"] and body["currency"] == "USD"
+        assert {h["price_day"] for h in body["holdings"]} == {body["valuation_day"]}  # consistent prices
+        assert body["nav"] == pytest.approx(body["cash"] + body["invested_value"], abs=0.01)
+        assert abs(sum(h["weight"] for h in body["holdings"]) + body["cash"] / body["nav"] - 1) < 1e-3
+        assert body["hhi"] > 0 and body["beta"] is not None

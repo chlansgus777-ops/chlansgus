@@ -85,6 +85,13 @@ def period_return(closes: Sequence[float], n: int) -> float | None:
     return closes[-1] / closes[-n - 1] - 1
 
 
+def aligned_closes(bars: Sequence[Bar], bench: Sequence[Bar]) -> tuple[list[float], list[float]]:
+    """Closes of both series on the dates they share (never align by array position)."""
+    b = {x.day: x.close for x in bench}
+    pairs = [(x.close, b[x.day]) for x in bars if x.day in b]
+    return [p[0] for p in pairs], [p[1] for p in pairs]
+
+
 def relative_strength(closes: Sequence[float], bench: Sequence[float], n: int) -> float | None:
     """Excess return vs benchmark over ``n`` bars (e.g. 0.05 = +5pp)."""
     r = period_return(closes, n)
@@ -176,7 +183,7 @@ def _stdev(xs: Sequence[float]) -> float | None:
 
 def compute_technicals(
     bars: Sequence[Bar],
-    benchmark_closes: Sequence[float] | None = None,
+    benchmark: Sequence[Bar] | None = None,
     anchor: date | None = None,
     level_tolerance_pct: float = 1.5,
 ) -> TechnicalSnapshot:
@@ -198,7 +205,7 @@ def compute_technicals(
         gap = bars[-1].open / bars[-2].close - 1
     avg_vol = sum(vols[-20:]) / 20 if len(vols) >= 20 else None
     avg_dv = sum(b.close * b.volume for b in bars[-20:]) / 20 if len(bars) >= 20 else None
-    bench = list(benchmark_closes) if benchmark_closes else None
+    rs_a, rs_b = aligned_closes(bars, benchmark) if benchmark else ([], [])
     return TechnicalSnapshot(
         last_close=last,
         sma20=sma(closes, 20),
@@ -219,8 +226,8 @@ def compute_technicals(
         gap_pct=gap,
         anchored_vwap=anchored_vwap(bars, anchor) if anchor else None,
         anchor_date=anchor,
-        rs_3m=relative_strength(closes, bench, 63) if bench else None,
-        rs_6m=relative_strength(closes, bench, 126) if bench else None,
+        rs_3m=relative_strength(rs_a, rs_b, 63) if rs_a else None,
+        rs_6m=relative_strength(rs_a, rs_b, 126) if rs_a else None,
         return_1m=period_return(closes, 21),
         return_3m=period_return(closes, 63),
         volatility_20d=(sd * (252**0.5)) if sd is not None else None,

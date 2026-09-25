@@ -1,6 +1,6 @@
 # MarketLens sector models — version controlled. Values are fractions (0.20 = 20%).
 # bad → subscore 0, good → subscore 1 (linear). If good < bad, lower is better.
-version = "sector-models-1.0.0"
+version = "sector-models-1.1.0"  # 1.1.0: energy keywords no longer capture "Utilities—Regulated Gas"
 
 [[model]]
 id = "semiconductor"
@@ -164,7 +164,7 @@ valuation = [
 id = "energy"
 name = "Energy"
 sectors = ["Energy"]
-industry_keywords = ["oil", "gas"]
+industry_keywords = ["oil & gas", "oil and gas", "crude", "coal"]
 primary_multiple = "ev_ebitda"
 rationale = "commodity price takers; FCF through the cycle, balance sheet and capital discipline"
 fundamental = [

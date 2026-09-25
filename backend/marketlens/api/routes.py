@@ -8,23 +8,35 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from marketlens import __version__
 from marketlens.application.codec import encode
-from marketlens.application.evaluation_service import EvaluationService
+from marketlens.application.evaluation_service import PAPER_DISCLAIMER, EvaluationService
 from marketlens.application.services import MarketLensService
-from marketlens.config import AGENT_PROMPT_VERSION, SCHEMA_VERSION
-from marketlens.domain.enums import BULLISH_ACTIONS, Horizon
+from marketlens.config import AGENT_PROMPT_VERSION, SCHEMA_VERSION, code_version
+from marketlens.domain.enums import ACTION_KO, BULLISH_ACTIONS, Action, Horizon
 from marketlens.domain.issues import compute_issue_impacts
 from marketlens.domain.macro import detect_regimes, factor_moves, primary_regime
+from marketlens.domain.market_calendar import last_completed_session, to_ny
+from marketlens.domain.portfolio import portfolio_snapshot
 from marketlens.infrastructure.db import repository as repo
 
 router = APIRouter()
+TICKER_RE = r"^[A-Za-z][A-Za-z0-9.\-]{0,9}$"
 
 
 def svc(req: Request) -> MarketLensService:
     s = req.app.state.service
     if s is None:
-        raise HTTPException(503, "service not ready")
+        raise HTTPException(503, "서비스 준비 중")
     return s
+
+
+def _ticker(t: str) -> str:
+    import re
+
+    if not re.match(TICKER_RE, t):
+        raise HTTPException(422, f"올바르지 않은 종목 코드: {t[:12]}")
+    return t.upper()
 
 
 # ---------------------------------------------------------------- system
@@ -38,6 +50,8 @@ def system(req: Request) -> dict[str, Any]:
         "mock_banner": s.mode.value == "MOCK",
         "now": s.now().isoformat(),
         "versions": {
+            "app_version": __version__,
+            "code_version": code_version(),
             "scoring_model_version": cfg.scoring_model.version,
             "decision_model_version": cfg.decision_model_version,
             "agent_prompt_version": AGENT_PROMPT_VERSION,
@@ -54,12 +68,21 @@ def system(req: Request) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- opportunities / scan
-def _row_summary(r: Any) -> dict[str, Any]:
+def _row_summary(r: Any, s: MarketLensService | None = None) -> dict[str, Any]:
     res = r.result
     entry = res.get("entry") or {}
     er = res.get("event_risk") or {}
     nxt = (er.get("nearest") or {})
+    status = s.recommendation_status(r) if s is not None else None
+    bullish = r.final_action in {a.value for a in BULLISH_ACTIONS}
     return {
+        "current_status": status.status if status else None,  # CURRENT | AGING | EXPIRED (re-judged now)
+        "current_status_reason": status.reason_ko if status else None,
+        "sessions_since": status.sessions_since if status else None,
+        "actionable_now": bool(status and status.status == "CURRENT" and r.data_quality in ("FRESH", "DELAYED")) if bullish else None,
+        "action_ko": ACTION_KO.get(Action(r.final_action), r.final_action),
+        "valuation_price_basis": res.get("valuation_price_basis"),
+        "sector_known": res.get("sector_known", True),
         "id": r.id, "rank": r.rank, "ticker": r.ticker, "company": res["security"]["company_name"], "sector": r.sector,
         "sector_model": r.sector_model, "price": r.price, "session": r.session, "price_timestamp": r.price_timestamp.isoformat() if r.price_timestamp else None,
         "price_source": r.price_source, "price_quality": r.price_quality, "score": r.score, "confidence": r.confidence,
@@ -75,11 +98,12 @@ def _row_summary(r: Any) -> dict[str, Any]:
 def opportunities(req: Request) -> dict[str, Any]:
     s = svc(req)
     with s.sf() as ss:
-        scan = repo.latest_scan(ss)
+        scan = repo.latest_scan(ss, mode=s.mode.value)
         if scan is None:
             return {"scan": None, "rows": []}
         rows = repo.recommendations_for_scan(ss, scan.id)
-        return {"scan": {"id": scan.id, "as_of": scan.as_of.isoformat(), "mode": scan.mode, "stages": scan.stages, "excluded": scan.excluded_count, "scoring_model_version": scan.scoring_model_version}, "rows": [_row_summary(r) for r in rows]}
+        return {"scan": {"id": scan.id, "as_of": scan.as_of.isoformat(), "mode": scan.mode, "stages": scan.stages, "excluded": scan.excluded_count, "scoring_model_version": scan.scoring_model_version},
+                "rows": [_row_summary(r, s) for r in rows]}
 
 
 @router.post("/scan")
@@ -91,24 +115,30 @@ def run_scan(req: Request, committee: bool = True) -> dict[str, Any]:
 @router.get("/stocks/{ticker}")
 def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
     s = svc(req)
-    t = ticker.upper()
+    t = _ticker(ticker)
+    mode = s.mode.value
     if refresh:
         s.analyze(t, run_committee=False, persist=True)
     with s.sf() as ss:
-        row = repo.latest_recommendation(ss, t)
+        row = repo.latest_recommendation(ss, t, mode=mode)
         if row is None:
-            s.analyze(t, run_committee=False, persist=True)
-            row = repo.latest_recommendation(ss, t)
+            try:
+                s.analyze(t, run_committee=False, persist=True)
+            except KeyError:
+                raise HTTPException(404, f"{t}: 분석 시점의 유니버스에 없는 종목") from None
+            row = repo.latest_recommendation(ss, t, mode=mode)
         if row is None:
-            raise HTTPException(404, f"{t} unavailable")
+            raise HTTPException(404, f"{t}: 분석 결과 없음")
         com = repo.committee_for(ss, row.id)
-        history = [{"id": h.id, "as_of": h.as_of.isoformat(), "score": h.score, "action": h.final_action} for h in repo.recommendation_history(ss, t, 30)]
+        history = [{"id": h.id, "as_of": h.as_of.isoformat(), "score": h.score, "action": h.final_action} for h in repo.recommendation_history(ss, t, 30, mode=mode)]
         return {
-            "recommendation": _row_summary(row),
+            "recommendation": _row_summary(row, s),
             "analysis": row.result,
             "committee": com.payload if com else None,
             "history": history,
-            "versions": {"scoring": row.scoring_model_version, "decision": row.decision_model_version, "prompt": row.agent_prompt_version, "config": row.config_version, "provider": row.provider_version, "schema": row.schema_version},
+            "versions": {"scoring": row.scoring_model_version, "decision": row.decision_model_version, "prompt": row.agent_prompt_version, "config": row.config_version,
+                         "provider": row.provider_version, "schema": row.schema_version, "code": row.code_version, "app": row.app_version, "llm_models": row.llm_model_ids,
+                         "input_fingerprint": row.input_fingerprint},
         }
 
 
@@ -172,7 +202,8 @@ def issue_detail(req: Request, issue_id: str) -> dict[str, Any]:
 @router.get("/calendar")
 def calendar(req: Request, days: int = 45) -> dict[str, Any]:
     s = svc(req)
-    d = s.now().date()
+    days = max(1, min(days, 365))
+    d = to_ny(s.now()).date()
     f = s.data.events(d - timedelta(days=1), d + timedelta(days=days))
     evs = sorted(f.value or [], key=lambda e: e.event_date)
     return {"available": f.value is not None, "reason": f.error, "events": [encode(e) | {"days_until": e.days_until(d)} for e in evs if (not e.affected or e.importance >= 0.8)][:300]}
@@ -190,7 +221,7 @@ def dashboard(req: Request) -> dict[str, Any]:
         if r["vetoes"]:
             risks.append({"ticker": r["ticker"], "text": ", ".join(r["vetoes"])})
         elif r["risk"] in ("HIGH", "EXTREME"):
-            risks.append({"ticker": r["ticker"], "text": f"event risk {r['risk']}"})
+            risks.append({"ticker": r["ticker"], "text": f"이벤트 위험 {r['risk']}"})
     m = macro(req)
     cal = calendar(req, 21)
     with s.sf() as ss:
@@ -223,16 +254,12 @@ def portfolio(req: Request) -> dict[str, Any]:
     s = svc(req)
     with s.sf() as ss:
         pf = s.portfolio(ss)
-    prices = {}
-    for h in pf.holdings:
-        q = s.data.quote(h.ticker).value
-        prices[h.ticker] = q.price if q else None
-    total = pf.cash + sum((prices.get(h.ticker) or h.cost_basis) * h.quantity for h in pf.holdings)
-    sectors: dict[str, float] = {}
-    for h in pf.holdings:
-        v = (prices.get(h.ticker) or h.cost_basis) * h.quantity
-        sectors[h.sector] = sectors.get(h.sector, 0) + v / total if total else 0
-    return {"cash": pf.cash, "total_value": total, "holdings": [encode(h) | {"price": prices.get(h.ticker)} for h in pf.holdings], "sector_weights": sectors, "note": "MarketLens never places orders."}
+    end = last_completed_session(s.now())
+    start = end - timedelta(days=260)
+    closes = {h.ticker: {b.day: b.close for b in (s.data.bars(h.ticker, start, end).value or []) if b.day <= end} for h in pf.holdings}
+    bench = {b.day: b.close for b in (s.data.bars("SPY", start, end).value or []) if b.day <= end}
+    snap = portfolio_snapshot(pf, closes, bench or None)
+    return encode(snap) | {"currency": "USD", "note": "MarketLens는 주문을 넣지 않습니다. 평가금액은 모든 종목을 같은 거래일 종가로 계산합니다."}
 
 
 @router.put("/portfolio")
@@ -242,7 +269,7 @@ def set_portfolio(req: Request, body: PortfolioIn) -> dict[str, Any]:
         if body.cash is not None:
             repo.set_setting(ss, "portfolio_cash", str(body.cash))
         for h in body.holdings:
-            repo.upsert_holding(ss, h.ticker.upper(), h.quantity, h.cost_basis)
+            repo.upsert_holding(ss, _ticker(h.ticker), h.quantity, h.cost_basis)
         ss.commit()
     return portfolio(req)
 
@@ -253,8 +280,8 @@ def get_watchlist(req: Request) -> list[dict[str, Any]]:
     with s.sf() as ss:
         out = []
         for w in repo.watchlist(ss):
-            rec = repo.latest_recommendation(ss, w.ticker)
-            out.append({"ticker": w.ticker, "note": w.note, "added_at": w.added_at.isoformat(), "latest": _row_summary(rec) if rec else None})
+            rec = repo.latest_recommendation(ss, w.ticker, mode=s.mode.value)
+            out.append({"ticker": w.ticker, "note": w.note, "added_at": w.added_at.isoformat(), "latest": _row_summary(rec, s) if rec else None})
         return out
 
 
@@ -262,7 +289,7 @@ def get_watchlist(req: Request) -> list[dict[str, Any]]:
 def add_watch(req: Request, ticker: str) -> dict[str, str]:
     s = svc(req)
     with s.sf() as ss:
-        repo.add_watch(ss, ticker.upper())
+        repo.add_watch(ss, _ticker(ticker))
         ss.commit()
     return {"status": "ok"}
 
@@ -271,7 +298,7 @@ def add_watch(req: Request, ticker: str) -> dict[str, str]:
 def del_watch(req: Request, ticker: str) -> dict[str, str]:
     s = svc(req)
     with s.sf() as ss:
-        repo.remove_watch(ss, ticker.upper())
+        repo.remove_watch(ss, _ticker(ticker))
         ss.commit()
     return {"status": "ok"}
 
@@ -287,6 +314,17 @@ def performance(req: Request, period: str = "all") -> dict[str, Any]:
 def run_evaluation(req: Request) -> dict[str, Any]:
     ev = EvaluationService(svc(req))
     return {"outcomes_written": ev.update_outcomes(), "paper": ev.update_paper()}
+
+
+@router.get("/paper/account")
+def paper_account(req: Request) -> dict[str, Any]:
+    acct = EvaluationService(svc(req)).paper_account()
+    return {"available": acct is not None, "account": acct, "disclaimer": PAPER_DISCLAIMER}
+
+
+@router.post("/sync")
+def sync(req: Request) -> dict[str, Any]:
+    return encode(svc(req).sync_market())
 
 
 @router.post("/calibration/run")
@@ -326,12 +364,12 @@ def settings(req: Request) -> dict[str, Any]:
     st = s.settings
     return {
         "mode": st.mode.value,
-        "keys_configured": {"FINNHUB_API_KEY": bool(st.finnhub_api_key), "FRED_API_KEY": bool(st.fred_api_key), "POLYGON_API_KEY": bool(st.polygon_api_key), "ANTHROPIC_API_KEY": bool(st.anthropic_api_key), "OPENAI_API_KEY": bool(st.openai_api_key), "SEC_USER_AGENT": bool(st.sec_user_agent)},
+        "keys_configured": {"FINNHUB_API_KEY": bool(st.finnhub_api_key), "FRED_API_KEY": bool(st.fred_api_key), "POLYGON_API_KEY": bool(st.polygon_api_key), "FINRA_API_KEY": bool(st.finra_api_key), "ANTHROPIC_API_KEY": bool(st.anthropic_api_key), "OPENAI_API_KEY": bool(st.openai_api_key), "SEC_USER_AGENT": bool(st.sec_user_agent)},
         "weights": dict(cfg.scoring_model.weights),
         "decision": encode(cfg.decision),
         "entry": encode(cfg.entry),
         "scanner": encode(cfg.scanner),
         "calibration": encode(cfg.calibration),
         "sector_models": [{"id": m.model_id, "name": m.name, "rationale": m.rationale, "primary_multiple": m.primary_multiple, "fundamental": [encode(r) for r in m.fundamental_rules], "valuation": [encode(r) for r in m.valuation_rules]} for m in cfg.sector_models],
-        "note": "Secrets are never returned by the API. Configure them in .env or the OS keychain.",
+        "note": "API 키 등 비밀값은 API로 절대 반환되지 않습니다. .env 파일 또는 OS 자격 증명 관리자에서 설정하세요.",
     }

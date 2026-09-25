@@ -27,13 +27,21 @@ class ReplayOutcome:
     result: AnalysisResult
 
 
+AUDIT_ONLY_FILES = ("exposure_graph.toml", "theses.toml")  # their content is already inside AnalysisInputs
+
+
 def config_snapshot(config_dir: Path, weights: dict[str, float], scoring_version: str) -> dict[str, Any]:
-    return {
+    snap: dict[str, Any] = {
         "scoring_model.toml": (config_dir / "scoring_model.toml").read_text(encoding="utf-8"),
         "sector_models.toml": (config_dir / "sector_models.toml").read_text(encoding="utf-8"),
         "weights": weights,
         "scoring_version": scoring_version,
     }
+    for name in AUDIT_ONLY_FILES:
+        p = config_dir / name
+        if p.exists():
+            snap[name] = p.read_text(encoding="utf-8")
+    return snap
 
 
 def replay(inputs_json: dict[str, Any], snapshot: dict[str, Any], original_score: float, original_action: str, original_fingerprint: str) -> ReplayOutcome:

@@ -2,10 +2,11 @@
 
 Order of precedence:
 1. Hard vetoes (cannot be overridden by anything, including the AI committee)
-2. Score bands with hysteresis (separate enter/exit thresholds)
-3. Price plan (buy zone / R/R) and event-risk sizing limits
+2. Score bands with hysteresis (separate enter/exit thresholds, per action level)
+3. Price plan (buy zone / R/R — also required for ADD) and event-risk limits
 4. Material-change gate (a recommendation only changes when something material changed)
-5. Downgrade-only adjustments from the risk review (``apply_downgrade``)
+5. Portfolio risk gate for EVERY bullish action (BUY, BUY SMALL, ADD)
+6. Downgrade-only adjustments from the risk review (``apply_downgrade``)
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ class DecisionThresholds:
     material_score_delta: float = 5.0
     material_rr_delta: float = 0.5
     material_revision_delta: float = 0.02
+    min_rr: float = 2.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +49,10 @@ class DecisionContext:
     event_risk_level: str  # LOW | MEDIUM | HIGH | EXTREME
     material_changes: tuple[str, ...]  # computed by what_changed.detect_material_changes
     portfolio_size_cap: str | None = None  # FULL/HALF/SMALL/WATCH from deterministic portfolio check
+    stale_core: tuple[str, ...] = ()  # core inputs present but too old (fundamentals, price history)
+    binary_event: bool = False  # EXTREME risk comes from a binary outcome (FDA/antitrust/regulatory)
+    prior_stop_breached: bool = False  # price is below the stop of the previous bullish recommendation
+    sector_unknown: bool = False  # no reliable sector/industry → generic model, lower confidence, no full BUY
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +71,8 @@ def evaluate_vetoes(ctx: DecisionContext, th: DecisionThresholds) -> list[HardVe
     v: list[HardVeto] = []
     if ctx.price_quality in (DataQuality.STALE, DataQuality.MISSING, DataQuality.CONFLICTING):
         v.append(HardVeto.STALE_PRICE)
+    if ctx.stale_core:
+        v.append(HardVeto.STALE_CORE_DATA)
     if ctx.data_quality.core_missing or ctx.data_quality.completeness < th.min_completeness:
         v.append(HardVeto.MISSING_CORE_DATA)
     if ctx.severe_conflicts:
@@ -78,62 +86,82 @@ def evaluate_vetoes(ctx: DecisionContext, th: DecisionThresholds) -> list[HardVe
     return v
 
 
+def _plan_ok(plan: EntryPlan | None, th: DecisionThresholds) -> bool:
+    return plan is not None and plan.in_buy_zone and (plan.rr_at_current or 0) >= th.min_rr - 1e-9
+
+
 def _raw_action(score: float, held: bool, plan: EntryPlan | None, prev: Action | None, th: DecisionThresholds) -> tuple[Action, list[str]]:
     reasons: list[str] = []
-    was_bullish = prev in BULLISH_ACTIONS
-    buy_th = th.buy_exit if was_bullish else th.buy_enter
-    small_th = th.buy_small_exit if was_bullish else th.buy_small_enter
-    if was_bullish:
-        reasons.append(f"hysteresis: using exit thresholds (BUY ≥ {th.buy_exit}, BUY SMALL ≥ {th.buy_small_exit})")
-    in_zone = plan is not None and plan.in_buy_zone and (plan.rr_at_current or 0) > 0
+    # hysteresis per level: a previous BUY/ADD keeps BUY until the BUY exit; a previous BUY SMALL keeps
+    # BUY SMALL until its exit but must still reach the full BUY *enter* threshold to become BUY.
+    buy_th = th.buy_exit if prev in (Action.BUY, Action.ADD) else th.buy_enter
+    small_th = th.buy_small_exit if prev in BULLISH_ACTIONS else th.buy_small_enter
+    if prev in BULLISH_ACTIONS:
+        reasons.append(f"히스테리시스 적용: 매수 유지 기준 {buy_th:g}, 소량 매수 유지 기준 {small_th:g}")
     if held:
         if score < th.reduce_floor:
-            return Action.SELL, reasons + [f"score {score} < {th.reduce_floor}"]
+            return Action.SELL, reasons + [f"점수 {score} < {th.reduce_floor:g} → 매도"]
         if score < th.hold_floor:
-            return Action.REDUCE, reasons + [f"score {score} < {th.hold_floor}"]
+            return Action.REDUCE, reasons + [f"점수 {score} < {th.hold_floor:g} → 비중 축소"]
         if score >= buy_th and plan is not None and plan.add_zone_low <= plan.current_price <= plan.add_zone_high:
-            return Action.ADD, reasons + [f"score {score} ≥ {buy_th} and price inside add zone"]
-        return Action.HOLD, reasons + [f"held; score {score}"]
+            if (plan.rr_at_current or 0) >= th.min_rr:
+                return Action.ADD, reasons + [f"점수 {score} ≥ {buy_th:g}, 추가매수 구간 진입, 손익비 {plan.rr_at_current} ≥ {th.min_rr:g}"]
+            return Action.HOLD, reasons + [f"추가매수 구간이지만 손익비 {plan.rr_at_current} < {th.min_rr:g} → 보유"]
+        return Action.HOLD, reasons + [f"보유 중, 점수 {score}"]
     if score >= small_th and plan is None:
-        return Action.WAIT, reasons + ["attractive score but no valid price plan"]
+        return Action.WAIT, reasons + ["점수는 매력적이나 유효한 가격 계획이 없음 → 대기"]
     if score >= buy_th:
-        if in_zone:
-            return Action.BUY, reasons + [f"score {score} ≥ {buy_th}; price {plan.current_price} ≤ max buy {plan.max_buy}"]  # type: ignore[union-attr]
-        return Action.WAIT, reasons + [f"score {score} ≥ {buy_th} but price above max buy {plan.max_buy if plan else 'N/A'}"]
+        if _plan_ok(plan, th):
+            return Action.BUY, reasons + [f"점수 {score} ≥ {buy_th:g}, 현재가 {plan.current_price} ≤ 최대 매수가 {plan.max_buy}"]  # type: ignore[union-attr]
+        return Action.WAIT, reasons + [f"점수 {score} ≥ {buy_th:g} 이지만 현재가가 최대 매수가 {plan.max_buy if plan else 'N/A'} 초과 → 대기"]
     if score >= small_th:
-        if in_zone:
-            return Action.BUY_SMALL, reasons + [f"score {score} ≥ {small_th}; price in buy zone"]
-        return Action.WAIT, reasons + [f"score {score} ≥ {small_th} but price above max buy"]
+        if _plan_ok(plan, th):
+            return Action.BUY_SMALL, reasons + [f"점수 {score} ≥ {small_th:g}, 매수 구간 안"]
+        return Action.WAIT, reasons + [f"점수 {score} ≥ {small_th:g} 이지만 매수 구간 밖 → 대기"]
     if score >= th.watch_floor:
-        return Action.WATCH, reasons + [f"score {score} in watch band"]
-    return Action.WATCH, reasons + [f"score {score} below watch floor {th.watch_floor}: not attractive"]
+        return Action.WATCH, reasons + [f"점수 {score}: 관찰 구간"]
+    return Action.WATCH, reasons + [f"점수 {score} < {th.watch_floor:g}: 매력 낮음"]
 
 
-def _apply_vetoes(action: Action, vetoes: list[HardVeto], held: bool) -> tuple[Action, str | None, list[str]]:
+def _apply_vetoes(action: Action, vetoes: list[HardVeto], ctx: DecisionContext) -> tuple[Action, str | None, list[str]]:
+    held = ctx.held
     notes: list[str] = []
-    size_limit: str | None = None
-    if HardVeto.STALE_PRICE in vetoes or HardVeto.MISSING_CORE_DATA in vetoes or HardVeto.SEVERE_DATA_CONFLICT in vetoes:
-        notes.append("hard veto: data not reliable enough for any action")
+    if {HardVeto.STALE_PRICE, HardVeto.STALE_CORE_DATA, HardVeto.MISSING_CORE_DATA, HardVeto.SEVERE_DATA_CONFLICT} & set(vetoes):
+        notes.append("하드 거부권: 데이터가 오래되었거나 부족·충돌 → 어떤 행동도 권고하지 않음")
         return Action.DATA_INSUFFICIENT, None, notes
     if HardVeto.THESIS_INVALIDATED in vetoes:
-        notes.append("hard veto: thesis invalidated")
+        notes.append("하드 거부권: 투자 논리 훼손")
         return (Action.SELL if held else Action.WAIT), None, notes
     if HardVeto.UNACCEPTABLE_LIQUIDITY in vetoes and action in BULLISH_ACTIONS:
-        notes.append("hard veto: liquidity below minimum")
+        notes.append("하드 거부권: 유동성 기준 미달")
         return (Action.HOLD if held else Action.WAIT), None, notes
-    if HardVeto.EXTREME_EVENT_RISK in vetoes:
-        size_limit = "SMALL"
-        if action == Action.BUY:
-            notes.append("hard veto: extreme event risk → BUY capped to BUY SMALL")
-            return Action.BUY_SMALL, size_limit, notes
-        if action == Action.ADD:
-            notes.append("hard veto: extreme event risk → no adds before the event")
-            return Action.HOLD, size_limit, notes
-    return action, size_limit, notes
+    if HardVeto.EXTREME_EVENT_RISK in vetoes and action in BULLISH_ACTIONS:
+        if ctx.binary_event or action == Action.ADD:
+            notes.append("하드 거부권: 임박한 극단적 이벤트(양자택일형 결과 또는 추가매수) → 이벤트 이후로 대기")
+            return (Action.HOLD if held else Action.WAIT), "WATCH", notes
+        notes.append("하드 거부권: 극단적 이벤트 위험 → 소량 매수로 제한")
+        return Action.BUY_SMALL, "SMALL", notes
+    return action, None, notes
+
+
+def _portfolio_gate(action: Action, cap: str | None, held: bool) -> tuple[Action, str | None]:
+    """Apply the deterministic portfolio cap to every bullish action (never only BUY)."""
+    if cap is None or action not in BULLISH_ACTIONS:
+        return action, None
+    if cap == "WATCH":
+        return (Action.HOLD if held else Action.WATCH), f"포트폴리오 한도(집중도/현금) 초과 → {'보유' if held else '관찰'}"
+    if cap == "SMALL" and action == Action.BUY:
+        return Action.BUY_SMALL, "포트폴리오 한도 → 소량 매수로 제한"
+    return action, None
+
+
+SECTOR_UNKNOWN_CONFIDENCE_PENALTY = 15.0
 
 
 def compute_confidence(card: ScoreCard, action: Action, th: DecisionThresholds, dq: DataQualityReport) -> float:
-    """Deterministic base confidence: data completeness × distance from the nearest threshold."""
+    """Deterministic base confidence: data completeness × distance from the nearest threshold.
+
+    This is NOT a calibrated probability of success; it only expresses how robust the classification is."""
     s = card.total
     bounds = [th.buy_enter, th.buy_small_enter, th.watch_floor, th.reduce_floor]
     margin = min(abs(s - b) for b in bounds)
@@ -148,22 +176,33 @@ def decide(card: ScoreCard, plan: EntryPlan | None, ctx: DecisionContext, th: De
     th = th or DecisionThresholds()
     vetoes = evaluate_vetoes(ctx, th)
     raw, reasons = _raw_action(card.total, ctx.held, plan, ctx.previous_action, th)
-    action, size_limit, notes = _apply_vetoes(raw, vetoes, ctx.held)
+    if ctx.prior_stop_breached and raw in BULLISH_ACTIONS | {Action.HOLD}:
+        raw = Action.SELL if ctx.held else Action.WAIT
+        reasons.append("직전 추천의 손절가 이탈 → " + ("매도" if ctx.held else "대기"))
+    action, size_limit, notes = _apply_vetoes(raw, vetoes, ctx)
 
     suppressed = False
     prev = ctx.previous_action
-    if not vetoes and prev is not None and action != prev and not ctx.material_changes and prev != Action.DATA_INSUFFICIENT:
+    if not vetoes and not ctx.prior_stop_breached and prev is not None and action != prev and not ctx.material_changes and prev != Action.DATA_INSUFFICIENT:
         # no material change → keep the previous recommendation (avoid flip-flopping)
-        notes.append(f"change {prev.value} → {action.value} suppressed: no material change")
+        notes.append(f"{prev.value} → {action.value} 변경 보류: 중요한 변화 없음")
         action = prev
         suppressed = True
 
-    if ctx.portfolio_size_cap in ("SMALL", "WATCH") and action == Action.BUY:
-        action = Action.BUY_SMALL if ctx.portfolio_size_cap == "SMALL" else Action.WATCH
-        notes.append(f"portfolio concentration cap {ctx.portfolio_size_cap}")
+    gated, why = _portfolio_gate(action, ctx.portfolio_size_cap, ctx.held)
+    if why:
+        notes.append(why)
+        action = gated
         size_limit = ctx.portfolio_size_cap
 
+    if ctx.sector_unknown and action == Action.BUY:
+        notes.append("업종 분류 불명확 → 업종별 모델을 확정할 수 없어 소량 매수로 제한")
+        action, size_limit = Action.BUY_SMALL, "SMALL"
+
     conf = compute_confidence(card, action, th, ctx.data_quality)
+    if ctx.sector_unknown:
+        conf = round(max(0.0, conf - SECTOR_UNKNOWN_CONFIDENCE_PENALTY), 1)
+        notes.append(f"업종 분류 불명확 → 신뢰도 −{SECTOR_UNKNOWN_CONFIDENCE_PENALTY:g}")
     return Decision(
         action=action,
         confidence=conf,

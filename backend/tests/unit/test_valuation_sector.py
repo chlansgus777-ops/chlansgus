@@ -55,8 +55,17 @@ def test_rule_coverage_threshold():
     assert rs.subscore == pytest.approx(0.25) and rs.coverage == 1.0
 
 
+def test_market_cap_never_uses_weighted_diluted_shares():
+    """Weighted-average diluted shares are a past-period EPS denominator, not today's share count."""
+    m = compute_metrics([q(i, 100 + i, eps=0.5) for i in range(8)])  # only shares_diluted is known
+    v = compute_multiples(50.0, m, None)
+    assert m.shares_diluted == 100 and m.shares_outstanding is None
+    assert v.market_cap is None and v.enterprise_value is None and v.price_sales is None and v.fcf_yield is None
+    assert v.trailing_pe is not None  # per-share multiples still work
+
+
 def test_multiples_and_negative_earnings():
-    m = compute_metrics([q(i, 100 + i, eps=0.5) for i in range(8)])
+    m = compute_metrics([q(i, 100 + i, eps=0.5, shares_outstanding=100) for i in range(8)])
     a = AnalystSnapshot(date(2026, 1, 1), "t", forward_eps=2.5, forward_eps_growth=0.25)
     v = compute_multiples(50.0, m, a)
     assert v.forward_pe == pytest.approx(20.0)

@@ -1,12 +1,14 @@
 """Fundamental statements and deterministic metrics.
 
-Point-in-time: each quarter carries ``filed_date``. :func:`as_of` drops quarters that had not been
-filed yet, so historical analyses never see data that was published later.
+Point-in-time: each quarter carries ``filed_date`` (earliest filing) and optionally ``field_filed``
+(per-field first publication date). :func:`as_of` drops quarters that had not been filed yet AND blanks
+individual fields that were published later (e.g. a Q4 value only disclosed in the 10-K), so historical
+analyses never see data that was not yet public.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Mapping, Sequence
 
@@ -31,17 +33,39 @@ class QuarterlyFinancials:
     total_equity: float | None = None
     shares_diluted: float | None = None
     inventory: float | None = None
+    shares_outstanding: float | None = None  # cover-page shares outstanding (for market cap)
+    # per-field first publication date; fields missing here are assumed published at ``filed_date``
+    field_filed: Mapping[str, date] = field(default_factory=dict)
     # sector specific extras, e.g. {"rpo": .., "nim": .., "cet1": .., "ffo": ..}
     extras: Mapping[str, float] = field(default_factory=dict)
 
 
 def as_of(quarters: Sequence[QuarterlyFinancials], d: date) -> list[QuarterlyFinancials]:
-    return sorted((q for q in quarters if q.filed_date <= d), key=lambda q: q.period_end)
+    out: list[QuarterlyFinancials] = []
+    for q in quarters:
+        if q.filed_date > d:
+            continue
+        late = {k: None for k, fd in q.field_filed.items() if fd > d}
+        out.append(replace(q, **late) if late else q)
+    return sorted(out, key=lambda q: q.period_end)
+
+
+# Consecutive fiscal quarters end ~91 days apart; allow for 52/53-week calendars.
+MIN_QUARTER_GAP_DAYS = 75
+MAX_QUARTER_GAP_DAYS = 105
+
+
+def consecutive(qs: Sequence[QuarterlyFinancials]) -> bool:
+    for a, b in zip(qs[:-1], qs[1:]):
+        gap = (b.period_end - a.period_end).days
+        if gap < MIN_QUARTER_GAP_DAYS or gap > MAX_QUARTER_GAP_DAYS:
+            return False
+    return True
 
 
 def _sum4(qs: Sequence[QuarterlyFinancials], attr: str) -> float | None:
-    if len(qs) < 4:
-        return None
+    if len(qs) < 4 or not consecutive(qs[-4:]):
+        return None  # a TTM over a gap or duplicate quarter would be wrong
     vals = [getattr(q, attr) for q in qs[-4:]]
     if any(v is None for v in vals):
         return None
@@ -99,6 +123,7 @@ class FundamentalMetrics:
     fcf_margin: float | None
     cash: float | None
     total_debt: float | None
+    total_equity: float | None
     net_debt: float | None
     capex_ttm: float | None
     ebitda_ttm: float | None
@@ -107,6 +132,7 @@ class FundamentalMetrics:
     roe: float | None
     roic: float | None
     shares_diluted: float | None
+    shares_outstanding: float | None
     share_dilution_yoy: float | None
     revenue_trend_4q: float | None
     revenue_trend_8q: float | None
@@ -119,8 +145,8 @@ def compute_metrics(quarters: Sequence[QuarterlyFinancials], tax_rate: float = 0
     qs = sorted(quarters, key=lambda q: q.period_end)
     n = len(qs)
     last = qs[-1] if qs else None
-    prev_q = qs[-2] if n >= 2 else None
-    yoy_q = qs[-5] if n >= 5 else None
+    prev_q = qs[-2] if n >= 2 and consecutive(qs[-2:]) else None
+    yoy_q = qs[-5] if n >= 5 and 350 <= (qs[-1].period_end - qs[-5].period_end).days <= 380 else None
 
     rev_ttm = _sum4(qs, "revenue")
     rev_ttm_prev = _sum4(qs[:-4], "revenue") if n >= 8 else None
@@ -177,6 +203,7 @@ def compute_metrics(quarters: Sequence[QuarterlyFinancials], tax_rate: float = 0
         fcf_margin=_div(fcf_ttm, rev_ttm),
         cash=cash,
         total_debt=debt,
+        total_equity=equity,
         net_debt=net_debt,
         capex_ttm=capex_ttm,
         ebitda_ttm=ebitda_ttm,
@@ -185,6 +212,7 @@ def compute_metrics(quarters: Sequence[QuarterlyFinancials], tax_rate: float = 0
         roe=roe,
         roic=roic,
         shares_diluted=last.shares_diluted if last else None,
+        shares_outstanding=last.shares_outstanding if last else None,
         share_dilution_yoy=_growth(last.shares_diluted if last else None, yoy_q.shares_diluted if yoy_q else None),
         revenue_trend_4q=_trend(rev_series[-4:]),
         revenue_trend_8q=_trend(rev_series[-8:]),

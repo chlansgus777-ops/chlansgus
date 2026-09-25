@@ -16,13 +16,20 @@ class OpenAICompatibleProvider:
         self.fast_model = fast_model
         self.deep_model = deep_model
         self.available = bool(base_url)
+        self._base_url = base_url
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._http = httpx.Client(base_url=base_url, headers=headers, timeout=120.0, transport=transport)
 
+    def model_for(self, tier: str) -> str:
+        return self.deep_model if tier == "deep" else self.fast_model
+
+    def signature(self, tier: str) -> str:
+        return f"{self.name}|{self._base_url}|{self.model_for(tier)}"
+
     def complete_json(self, system: str, user: str, schema: dict[str, Any], tier: str, max_tokens: int = 4000) -> LLMResponse:
         if not self.available:
-            raise LLMUnavailable("no base URL")
-        model = self.deep_model if tier == "deep" else self.fast_model
+            raise LLMUnavailable("OPENAI_BASE_URL 없음")
+        model = self.model_for(tier)
         body = {
             "model": model,
             "max_tokens": max_tokens,

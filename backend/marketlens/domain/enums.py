@@ -51,9 +51,22 @@ class Action(StrEnum):
 
 BULLISH_ACTIONS = frozenset({Action.BUY, Action.BUY_SMALL, Action.ADD})
 
+ACTION_KO = {
+    Action.BUY: "매수",
+    Action.BUY_SMALL: "소량 매수",
+    Action.ADD: "추가 매수",
+    Action.HOLD: "보유",
+    Action.WATCH: "관찰",
+    Action.WAIT: "대기",
+    Action.REDUCE: "비중 축소",
+    Action.SELL: "매도",
+    Action.DATA_INSUFFICIENT: "데이터 부족",
+}
+
 
 class HardVeto(StrEnum):
     STALE_PRICE = "STALE_PRICE"
+    STALE_CORE_DATA = "STALE_CORE_DATA"
     MISSING_CORE_DATA = "MISSING_CORE_DATA"
     SEVERE_DATA_CONFLICT = "SEVERE_DATA_CONFLICT"
     THESIS_INVALIDATED = "THESIS_INVALIDATED"

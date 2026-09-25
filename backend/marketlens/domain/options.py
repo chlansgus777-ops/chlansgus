@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Sequence
 
 
 @dataclass(frozen=True, slots=True)
 class OptionsSnapshot:
     source: str
+    as_of: date | None = None  # trading day the chain snapshot refers to (None → freshness unknown → unused)
     atm_iv: float | None = None
     iv_history_1y: tuple[float, ...] = ()
     put_call_volume: float | None = None
@@ -88,6 +90,8 @@ class OwnershipSnapshot:
 
     source: str
     short_interest_pct_float: float | None = None
+    short_interest_shares: float | None = None
+    short_interest_settlement: date | None = None
     days_to_cover: float | None = None
     short_interest_change: float | None = None
     insider_net_buy_value_90d: float | None = None

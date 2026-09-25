@@ -109,7 +109,7 @@ def test_macro_transmits_through_exposure():
     bank = macro_impact(MacroExposure(rates=0.4), moves)
     energy = macro_impact(MacroExposure(oil=0.9), moves)
     assert growth.net < 0 < bank.net and energy.net > 0
-    assert any("headwind" in c[2] for c in growth.contributions)
+    assert any("역풍" in c[2] for c in growth.contributions)  # rates up = headwind for long-duration growth
 
 
 def test_supplier_problem_barely_moves_customer():

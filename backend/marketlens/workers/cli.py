@@ -16,9 +16,37 @@ def _service(settings: Any):  # type: ignore[no-untyped-def]
     from marketlens.infrastructure.db.session import make_engine, make_session_factory, migrate
     from marketlens.infrastructure.logging import configure_logging
 
-    configure_logging(settings.log_level, settings.secrets())
+    configure_logging(settings.log_level, settings.secrets(), settings.data_dir / "logs")
     migrate(settings.database_url)
     return MarketLensService(settings, make_session_factory(make_engine(settings.database_url)))
+
+
+def _serve(settings: Any, host: str, port: int) -> int:
+    import uvicorn
+
+    from marketlens.api.app import create_app
+    from marketlens.workers.runtime import AlreadyRunning, InstanceLock, PortInUse, choose_port
+
+    if host not in ("127.0.0.1", "localhost"):
+        print("보안: MarketLens API는 로컬(127.0.0.1)에서만 실행할 수 있습니다.", file=sys.stderr)
+        return 2
+    lock = InstanceLock(settings.data_dir / f"marketlens-{settings.mode.value.lower()}.lock")
+    try:
+        lock.acquire()
+    except AlreadyRunning as e:
+        print(str(e), file=sys.stderr)
+        return 4
+    try:
+        try:
+            port = choose_port(host, port)
+        except PortInUse as e:
+            print(str(e), file=sys.stderr)
+            return 3
+        print(f"MARKETLENS_PORT={port}", flush=True)  # read by the desktop shell
+        uvicorn.run(create_app(settings), host=host, port=port, log_level="warning")
+        return 0
+    finally:
+        lock.release()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -26,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     sv = sub.add_parser("serve", help="run the API + UI server")
     sv.add_argument("--host", default="127.0.0.1")
-    sv.add_argument("--port", type=int, default=8765)
+    sv.add_argument("--port", type=int, default=8765, help="0 = choose a free port automatically")
     sc = sub.add_parser("scan", help="run a whole-market scan")
     sc.add_argument("--no-committee", action="store_true")
     an = sub.add_parser("analyze", help="analyze one ticker")
@@ -37,18 +65,14 @@ def main(argv: list[str] | None = None) -> int:
     rp = sub.add_parser("replay", help="replay a stored recommendation from its snapshot")
     rp.add_argument("rec_id", type=int)
     sub.add_parser("migrate", help="apply database migrations")
+    sub.add_parser("sync", help="LIVE only: refresh the local point-in-time store from free sources")
     sim = sub.add_parser("simulate", help="MOCK only: run weekly scans over past weeks to populate evaluation data")
     sim.add_argument("--weeks", type=int, default=12)
     args = p.parse_args(argv)
     settings = load_settings()
 
     if args.cmd == "serve":
-        import uvicorn
-
-        from marketlens.api.app import create_app
-
-        uvicorn.run(create_app(settings), host=args.host, port=args.port, log_level="info")
-        return 0
+        return _serve(settings, args.host, args.port)
     if args.cmd == "migrate":
         from marketlens.infrastructure.db.session import migrate
 
@@ -56,7 +80,9 @@ def main(argv: list[str] | None = None) -> int:
         print("migrated", settings.database_url)
         return 0
     s = _service(settings)
-    if args.cmd == "scan":
+    if args.cmd == "sync":
+        print(json.dumps(s.sync_market(), default=str)[:4000])
+    elif args.cmd == "scan":
         print(json.dumps(s.run_scan(run_committee=not args.no_committee).__dict__, default=str))
     elif args.cmd == "analyze":
         r, c, rid = s.analyze(args.ticker, run_committee=args.committee)

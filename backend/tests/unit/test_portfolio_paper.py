@@ -13,14 +13,44 @@ UTC = timezone.utc
 def test_sector_concentration_limits_size():
     pf = Portfolio((Holding("A", 100, 100, "Technology"), Holding("B", 100, 100, "Technology"), Holding("C", 50, 100, "Energy")), 20_000)
     r = review_candidate(pf, {"A": 100, "B": 100, "C": 100}, CandidateProfile("D", "Technology", (), 0.0), {})
-    assert r.size_cap == SizeClass.WATCH and any("sector" in w for w in r.warnings)
+    assert r.size_cap == SizeClass.WATCH and any("섹터" in w for w in r.warnings)
+
+
+def _dated(values: list[float], start: date = date(2026, 1, 5)) -> dict[date, float]:
+    from marketlens.domain.market_calendar import add_trading_days
+
+    return {add_trading_days(start, i): v for i, v in enumerate(values)}
 
 
 def test_high_correlation_limits_size():
-    rets = [0.01 * ((i % 5) - 2) for i in range(60)]
+    rets = _dated([0.01 * ((i % 5) - 2) for i in range(60)])
     pf = Portfolio((Holding("A", 10, 100, "Energy"),), 100_000)
     r = review_candidate(pf, {"A": 100}, CandidateProfile("B", "Technology", (), 0.0, rets), {"A": rets})
     assert r.size_cap == SizeClass.HALF and r.max_correlation[0] == "A" and r.max_correlation[1] > 0.99
+
+
+def test_correlation_uses_date_alignment_not_positions():
+    """Regression (거래일 미정렬 correlation 정정): one series misses a bar in the middle. Pairing by array
+    position shifts every later pair by a day and destroys the correlation; pairing by date keeps it."""
+    from marketlens.domain.portfolio import aligned_pearson, pearson
+
+    import random
+
+    rnd = random.Random(7)
+    a = _dated([rnd.gauss(0, 0.02) for _ in range(80)])
+    days = sorted(a)
+    c = {d: v for d, v in a.items() if d != days[70]}  # identical returns, one missing session near the end
+    positional = pearson(list(a.values()), list(c.values()))  # old behaviour: pair the last n values
+    aligned = aligned_pearson(a, c)
+    assert aligned is not None and aligned > 0.999
+    assert positional is not None and positional < 0.5
+
+
+def test_existing_position_is_not_correlated_with_itself():
+    rets = _dated([0.01 * ((i % 5) - 2) for i in range(60)])
+    pf = Portfolio((Holding("A", 10, 100, "Energy"),), 100_000)
+    r = review_candidate(pf, {"A": 100}, CandidateProfile("A", "Energy", (), 0.0, rets), {"A": rets})
+    assert r.max_correlation is None and r.size_cap == SizeClass.FULL
 
 
 def test_theme_overlap():
@@ -72,7 +102,8 @@ def test_targets_partial_then_full():
     r = simulate(sig(ts), b, PaperConfig(slippage_bps=0, default_half_spread_bps=0))
     assert r.exit_reasons == (ExitReason.TARGET_1, ExitReason.TARGET_2)
     assert r.return_pct == pytest.approx(0.15)
-    assert r.mfe_pct == pytest.approx(0.21)
+    # MFE only counts price action up to the exit fill: the position was gone at 120, the 121 high came after
+    assert r.mfe_pct == pytest.approx(0.20)
 
 
 def test_time_exit_and_open_position_mark():
@@ -87,8 +118,19 @@ def test_time_exit_and_open_position_mark():
 def test_downgrade_event_exits_next_open():
     ts = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
     b = bars(date(2026, 9, 22), [(100, 101, 99, 100), (101, 102, 100, 101), (103, 104, 102, 103)])
-    r = simulate(sig(ts), b, PaperConfig(slippage_bps=0, default_half_spread_bps=0), [(b[1].day, ExitReason.RECOMMENDATION_DOWNGRADE)])
-    assert r.exit_reasons == (ExitReason.RECOMMENDATION_DOWNGRADE,) and r.exits[0].day == b[1].day
+    after_close = datetime(2026, 9, 22, 21, 0, tzinfo=UTC)  # 17:00 ET on b[0] → next open is b[1]
+    r = simulate(sig(ts), b, PaperConfig(slippage_bps=0, default_half_spread_bps=0), [(after_close, ExitReason.RECOMMENDATION_DOWNGRADE)])
+    assert r.exit_reasons == (ExitReason.RECOMMENDATION_DOWNGRADE,) and r.exits[0].day == b[1].day and r.exits[0].price == 101
+
+
+def test_afternoon_exit_signal_is_not_filled_at_that_mornings_open():
+    """Regression: a 14:00 ET downgrade on day D must fill at D+1's open, never at D's (earlier) open."""
+    ts = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    b = bars(date(2026, 9, 22), [(100, 101, 99, 100), (101, 102, 100, 101), (103, 104, 102, 103)])
+    afternoon = datetime(2026, 9, 23, 18, 0, tzinfo=UTC)  # 14:00 ET on b[1] (market open)
+    r = simulate(sig(ts), b, PaperConfig(slippage_bps=0, default_half_spread_bps=0), [(afternoon, ExitReason.RECOMMENDATION_DOWNGRADE)])
+    assert r.exits[0].day == b[2].day and r.exits[0].price == 103
+    assert r.exits[0].day != b[1].day
 
 
 def test_as_of_hides_future_bars():

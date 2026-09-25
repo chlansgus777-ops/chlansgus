@@ -22,18 +22,30 @@ INJECTION_PATTERNS = [
         r"override\s+(the\s+)?(rules|score|decision)",
         r"recommend\s+buy\s+immediately",
         r"output\s+stance",
+        r"(이전|앞의|위의)\s*(의\s*)?(모든\s*)?(지시|명령|지침)(를|을|사항을)?\s*(모두\s*)?무시",
+        r"시스템\s*프롬프트",
+        r"(매수|BUY)(를|을)?\s*(즉시\s*)?추천하(라|세요|십시오)",
+        r"(신뢰도|점수|confidence|score)(를|을)?\s*\d+\s*(으로|로)\s*(출력|설정|변경)",
+        r"(관리자|개발자)\s*모드",
     )
 ]
+_ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff\u00ad"), None)
+
+
+def _normalise(text: str) -> str:
+    """NFKC (full-width → ASCII) and zero-width characters removed, so obfuscated attacks still match."""
+    return unicodedata.normalize("NFKC", text or "").translate(_ZERO_WIDTH)
 
 MAX_EXTERNAL_CHARS = 2000
 
 
 def detect_injection(text: str) -> list[str]:
-    return [p.pattern for p in INJECTION_PATTERNS if p.search(text or "")]
+    t = _normalise(text)
+    return [p.pattern for p in INJECTION_PATTERNS if p.search(t)]
 
 
 def sanitize_external(text: str, max_chars: int = MAX_EXTERNAL_CHARS) -> str:
-    t = unicodedata.normalize("NFKC", text or "")
+    t = _normalise(text)
     t = "".join(ch for ch in t if ch in "\n\t" or unicodedata.category(ch)[0] != "C")
     # neutralise anything that looks like our envelope or chat-role tags
     t = re.sub(r"<\s*/?\s*(untrusted_external_data|system|assistant|user)[^>]*>", "[tag removed]", t, flags=re.IGNORECASE)

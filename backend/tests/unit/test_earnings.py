@@ -25,7 +25,7 @@ def test_good_number_but_below_expectations_is_a_miss():
 def test_beat_with_weak_guide():
     a = assess_earnings([rep(g_lo=90, g_hi=94, g_c=100)])
     assert a.result_quality == ResultQuality.BEAT_WEAK_GUIDE
-    assert any("low-quality" in n for n in a.notes)
+    assert any("질 낮은 서프라이즈" in n for n in a.notes)
 
 
 def test_expectation_bar_high_after_run_up():

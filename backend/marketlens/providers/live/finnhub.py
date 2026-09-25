@@ -1,12 +1,14 @@
-"""Finnhub (commercial API, requires FINNHUB_API_KEY; respect plan limits and terms).
+"""Finnhub (free tier; requires FINNHUB_API_KEY; respect plan limits and terms).
 
-Implemented: real-time quote, company news, earnings calendar, earnings surprises (history).
-Candles / estimates / revisions / options need paid plans → not implemented here (MISSING).
+Implemented: quote, market-wide news, company news, earnings calendar, earnings history (actual report
+dates with EPS/revenue actual vs estimate from the earnings calendar).
+Not available on the free tier → NotSupported (falls through / MISSING, never an error storm):
+daily candles, estimate revisions, valuation history.
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Sequence
 
 from marketlens.domain.catalysts import CatalystEvent, CatalystType
@@ -18,19 +20,32 @@ from marketlens.infrastructure.resilience import TokenBucket
 from marketlens.providers.contracts import NewsItem, NotSupported, ProviderDataError, ProviderUnavailable, ValuationHistory
 from marketlens.providers.live.http import HttpClient
 
+WIRE_SOURCES = ("reuters", "bloomberg", "associated press", "ap news", "dow jones", "marketwatch", "cnbc", "wsj", "financial times", "barron")
+OFFICIAL_SOURCES = ("sec.gov", "businesswire", "business wire", "globenewswire", "prnewswire", "pr newswire", "federalreserve", "treasury.gov")
+
+
+def source_type(source: str, url: str) -> str:
+    s = f"{source} {url}".lower()
+    if any(k in s for k in OFFICIAL_SOURCES):
+        return "OFFICIAL"  # issuer press releases / regulators
+    if any(k in s for k in WIRE_SOURCES):
+        return "WIRE"
+    return "COMMERCIAL"
+
 
 class FinnhubProvider:
     mode = DataMode.LIVE
 
-    def __init__(self, api_key: str | None, transport: Any = None) -> None:
+    def __init__(self, api_key: str | None, transport: Any = None, realtime: bool = False, rate_per_s: float = 0.9) -> None:
         self.name = "finnhub"
         self.configured = bool(api_key)
         self._key = api_key
-        self._http = HttpClient("https://finnhub.io/api/v1", bucket=TokenBucket(0.9, 5), transport=transport)
+        self._realtime = realtime  # only claim real-time quotes when the user's plan guarantees it
+        self._http = HttpClient("https://finnhub.io/api/v1", bucket=TokenBucket(rate_per_s, 5), transport=transport)
 
     def _get(self, path: str, **params: Any) -> Any:
         if not self.configured:
-            raise ProviderUnavailable("FINNHUB_API_KEY not set")
+            raise ProviderUnavailable("FINNHUB_API_KEY 미설정")
         params["token"] = self._key
         return self._http.get_json(path, params)
 
@@ -42,24 +57,33 @@ class FinnhubProvider:
             raise ProviderDataError(f"{ticker}: empty quote")
         ts = datetime.fromtimestamp(int(t), tz=timezone.utc)
         return Quote(ticker=ticker, price=float(c), timestamp=ts, session=classify_session(ts), source=self.name, mode=DataMode.LIVE,
-                     open=d.get("o"), high=d.get("h"), low=d.get("l"), previous_close=d.get("pc"))
+                     open=d.get("o"), high=d.get("h"), low=d.get("l"), previous_close=d.get("pc"), is_realtime=self._realtime)
 
     def get_daily_bars(self, ticker: str, start: date, end: date) -> list[Bar]:
-        raise NotSupported("Finnhub candles require a paid plan; use the Polygon provider for bars")
+        raise NotSupported("Finnhub 무료 요금제는 일봉 미제공 → Polygon 사용")
 
     # --- NewsProvider
-    def get_news(self, since: datetime, tickers: Sequence[str] | None = None) -> list[NewsItem]:
+    def _items(self, rows: Any, since: datetime, default_tickers: tuple[str, ...]) -> list[NewsItem]:
+        if not isinstance(rows, list):
+            raise ProviderDataError("news: malformed payload")
         out: list[NewsItem] = []
-        for t in tickers or ():
+        for r in rows:
+            ts = datetime.fromtimestamp(int(r.get("datetime", 0)), tz=timezone.utc)
+            if ts < since:
+                continue
+            related = tuple(x.strip().upper() for x in str(r.get("related", "")).split(",") if x.strip()) or default_tickers
+            src, url = str(r.get("source", "finnhub")), str(r.get("url", ""))
+            out.append(NewsItem(f"finnhub-{r.get('id')}", ts, str(r.get("headline", "")), str(r.get("summary", "")), url, src, source_type(src, url), related))
+        return out
+
+    def get_news(self, since: datetime, tickers: Sequence[str] | None = None) -> list[NewsItem]:
+        if not tickers:
+            # market-wide news (a single call) — never silently return an empty list
+            return self._items(self._get("/news", category="general"), since, ())
+        out: list[NewsItem] = []
+        for t in tickers:
             rows = self._get("/company-news", symbol=t, **{"from": since.date().isoformat(), "to": datetime.now(tz=timezone.utc).date().isoformat()})
-            if not isinstance(rows, list):
-                raise ProviderDataError("company-news: malformed payload")
-            for r in rows:
-                ts = datetime.fromtimestamp(int(r.get("datetime", 0)), tz=timezone.utc)
-                if ts < since:
-                    continue
-                related = tuple(x.strip() for x in str(r.get("related", t)).split(",") if x.strip())
-                out.append(NewsItem(f"finnhub-{r.get('id')}", ts, str(r.get("headline", "")), str(r.get("summary", "")), str(r.get("url", "")), str(r.get("source", "finnhub")), "COMMERCIAL", related or (t,)))
+            out.extend(self._items(rows, since, (t,)))
         return out
 
     # --- CalendarProvider
@@ -69,23 +93,30 @@ class FinnhubProvider:
         if not isinstance(rows, list):
             raise ProviderDataError("earnings calendar: malformed payload")
         return [
-            CatalystEvent(f"ER-{r['symbol']}-{r['date']}", CatalystType.EARNINGS, date.fromisoformat(r["date"]), f"{r['symbol']} earnings", (r["symbol"],), 0.9, source=self.name)
+            CatalystEvent(f"ER-{r['symbol']}-{r['date']}", CatalystType.EARNINGS, date.fromisoformat(r["date"]), f"{r['symbol']} 실적발표", (r["symbol"],), 0.9, source=self.name)
             for r in rows if r.get("symbol") and r.get("date")
         ]
 
     # --- AnalystProvider (partial)
     def get_earnings_history(self, ticker: str) -> list[EarningsReport]:
-        rows = self._get("/stock/earnings", symbol=ticker)
+        """Uses the earnings calendar so ``report_date`` is the real announcement date (the /stock/earnings
+        endpoint only has the fiscal period end, which must never be treated as the report date)."""
+        today = datetime.now(tz=timezone.utc).date()
+        d = self._get("/calendar/earnings", symbol=ticker, **{"from": (today - timedelta(days=800)).isoformat(), "to": today.isoformat()})
+        rows = d.get("earningsCalendar")
         if not isinstance(rows, list):
-            raise ProviderDataError("earnings: malformed payload")
-        return [
-            EarningsReport(report_date=date.fromisoformat(r["period"]), fiscal_label=f"Q{r.get('quarter')} {r.get('year')}", source=self.name,
-                           eps_actual=r.get("actual"), eps_consensus=r.get("estimate"))
-            for r in rows if r.get("period")
-        ]
+            raise ProviderDataError("earnings history: malformed payload")
+        out = []
+        for r in rows:
+            if not r.get("date") or r.get("epsActual") is None and r.get("revenueActual") is None:
+                continue
+            out.append(EarningsReport(report_date=date.fromisoformat(r["date"]), fiscal_label=f"Q{r.get('quarter')} {r.get('year')}", source=self.name,
+                                      eps_actual=r.get("epsActual"), eps_consensus=r.get("epsEstimate"),
+                                      revenue_actual=r.get("revenueActual"), revenue_consensus=r.get("revenueEstimate")))
+        return sorted(out, key=lambda x: x.report_date)
 
     def get_estimates(self, ticker: str, as_of: date) -> Any:
-        raise ProviderUnavailable("EPS/revenue estimate revisions require a licensed estimates feed (not configured)")
+        raise NotSupported("추정치 리비전은 유료 데이터 → 미제공(MISSING)")
 
     def get_valuation_history(self, ticker: str, multiple: str) -> ValuationHistory:
-        raise ProviderUnavailable("historical valuation series not available from Finnhub free tier")
+        raise NotSupported("과거 밸류에이션 시계열 미제공(MISSING)")

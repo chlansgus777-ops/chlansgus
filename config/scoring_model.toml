@@ -1,7 +1,7 @@
 # MarketLens model configuration — every change must bump the relevant version.
-scoring_model_version = "scoring-1.1.0"   # 1.1.0: direction-aware exposure-graph transmission
-decision_model_version = "decision-1.0.0"
-config_version = "config-1.0.0"
+scoring_model_version = "scoring-2.0.0"   # 2.0.0: coverage-blended components, point-in-time freshness inputs
+decision_model_version = "decision-2.0.0" # 2.0.0: stale-core veto, portfolio gate on all bullish actions, ADD R/R, prior-stop, sector-unknown
+config_version = "config-2.0.0"           # 2.0.0: per-type freshness rules, paper account limits
 
 [scoring.weights]            # points; normalised to 0-100
 fundamental = 25
@@ -30,6 +30,7 @@ material_score_delta = 5.0
 material_rr_delta = 0.5
 material_revision_delta = 0.02
 committee_max_confidence_adjustment = 10.0
+min_rr = 2.0
 
 [entry]
 min_rr = 2.0
@@ -45,6 +46,24 @@ add_zone_atr = 0.5
 [freshness]
 realtime_max_age_seconds = 120
 delayed_max_age_seconds = 1200
+
+# Per data type: FRESH up to fresh_max, usable (DELAYED, lower confidence) up to usable_max, then STALE.
+# price_history / options are in NYSE sessions, the rest in calendar days (see domain/freshness.py).
+[freshness.rules.price_history]
+fresh_max = 1
+usable_max = 3
+[freshness.rules.fundamentals]
+fresh_max = 190      # a 10-K can arrive 90 days after FY end → the prior Q3 is ~181 days old until then
+usable_max = 280
+[freshness.rules.earnings]
+fresh_max = 110
+usable_max = 200
+[freshness.rules.analyst]
+fresh_max = 7
+usable_max = 30
+[freshness.rules.short_interest]
+fresh_max = 30
+usable_max = 45
 
 [scanner]
 min_price = 5.0
@@ -97,6 +116,9 @@ default_half_spread_bps = 2.0
 max_holding_days = 60
 t1_exit_fraction = 0.5
 position_notional = 10000
+starting_capital = 100000
+max_position_weight = 0.10
+max_open_positions = 25
 
 [calibration]
 min_samples = 100
@@ -113,6 +135,7 @@ min_ic_periods = 5
 
 [cache_ttl_seconds]
 price = 15
+bars = 3600
 news = 300
 fundamentals = 86400
 macro = 3600

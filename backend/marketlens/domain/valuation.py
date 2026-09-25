@@ -53,7 +53,10 @@ def compute_multiples(
     extras: Mapping[str, float] | None = None,
 ) -> ValuationMultiples:
     extras = extras or {}
-    shares = m.shares_diluted
+    # market cap needs the CURRENT share count (cover-page shares outstanding). Weighted-average diluted
+    # shares describe a past period's EPS denominator, not today's share count → never used here; without
+    # shares outstanding the market cap (and every multiple built on it) is left missing.
+    shares = m.shares_outstanding
     mcap = price * shares if price is not None and shares else None
     ev = None
     if mcap is not None and m.total_debt is not None and m.cash is not None:
@@ -67,9 +70,7 @@ def compute_multiples(
     elif m.eps_growth_ttm is not None:
         growth_pct = m.eps_growth_ttm * 100
     peg = fwd_pe / growth_pct if fwd_pe is not None and growth_pct is not None and growth_pct > 0 else None
-    equity = extras.get("book_value") if extras.get("book_value") else None
-    if equity is None and "total_equity" in extras:
-        equity = extras["total_equity"]
+    equity = extras.get("book_value") or m.total_equity
     tbv = extras.get("tangible_book_value")
     ffo_ttm = extras.get("ffo_ttm")
     dps = extras.get("dividends_per_share_ttm")

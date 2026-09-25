@@ -34,31 +34,50 @@ def now() -> datetime:
 
 
 # ---------------------------------------------------------------- scans & recommendations
-def latest_scan(s: Session) -> ScanRunRow | None:
-    return s.scalars(select(ScanRunRow).order_by(desc(ScanRunRow.id)).limit(1)).first()
+def latest_scan(s: Session, mode: str | None = None) -> ScanRunRow | None:
+    q = select(ScanRunRow)
+    if mode is not None:
+        q = q.where(ScanRunRow.mode == mode)
+    return s.scalars(q.order_by(desc(ScanRunRow.id)).limit(1)).first()
 
 
 def recommendations_for_scan(s: Session, scan_id: int) -> list[RecommendationRow]:
     return list(s.scalars(select(RecommendationRow).where(RecommendationRow.scan_run_id == scan_id).order_by(RecommendationRow.rank)))
 
 
-def latest_recommendation(s: Session, ticker: str, before: datetime | None = None) -> RecommendationRow | None:
+def latest_recommendation(s: Session, ticker: str, before: datetime | None = None, mode: str | None = None, inclusive: bool = False, exclude_id: int | None = None) -> RecommendationRow | None:
+    """Latest recommendation before ``before`` (point-in-time upper bound; ``inclusive`` also admits the
+    same timestamp) in ``mode``."""
     q = select(RecommendationRow).where(RecommendationRow.ticker == ticker)
     if before is not None:
-        q = q.where(RecommendationRow.as_of < before)
+        q = q.where(RecommendationRow.as_of <= before if inclusive else RecommendationRow.as_of < before)
+    if mode is not None:
+        q = q.where(RecommendationRow.mode == mode)
+    if exclude_id is not None:
+        q = q.where(RecommendationRow.id != exclude_id)
     return s.scalars(q.order_by(desc(RecommendationRow.as_of), desc(RecommendationRow.id)).limit(1)).first()
 
 
-def recommendation_history(s: Session, ticker: str, limit: int = 20) -> list[RecommendationRow]:
-    return list(s.scalars(select(RecommendationRow).where(RecommendationRow.ticker == ticker).order_by(desc(RecommendationRow.as_of)).limit(limit)))
+def recommendation_history(s: Session, ticker: str, limit: int = 20, mode: str | None = None, until: datetime | None = None) -> list[RecommendationRow]:
+    q = select(RecommendationRow).where(RecommendationRow.ticker == ticker)
+    if mode is not None:
+        q = q.where(RecommendationRow.mode == mode)
+    if until is not None:
+        q = q.where(RecommendationRow.as_of <= until)
+    return list(s.scalars(q.order_by(desc(RecommendationRow.as_of), desc(RecommendationRow.id)).limit(limit)))
 
 
 def get_recommendation(s: Session, rec_id: int) -> RecommendationRow | None:
     return s.get(RecommendationRow, rec_id)
 
 
-def all_recommendations(s: Session) -> list[RecommendationRow]:
-    return list(s.scalars(select(RecommendationRow).order_by(RecommendationRow.as_of)))
+def all_recommendations(s: Session, mode: str | None = None, until: datetime | None = None) -> list[RecommendationRow]:
+    q = select(RecommendationRow)
+    if mode is not None:
+        q = q.where(RecommendationRow.mode == mode)
+    if until is not None:
+        q = q.where(RecommendationRow.as_of <= until)
+    return list(s.scalars(q.order_by(RecommendationRow.as_of, RecommendationRow.id)))
 
 
 def committee_for(s: Session, rec_id: int) -> CommitteeRow | None:
@@ -100,7 +119,10 @@ def llm_usage(s: Session) -> dict[str, Any]:
     r = s.execute(select(func.count(LLMCallRow.id), func.sum(LLMCallRow.input_tokens), func.sum(LLMCallRow.output_tokens), func.sum(LLMCallRow.estimated_cost_usd), func.avg(LLMCallRow.latency_ms))).one()
     cached = s.scalar(select(func.count(LLMCallRow.id)).where(LLMCallRow.cached.is_(True))) or 0
     errors = s.scalar(select(func.count(LLMCallRow.id)).where(LLMCallRow.error.is_not(None))) or 0
-    return {"calls": r[0] or 0, "input_tokens": r[1] or 0, "output_tokens": r[2] or 0, "estimated_cost_usd": round(r[3] or 0.0, 4), "avg_latency_ms": round(r[4] or 0.0, 1), "cached_calls": cached, "errors": errors}
+    unknown = s.scalar(select(func.count(LLMCallRow.id)).where(LLMCallRow.estimated_cost_usd.is_(None), LLMCallRow.cached.is_(False), LLMCallRow.error.is_(None))) or 0
+    return {"calls": r[0] or 0, "input_tokens": r[1] or 0, "output_tokens": r[2] or 0,
+            "estimated_cost_usd": round(r[3] or 0.0, 4), "unknown_cost_calls": unknown,
+            "cost_complete": unknown == 0, "avg_latency_ms": round(r[4] or 0.0, 1), "cached_calls": cached, "errors": errors}
 
 
 # ---------------------------------------------------------------- outcomes / factors
@@ -108,8 +130,11 @@ def outcomes_for(s: Session, rec_id: int) -> list[OutcomeRow]:
     return list(s.scalars(select(OutcomeRow).where(OutcomeRow.recommendation_id == rec_id)))
 
 
-def factor_samples(s: Session) -> list[tuple[FactorSnapshotRow, dict[int, float]]]:
-    snaps = list(s.scalars(select(FactorSnapshotRow)))
+def factor_samples(s: Session, mode: str | None = None) -> list[tuple[FactorSnapshotRow, dict[int, float]]]:
+    q = select(FactorSnapshotRow)
+    if mode is not None:
+        q = q.join(RecommendationRow, RecommendationRow.id == FactorSnapshotRow.recommendation_id).where(RecommendationRow.mode == mode)
+    snaps = list(s.scalars(q))
     outs: dict[int, dict[int, float]] = {}
     for o in s.scalars(select(OutcomeRow)):
         outs.setdefault(o.recommendation_id, {})[o.horizon] = o.forward_return
@@ -247,7 +272,8 @@ def store_fundamental_vintages(s: Session, ticker: str, quarters: Iterable[Any])
     for q in quarters:
         key = (ticker, q.period_end, q.filed_date, q.source)
         if s.get(FundamentalVintageRow, key) is None:
-            s.add(FundamentalVintageRow(ticker=ticker, period_end=q.period_end, filed_date=q.filed_date, source=q.source, payload=json.loads(json.dumps(dataclasses.asdict(q), default=str)), retrieved_at=t))
+            payload = json.loads(json.dumps(dataclasses.asdict(q), default=str))  # dates → ISO strings (codec-compatible)
+            s.add(FundamentalVintageRow(ticker=ticker, period_end=q.period_end, filed_date=q.filed_date, source=q.source, payload=payload, retrieved_at=t))
 
 
 def store_bars(s: Session, ticker: str, bars: Iterable[Any], source: str) -> None:

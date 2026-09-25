@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from marketlens.domain.enums import DataMode, DataQuality
+from marketlens.domain.freshness import FreshnessCheck
 
 DERIVED_SOURCE = "calc"
 
@@ -25,6 +26,7 @@ class Fact:
     mode: DataMode = DataMode.LIVE
     evidence_id: str | None = None
     note: str | None = None
+    published_ts: datetime | None = None  # when the value became public (filing / release), if known
 
     @property
     def is_usable(self) -> bool:
@@ -80,6 +82,7 @@ class DataQualityReport:
     core_missing: tuple[str, ...] = ()
     conflicts: tuple[str, ...] = ()
     stale: tuple[str, ...] = ()
+    checks: tuple[FreshnessCheck, ...] = ()  # per-type freshness details (age, limits, Korean reason)
 
     @property
     def completeness(self) -> float:
@@ -101,7 +104,7 @@ class DataQualityReport:
         return DataQuality.FRESH
 
 
-def build_quality_report(facts: dict[str, Fact | None], core_fields: tuple[str, ...]) -> DataQualityReport:
+def build_quality_report(facts: dict[str, Fact | None], core_fields: tuple[str, ...], checks: tuple[FreshnessCheck, ...] = ()) -> DataQualityReport:
     fields: list[tuple[str, DataQuality]] = []
     core_missing: list[str] = []
     conflicts: list[str] = []
@@ -118,5 +121,5 @@ def build_quality_report(facts: dict[str, Fact | None], core_fields: tuple[str, 
         if name in core_fields and q in (DataQuality.MISSING, DataQuality.CONFLICTING):
             core_missing.append(name)
     return DataQualityReport(
-        fields=tuple(fields), core_missing=tuple(core_missing), conflicts=tuple(conflicts), stale=tuple(stale)
+        fields=tuple(fields), core_missing=tuple(core_missing), conflicts=tuple(conflicts), stale=tuple(stale), checks=checks
     )

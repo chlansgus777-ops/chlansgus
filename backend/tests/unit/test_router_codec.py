@@ -88,7 +88,7 @@ def test_what_changed_explains_changes():
     kinds = {c.kind for c in ch}
     assert {"revision", "price_zone", "rr", "score", "issue", "macro", "agent"} <= kinds
     mat = material_reasons(ch)
-    assert "price entered the buy zone" in mat and any("R/R" in m for m in mat)
+    assert "가격이 매수 구간에 진입" in mat and any("손익비" in m for m in mat)
 
 
 def test_small_price_move_is_not_material():

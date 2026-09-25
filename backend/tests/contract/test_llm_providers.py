@@ -71,4 +71,4 @@ def test_openai_compatible():
 
 def test_cost_estimate():
     assert estimate_cost("claude-opus-5", 1_000_000, 1_000_000) == 30.0
-    assert estimate_cost("unknown", 10, 10) == 0.0
+    assert estimate_cost("unknown", 10, 10) is None  # unknown price is UNKNOWN, never reported as free

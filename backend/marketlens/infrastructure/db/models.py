@@ -57,6 +57,11 @@ class SecurityRow(Base):
     delisted_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     mode: Mapped[str] = mapped_column(String(8))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    first_seen: Mapped[date | None] = mapped_column(Date, nullable=True)
+    sic: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    profile_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    shares_outstanding: Mapped[float | None] = mapped_column(Float, nullable=True)
+    shares_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 class PriceBarRow(Base):
@@ -131,6 +136,9 @@ class RecommendationRow(Base):
     provider_version: Mapped[str] = mapped_column(String(128))
     config_version: Mapped[str] = mapped_column(String(64))
     schema_version: Mapped[str] = mapped_column(String(32))
+    code_version: Mapped[str | None] = mapped_column(String(64), nullable=True)  # git commit of the running code
+    app_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    llm_model_ids: Mapped[str | None] = mapped_column(String(200), nullable=True)  # exact model IDs used by the committee
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -159,7 +167,7 @@ class LLMCallRow(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
-    estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    estimated_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)  # None = unknown price, not free
     cached: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
@@ -182,6 +190,7 @@ class OutcomeRow(Base):
     excess_return: Mapped[float | None] = mapped_column(Float, nullable=True)
     matured_on: Mapped[date] = mapped_column(Date)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(24), default="OK", server_default="OK")  # OK | DELISTED_LAST_PRICE
 
 
 class FactorSnapshotRow(Base):
@@ -216,6 +225,9 @@ class PaperPositionRow(Base):
     stop: Mapped[float] = mapped_column(Float)
     target1: Mapped[float] = mapped_column(Float)
     target2: Mapped[float] = mapped_column(Float)
+    max_buy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notional: Mapped[float | None] = mapped_column(Float, nullable=True)
+    skip_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
     thesis: Mapped[str] = mapped_column(Text)
     model_version: Mapped[str] = mapped_column(String(64))
     exits: Mapped[list] = mapped_column(JSON, default=list)

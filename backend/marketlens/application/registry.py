@@ -54,18 +54,21 @@ def build_mock_registry(health: HealthRegistry | None = None, now: datetime | No
     return ProviderRegistry(DataMode.MOCK, health, chains, world=w)
 
 
-def build_live_registry(settings: Settings, health: HealthRegistry | None = None) -> ProviderRegistry:
+def build_live_registry(settings: Settings, health: HealthRegistry | None = None, transport: object | None = None, sleep: object | None = None) -> ProviderRegistry:
+    """LIVE providers. ``transport`` (an httpx transport) is only injected by fixture/contract tests."""
     from marketlens.providers.live.finnhub import FinnhubProvider
+    from marketlens.providers.live.finra import FinraShortInterestProvider
     from marketlens.providers.live.fred import FredMacroProvider
     from marketlens.providers.live.polygon import PolygonProvider
     from marketlens.providers.live.sec_edgar import SecEdgarProvider
     from marketlens.providers.live.unavailable import UnavailableProvider as U
 
     health = health or HealthRegistry()
-    sec = SecEdgarProvider(settings.sec_user_agent)
-    fin = FinnhubProvider(settings.finnhub_api_key)
-    poly = PolygonProvider(settings.polygon_api_key)
-    fred = FredMacroProvider(settings.fred_api_key)
+    fast = {"rate_per_s": 1000.0} if transport is not None else {}  # fixture transports: no real quota to respect
+    sec = SecEdgarProvider(settings.sec_user_agent, transport=transport, **fast)
+    fin = FinnhubProvider(settings.finnhub_api_key, transport=transport, realtime=settings.finnhub_realtime, **fast)
+    poly = PolygonProvider(settings.polygon_api_key, transport=transport, **fast)
+    fred = FredMacroProvider(settings.fred_api_key, transport=transport, **fast)
     impl = {
         "universe": [sec],
         "price": [fin, poly],  # quotes: Finnhub; bars: Polygon (Finnhub raises NotSupported → failover)
@@ -73,13 +76,14 @@ def build_live_registry(settings: Settings, health: HealthRegistry | None = None
         "analyst": [fin],  # earnings history only; estimates/revisions need a licensed feed
         "news": [fin],
         "macro": [fred],
-        "options": [U("options", "no licensed options data provider configured")],
-        "short_interest": [U("short_interest", "no licensed short-interest provider configured")],
-        "insider": [U("insider", "insider data provider not configured (SEC Form 4 parser is a planned addition)")],
-        "institutional": [U("institutional", "13F provider not configured")],
+        "options": [U("options", "무료 옵션 데이터 공급원 없음 (MISSING)")],
+        "short_interest": [FinraShortInterestProvider(settings.finra_api_key, settings.finra_api_secret, transport=transport, **fast)],
+        "insider": [sec],  # SEC Form 4 (free)
+        "institutional": [U("institutional", "13F 기관 보유는 CUSIP 매핑이 필요해 미구현 (MISSING)")],
         "calendar": [fin],
     }
-    chains = {k: ProviderChain(k, impl[k], DataMode.LIVE, health) for k in PROVIDER_KINDS}
+    extra = {"sleep": sleep} if sleep is not None else {}
+    chains = {k: ProviderChain(k, impl[k], DataMode.LIVE, health, **extra) for k in PROVIDER_KINDS}
     return ProviderRegistry(DataMode.LIVE, health, chains)
 
 

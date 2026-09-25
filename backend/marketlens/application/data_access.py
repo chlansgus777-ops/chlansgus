@@ -52,10 +52,15 @@ class TTLCache:
 
 
 class DataAccess:
-    def __init__(self, registry: ProviderRegistry, ttl: dict[str, timedelta], cache: TTLCache | None = None) -> None:
+    """Provider access with TTL caching and (optionally) the local point-in-time store in front.
+
+    Reads prefer the store (no API call); provider results are written back to the store."""
+
+    def __init__(self, registry: ProviderRegistry, ttl: dict[str, timedelta], cache: TTLCache | None = None, store: Any = None) -> None:
         self.reg = registry
         self.ttl = ttl
         self.cache = cache or TTLCache()
+        self.store = store
 
     def _get(self, kind: str, chain: str, method: str, key: str, *args: Any, cross_check: Any = None) -> Fetched:
         ttl = self.ttl.get(kind, timedelta(minutes=5))
@@ -71,16 +76,49 @@ class DataAccess:
         return f
 
     def securities(self, as_of: date | None = None) -> Fetched:
+        if self.store is not None:
+            stored = self.store.securities(as_of)
+            if stored:
+                return Fetched(stored, "store")
         return self._get("universe", "universe", "list_securities", str(as_of), as_of)
 
     def quote(self, t: str) -> Fetched:
         return self._get("price", "price", "get_quote", t, t, cross_check=relative_conflicts(("price",), 0.02))
 
     def bars(self, t: str, start: date, end: date) -> Fetched:
-        return self._get("fundamentals", "price", "get_daily_bars", f"{t}:{start}:{end}", t, start, end)
+        if self.store is not None:
+            stored = self.store.bars(t, start, end)
+            # the store is authoritative when it covers the requested end (±3 sessions for sync lag)
+            if stored and (end - stored[-1].day).days <= 5:
+                return Fetched(stored, "store")
+        f = self._get("bars", "price", "get_daily_bars", f"{t}:{start}:{end}", t, start, end)
+        if self.store is not None and f.value:
+            self.store.save_bars(t, f.value, f.provider or "provider")
+        return f
+
+    def bars_bulk(self, tickers: list[str], start: date, end: date) -> dict[str, list[Bar]]:
+        """Bars for many tickers. With the local store this is ONE query for the whole market; without
+        it (mock / first run) it falls back to per-ticker provider calls."""
+        out: dict[str, list[Bar]] = {}
+        if self.store is not None:
+            stored = self.store.last_bars_all(start, end)
+            out = {t: stored[t] for t in tickers if t in stored and stored[t]}
+        for t in tickers:
+            if t not in out:
+                v = self.bars(t, start, end).value
+                if v:
+                    out[t] = list(v)
+        return out
 
     def quarters(self, t: str) -> Fetched:
-        return self._get("fundamentals", "fundamental", "get_quarterly", t, t)
+        if self.store is not None:
+            stored = self.store.quarters(t, self.ttl.get("fundamentals", timedelta(days=1)))
+            if stored:
+                return Fetched(stored, "store")
+        f = self._get("fundamentals", "fundamental", "get_quarterly", t, t)
+        if self.store is not None and f.value:
+            self.store.save_quarters(t, f.value)
+        return f
 
     def extras(self, t: str) -> Fetched:
         return self._get("fundamentals", "fundamental", "get_extras", t, t)
@@ -100,6 +138,9 @@ class DataAccess:
     def short_interest(self, t: str) -> Fetched:
         return self._get("analyst", "short_interest", "get_short_interest", t, t)
 
+    def insider(self, t: str) -> Fetched:
+        return self._get("fundamentals", "insider", "get_insider", t, t)
+
     def macro(self, as_of: datetime) -> Fetched:
         return self._get("macro", "macro", "get_series", as_of.strftime("%Y%m%d%H"), list(ALL_SERIES), as_of)
 
@@ -113,7 +154,7 @@ class DataAccess:
     def macro_snapshot(self, as_of: datetime) -> tuple[MacroSnapshot | None, str | None]:
         f = self.macro(as_of)
         if f.value is None or not f.value:
-            return None, f.error or "no macro series"
+            return None, f.error or "거시 데이터 없음"
         return MacroSnapshot(as_of=as_of, series=f.value), None
 
 

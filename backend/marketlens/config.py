@@ -45,12 +45,35 @@ SECRET_ENV_KEYS = (
     "FRED_API_KEY",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
-    "FMP_API_KEY",
     "POLYGON_API_KEY",
+    "FINRA_API_KEY",
+    "FINRA_API_SECRET",
 )
 
-SCHEMA_VERSION = "schema-1"
-AGENT_PROMPT_VERSION = "prompts-1.0.0"
+SCHEMA_VERSION = "schema-2"
+AGENT_PROMPT_VERSION = "prompts-2.0.0"
+
+
+@lru_cache(maxsize=1)
+def code_version() -> str:
+    """Git commit of the running code (``+dirty`` when uncommitted changes exist), or the commit baked
+    into a release build via MARKETLENS_BUILD_COMMIT / build_commit.txt; "unknown" otherwise."""
+    env = os.environ.get("MARKETLENS_BUILD_COMMIT")
+    if env:
+        return env.strip()[:64]
+    baked = REPO_ROOT / "build_commit.txt"
+    if baked.exists():
+        return baked.read_text(encoding="utf-8").strip()[:64] or "unknown"
+    import subprocess
+
+    try:
+        head = subprocess.run(["git", "rev-parse", "--short=12", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, timeout=3)
+        if head.returncode != 0:
+            return "unknown"
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=REPO_ROOT, capture_output=True, text=True, timeout=3)
+        return head.stdout.strip() + ("+dirty" if dirty.stdout.strip() else "")
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
 
 
 def _load_dotenv() -> None:
@@ -82,8 +105,10 @@ class Settings:
     sec_user_agent: str | None
     finnhub_api_key: str | None = field(repr=False, default=None)
     fred_api_key: str | None = field(repr=False, default=None)
-    fmp_api_key: str | None = field(repr=False, default=None)
     polygon_api_key: str | None = field(repr=False, default=None)
+    finra_api_key: str | None = field(repr=False, default=None)
+    finra_api_secret: str | None = field(repr=False, default=None)
+    finnhub_realtime: bool = False
     anthropic_api_key: str | None = field(repr=False, default=None)
     openai_api_key: str | None = field(repr=False, default=None)
     openai_base_url: str = "https://api.openai.com/v1"
@@ -96,9 +121,10 @@ class Settings:
     log_level: str = "INFO"
     scheduler: bool = False
     scan_interval_minutes: int = 60
+    data_dir: Path = field(default_factory=default_data_dir)
 
     def secrets(self) -> list[str]:
-        return [s for s in (self.finnhub_api_key, self.fred_api_key, self.fmp_api_key, self.polygon_api_key, self.anthropic_api_key, self.openai_api_key) if s]
+        return [s for s in (self.finnhub_api_key, self.fred_api_key, self.polygon_api_key, self.finra_api_key, self.finra_api_secret, self.anthropic_api_key, self.openai_api_key) if s]
 
 
 def _bool(v: str | None, default: bool) -> bool:
@@ -118,8 +144,10 @@ def load_settings() -> Settings:
         sec_user_agent=os.environ.get("SEC_USER_AGENT"),
         finnhub_api_key=_secret("FINNHUB_API_KEY"),
         fred_api_key=_secret("FRED_API_KEY"),
-        fmp_api_key=_secret("FMP_API_KEY"),
         polygon_api_key=_secret("POLYGON_API_KEY"),
+        finra_api_key=_secret("FINRA_API_KEY"),
+        finra_api_secret=_secret("FINRA_API_SECRET"),
+        finnhub_realtime=_bool(os.environ.get("FINNHUB_REALTIME"), False),
         anthropic_api_key=_secret("ANTHROPIC_API_KEY"),
         openai_api_key=_secret("OPENAI_API_KEY"),
         openai_base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
@@ -132,6 +160,7 @@ def load_settings() -> Settings:
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         scheduler=_bool(os.environ.get("MARKETLENS_SCHEDULER"), False),
         scan_interval_minutes=int(os.environ.get("SCAN_INTERVAL_MINUTES", "60")),
+        data_dir=data_dir,
     )
 
 

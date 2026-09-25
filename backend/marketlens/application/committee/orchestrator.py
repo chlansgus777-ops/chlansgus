@@ -17,10 +17,12 @@ from typing import Any, Callable, Protocol, TypeVar
 from pydantic import BaseModel
 
 from marketlens.application.committee.consensus import DIVERGENCE_CONFIDENCE_PENALTY, consensus
-from marketlens.application.committee.guard import allowed_numbers, parse_strict, sanitize
-from marketlens.application.committee.prompts import PROMPT_VERSION, build_prompt, evidence_pack
+from marketlens.application.committee.guard import parse_strict, sanitize
+from marketlens.application.committee.prompts import PROMPT_VERSION, build_prompt, evidence_pack, pack_evidence
 from marketlens.application.committee.schemas import ANALYSTS, AgentReport, DebateArgument, PortfolioAdvice, RiskReview, Synthesis
+from marketlens.application.evidence import Evidence
 from marketlens.application.pipeline import AnalysisResult
+from marketlens.config import SCHEMA_VERSION
 from marketlens.domain.decision import apply_downgrade, bounded_confidence
 from marketlens.domain.enums import Action
 from marketlens.domain.market_calendar import UTC
@@ -51,7 +53,7 @@ class LLMCallRecord:
     input_tokens: int
     output_tokens: int
     latency_ms: float
-    estimated_cost_usd: float
+    estimated_cost_usd: float | None  # None = model price unknown (never reported as $0)
     cached: bool
     error: str | None
     created_at: datetime
@@ -111,11 +113,22 @@ class Committee:
         self.max_adj = max_confidence_adjustment
         self.recorder = recorder
         self.parallel = parallel
+        self._known: set[str] = set()
+        self._universe: tuple[Evidence, ...] = ()
+        self._ticker = ""
+
+    def cache_key(self, tier: str, system: str, user: str, schema: dict[str, Any]) -> str:
+        """Provider, exact model ID and generation settings, prompt/schema versions and the full prompt.
+
+        Changing the model (or its settings) can never return a response cached for another model."""
+        sig_fn = getattr(self.llm, "signature", None)
+        sig = sig_fn(tier) if callable(sig_fn) else f"{getattr(self.llm, 'name', '')}|unknown-model"
+        return hashlib.sha256(json.dumps([PROMPT_VERSION, SCHEMA_VERSION, tier, getattr(self.llm, "name", ""), sig, system, user, schema], sort_keys=True).encode()).hexdigest()
 
     # ------------------------------------------------------------------ LLM call with cache/guard
-    def _ask(self, model_cls: type[M], role: str, tier: str, system: str, user: str, valid_ids: set[str], allowed: list[float], res: CommitteeResult) -> M | None:
+    def _ask(self, model_cls: type[M], role: str, tier: str, system: str, user: str, pack: list[Evidence], res: CommitteeResult) -> M | None:
         schema = strict_schema(model_cls.model_json_schema())
-        fp = hashlib.sha256(json.dumps([PROMPT_VERSION, tier, getattr(self.llm, "name", ""), system, user, schema], sort_keys=True).encode()).hexdigest()
+        fp = self.cache_key(tier, system, user, schema)
         cached = self.cache.get(fp)
         text: str | None = cached
         rec: LLMCallRecord
@@ -145,25 +158,35 @@ class Committee:
             return None
         if cached is None:
             self.cache.put(fp, rec.model, text)
-        clean, rep = sanitize(obj, valid_ids, allowed)
+        clean, rep = sanitize(obj, pack, self._ticker, self._known, self._universe)
         if rep.rejected_claims or rep.invalid_evidence_ids:
-            res.guard[role] = {"rejected_claims": rep.rejected_claims, "invalid_evidence_ids": rep.invalid_evidence_ids}
+            res.guard[role] = {"rejected_claims": rep.rejected_claims, "invalid_evidence_ids": rep.invalid_evidence_ids, "confidence_scale": rep.confidence_scale}
             log_event(log, Event.AGENT_OUTPUT_REJECTED, level=logging.WARNING, role=role, rejected=len(rep.rejected_claims), invalid_ids=len(rep.invalid_evidence_ids))
+        if rep.reject_output:
+            res.invalid_outputs[role] = "근거 없는 출력: 인용한 근거 ID가 모두 무효이거나 유효한 논점이 없음"
+            return None
         return clean
 
     # ------------------------------------------------------------------ main
-    def run(self, r: AnalysisResult, external_news: list[tuple[str, str]] | None = None) -> CommitteeResult:
+    def run(self, r: AnalysisResult, external_news: list[tuple[str, str]] | None = None, known_tickers: set[str] | None = None) -> CommitteeResult:
         det = r.decision
         res = CommitteeResult(
             ticker=r.ticker, status="COMPLETED", reason=None, deterministic_action=det.action.value, final_action=det.action.value,
             deterministic_confidence=det.confidence, final_confidence=det.confidence,
             size_class=r.portfolio_review.size_cap.value if r.portfolio_review else None, action_changed_by=None,
         )
+        if det.action == Action.DATA_INSUFFICIENT:
+            # downgrade-only: nothing the committee says can change DATA INSUFFICIENT → don't spend on it
+            res.status, res.reason = "SKIPPED", "데이터 부족/오래됨(하드 거부권) → AI 위원회 생략(결과를 바꿀 수 없음)"
+            return res
         if not getattr(self.llm, "available", False):
-            res.status, res.reason = "UNAVAILABLE", "AI COMMITTEE UNAVAILABLE: no LLM provider configured"
+            res.status, res.reason = "UNAVAILABLE", f"AI COMMITTEE UNAVAILABLE: {getattr(self.llm, 'reason', 'LLM 제공자 미설정')}"
             log_event(log, Event.COMMITTEE_UNAVAILABLE, ticker=r.ticker)
             return res
         log_event(log, Event.COMMITTEE_STARTED, ticker=r.ticker)
+        self._ticker = r.ticker
+        self._universe = r.evidence
+        self._known = {t for t in (known_tickers or set()) if len(t) >= 2} | {r.ticker}
         valid_ids = {e.evidence_id for e in r.evidence}
         from marketlens.application.safety import detect_injection
 
@@ -191,7 +214,7 @@ class Committee:
             comp = r.scorecard.component(ANALYST_COMPONENT[name])
             ctx = {"component_subscore": comp.subscore if comp.available else None, "component_available": comp.available}
             system, user = build_prompt(name, r.ticker, sm, pack, ctx, external if name == "news" else None)
-            rep = self._ask(AgentReport, name, "fast", system, user, valid_ids, allowed_numbers([p["value"] for p in pack]), res)
+            rep = self._ask(AgentReport, name, "fast", system, user, pack_evidence(r.evidence, name), res)
             if rep is not None and rep.agent != name:
                 res.invalid_outputs[name] = "agent field does not match role"
                 return name, None
@@ -212,7 +235,7 @@ class Committee:
                 pack = evidence_pack(r.evidence, side)
                 ctx = {"round": rnd, "agent_reports": summaries, "opponent_previous": prev.get("bear" if side == "bull" else "bull")}
                 system, user = build_prompt(side, r.ticker, sm, pack, ctx)
-                arg = self._ask(DebateArgument, f"{side}_r{rnd}", TIER[side], system, user, valid_ids, allowed_numbers([p["value"] for p in pack]), res)
+                arg = self._ask(DebateArgument, f"{side}_r{rnd}", TIER[side], system, user, pack_evidence(r.evidence, side), res)
                 if arg is not None and (arg.side != side or arg.round != rnd):
                     res.invalid_outputs[f"{side}_r{rnd}"] = "side/round mismatch"
                     arg = None
@@ -224,14 +247,15 @@ class Committee:
         pack = evidence_pack(r.evidence, "synthesizer")
         ctx_s = {"consensus_pct": cons, "divergence": div, "deterministic_score": r.scorecard.total, "deterministic_action": det.action.value, "debate": res.debate}
         system, user = build_prompt("synthesizer", r.ticker, sm, pack, ctx_s)
-        syn = self._ask(Synthesis, "synthesizer", TIER["synthesizer"], system, user, valid_ids, allowed_numbers([p["value"] for p in pack] + [cons, r.scorecard.total]), res)
+        extra = [Evidence("COMMITTEE_CONSENSUS", "score", "위원회 합의도", cons, "calc", None, "FRESH", "committee.consensus", r.ticker, "pct")] if cons is not None else []
+        syn = self._ask(Synthesis, "synthesizer", TIER["synthesizer"], system, user, pack_evidence(r.evidence, "synthesizer") + extra, res)
         res.synthesis = syn.model_dump() if syn else None
 
         # ---- Risk manager (downgrade-only)
         pack = evidence_pack(r.evidence, "risk_manager")
         ctx_r = {"deterministic_action": det.action.value, "vetoes": [v.value for v in det.vetoes], "event_risk": r.event_risk.level, "synthesis": res.synthesis}
         system, user = build_prompt("risk_manager", r.ticker, sm, pack, ctx_r)
-        risk = self._ask(RiskReview, "risk_manager", TIER["risk_manager"], system, user, valid_ids, allowed_numbers([p["value"] for p in pack]), res)
+        risk = self._ask(RiskReview, "risk_manager", TIER["risk_manager"], system, user, pack_evidence(r.evidence, "risk_manager"), res)
         res.risk_review = risk.model_dump() if risk else None
 
         # ---- Portfolio manager (size ≤ deterministic cap)
@@ -239,7 +263,7 @@ class Committee:
         pack = evidence_pack(r.evidence, "portfolio_manager")
         ctx_p = {"size_cap": pr.size_cap.value if pr else "HALF", "fit": pr.fit if pr else "NEUTRAL", "warnings": list(pr.warnings) if pr else []}
         system, user = build_prompt("portfolio_manager", r.ticker, sm, pack, ctx_p)
-        pm = self._ask(PortfolioAdvice, "portfolio_manager", TIER["portfolio_manager"], system, user, valid_ids, allowed_numbers([p["value"] for p in pack]), res)
+        pm = self._ask(PortfolioAdvice, "portfolio_manager", TIER["portfolio_manager"], system, user, pack_evidence(r.evidence, "portfolio_manager"), res)
         res.portfolio_advice = pm.model_dump() if pm else None
 
         final, changed_by = apply_committee(det.action, risk, pm, pr.size_cap.value if pr else None)

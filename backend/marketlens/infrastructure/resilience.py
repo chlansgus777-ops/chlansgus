@@ -115,7 +115,9 @@ def retry(fn: Callable[[], T], cfg: RetryConfig | None = None, sleep: Callable[[
             if attempt == cfg.attempts - 1:
                 break
             wait = e.retry_after if e.retry_after is not None else backoff_delay(attempt, cfg, rng)
-            sleep(min(wait, cfg.max_delay_s))
+            if wait > cfg.max_delay_s:
+                raise  # respect long Retry-After windows: don't hammer early, let health mark RATE_LIMITED
+            sleep(wait)
         except RETRYABLE as e:
             last = e
             if attempt == cfg.attempts - 1:

@@ -50,6 +50,7 @@ class EventRisk:
     nearest: CatalystEvent | None
     days_until: int | None
     reasons: tuple[str, ...]
+    binary: bool = False  # an imminent binary outcome (FDA / antitrust / regulatory decision)
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +66,7 @@ def assess_event_risk(ticker: str, events: list[CatalystEvent], today: date, cfg
     relevant = [e for e in events if (ticker in e.affected or (not e.affected and e.event_type in MACRO_EVENTS)) and e.event_date >= today]
     relevant.sort(key=lambda e: e.event_date)
     level = "LOW"
+    binary = False
     reasons: list[str] = []
     rank = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "EXTREME": 3}
 
@@ -77,15 +79,16 @@ def assess_event_risk(ticker: str, events: list[CatalystEvent], today: date, cfg
     for e in relevant:
         dte = e.days_until(today)
         if e.event_type in BINARY_EVENTS and ticker in e.affected and dte <= cfg.binary_window_days:
-            bump("EXTREME", f"binary event '{e.title}' in {dte} trading day(s)")
+            bump("EXTREME", f"양자택일형 이벤트 '{e.title}' {dte}거래일 후")
+            binary = True
         if e.event_type == CatalystType.EARNINGS and ticker in e.affected and dte <= cfg.earnings_window_days:
             if e.expected_move is not None and e.expected_move >= cfg.extreme_expected_move:
-                bump("EXTREME", f"earnings in {dte}d with implied move ±{e.expected_move:.0%}")
+                bump("EXTREME", f"실적발표 {dte}거래일 후, 옵션 예상변동폭 ±{e.expected_move:.0%}")
             elif e.expected_move is not None and e.expected_move >= cfg.high_expected_move:
-                bump("HIGH", f"earnings in {dte}d with implied move ±{e.expected_move:.0%}")
+                bump("HIGH", f"실적발표 {dte}거래일 후, 옵션 예상변동폭 ±{e.expected_move:.0%}")
             else:
-                bump("MEDIUM", f"earnings in {dte} trading day(s)")
+                bump("MEDIUM", f"실적발표 {dte}거래일 후")
         if e.event_type in MACRO_EVENTS and dte <= 1 and e.importance >= 0.8:
-            bump("MEDIUM", f"high-importance macro release '{e.title}' within 1 day")
+            bump("MEDIUM", f"중요 거시지표 발표 '{e.title}' 1거래일 이내")
     nearest = relevant[0] if relevant else None
-    return EventRisk(level, nearest, nearest.days_until(today) if nearest else None, tuple(reasons))
+    return EventRisk(level, nearest, nearest.days_until(today) if nearest else None, tuple(reasons), binary)

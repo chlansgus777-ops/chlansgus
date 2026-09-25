@@ -46,6 +46,19 @@ _QUALITY_TABLE: dict[tuple[bool | None, bool | None], ResultQuality] = {
     (False, False): ResultQuality.MISS_AND_LOWER,
 }
 
+RESULT_KO: dict[ResultQuality, str] = {
+    ResultQuality.BEAT_AND_RAISE: "예상 상회 + 가이던스 상향",
+    ResultQuality.BEAT: "예상 상회",
+    ResultQuality.BEAT_WEAK_GUIDE: "예상 상회했으나 가이던스 부진",
+    ResultQuality.GUIDE_UP: "예상 부합 + 가이던스 상향",
+    ResultQuality.INLINE: "예상 부합",
+    ResultQuality.GUIDE_DOWN: "예상 부합했으나 가이던스 하향",
+    ResultQuality.MISS_STRONG_GUIDE: "예상 하회했으나 가이던스 양호",
+    ResultQuality.MISS: "예상 하회",
+    ResultQuality.MISS_AND_LOWER: "예상 하회 + 가이던스 하향",
+    ResultQuality.UNKNOWN: "판단 불가",
+}
+
 QUALITY_SCORE: dict[ResultQuality, float] = {
     ResultQuality.BEAT_AND_RAISE: 1.0,
     ResultQuality.BEAT: 0.75,
@@ -156,9 +169,9 @@ def assess_earnings(
     else:
         rq = _QUALITY_TABLE[(beat, guide)]
     if rq == ResultQuality.BEAT_WEAK_GUIDE:
-        notes.append("Beat, but guidance below consensus: low-quality beat")
+        notes.append("실적은 예상을 넘었지만 가이던스가 컨센서스 아래: 질 낮은 서프라이즈")
     if rq == ResultQuality.MISS_STRONG_GUIDE:
-        notes.append("Missed the quarter but guided above consensus")
+        notes.append("분기 실적은 하회했지만 가이던스는 컨센서스 위")
 
     streak = 0
     for r in reversed(rs):
@@ -177,7 +190,7 @@ def assess_earnings(
         else:
             bar = ExpectationBar.NORMAL
     if bar == ExpectationBar.HIGH:
-        notes.append("High expectation bar: a routine beat may not be enough")
+        notes.append("시장 기대치가 높음: 평범한 서프라이즈로는 부족할 수 있음")
     return EarningsAssessment(
         revenue_surprise=rev_s,
         eps_surprise=eps_s,
