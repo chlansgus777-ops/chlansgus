@@ -17,7 +17,7 @@ from typing import Any, Callable, Protocol, TypeVar
 from pydantic import BaseModel
 
 from marketlens.application.committee.consensus import DIVERGENCE_CONFIDENCE_PENALTY, consensus
-from marketlens.application.committee.guard import GuardReport, allowed_numbers, parse_strict, sanitize
+from marketlens.application.committee.guard import allowed_numbers, parse_strict, sanitize
 from marketlens.application.committee.prompts import PROMPT_VERSION, build_prompt, evidence_pack
 from marketlens.application.committee.schemas import ANALYSTS, AgentReport, DebateArgument, PortfolioAdvice, RiskReview, Synthesis
 from marketlens.application.pipeline import AnalysisResult

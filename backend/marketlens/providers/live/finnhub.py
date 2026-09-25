@@ -6,7 +6,7 @@ Candles / estimates / revisions / options need paid plans → not implemented he
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Sequence
 
 from marketlens.domain.catalysts import CatalystEvent, CatalystType

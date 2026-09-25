@@ -212,3 +212,49 @@ def model_versions(s: Session) -> list[ModelVersionRow]:
 
 def recs_between(s: Session, start: date, end: date) -> list[RecommendationRow]:
     return list(s.scalars(select(RecommendationRow).where(RecommendationRow.as_of >= datetime.combine(start, datetime.min.time(), tzinfo=UTC), RecommendationRow.as_of <= datetime.combine(end, datetime.max.time(), tzinfo=UTC))))
+
+
+# ---------------------------------------------------------------- universe / history (point-in-time storage)
+def upsert_securities(s: Session, securities: Iterable[Any], mode: str) -> int:
+    """Keep every security ever seen. Delisted names stay in history (active=False), never deleted."""
+    from marketlens.infrastructure.db.models import SecurityRow
+
+    n = 0
+    t = now()
+    for sec in securities:
+        row = s.get(SecurityRow, sec.ticker)
+        vals = dict(company_name=sec.company_name, exchange=sec.exchange.value, sector=sec.sector, industry=sec.industry,
+                    market_cap=sec.market_cap, is_etf=sec.is_etf, is_adr=sec.is_adr, country_of_incorporation=sec.country_of_incorporation,
+                    currency=sec.currency, active=sec.active and sec.delisted_at is None, listed_at=sec.listed_at, delisted_at=sec.delisted_at,
+                    mode=mode, updated_at=t)
+        if row is None:
+            s.add(SecurityRow(ticker=sec.ticker, **vals))
+        else:
+            for k, v in vals.items():
+                setattr(row, k, v)
+        n += 1
+    return n
+
+
+def store_fundamental_vintages(s: Session, ticker: str, quarters: Iterable[Any]) -> None:
+    """Each (period_end, filed_date, source) is stored once; later restatements add rows, never overwrite."""
+    import dataclasses
+    import json
+
+    from marketlens.infrastructure.db.models import FundamentalVintageRow
+
+    t = now()
+    for q in quarters:
+        key = (ticker, q.period_end, q.filed_date, q.source)
+        if s.get(FundamentalVintageRow, key) is None:
+            s.add(FundamentalVintageRow(ticker=ticker, period_end=q.period_end, filed_date=q.filed_date, source=q.source, payload=json.loads(json.dumps(dataclasses.asdict(q), default=str)), retrieved_at=t))
+
+
+def store_bars(s: Session, ticker: str, bars: Iterable[Any], source: str) -> None:
+    from marketlens.infrastructure.db.models import PriceBarRow
+
+    existing = {d for (d,) in s.execute(select(PriceBarRow.day).where(PriceBarRow.ticker == ticker, PriceBarRow.source == source))}
+    t = now()
+    for b in bars:
+        if b.day not in existing:
+            s.add(PriceBarRow(ticker=ticker, day=b.day, source=source, open=b.open, high=b.high, low=b.low, close=b.close, volume=b.volume, retrieved_at=t))

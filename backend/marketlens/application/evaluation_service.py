@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from statistics import fmean
 from typing import Any
@@ -15,7 +14,7 @@ from marketlens.domain.calibration import compare_shadow, propose_weights, segme
 from marketlens.domain.enums import BULLISH_ACTIONS, Action, ExitReason
 from marketlens.domain.evaluation import HORIZONS, OutcomeSample, bucket_performance, factor_ic, forward_return, is_mature
 from marketlens.domain.market import Bar
-from marketlens.domain.market_calendar import UTC, is_trading_day, last_completed_session, next_trading_day, regular_close_time, to_ny
+from marketlens.domain.market_calendar import is_trading_day, last_completed_session, next_trading_day, regular_close_time, to_ny
 from marketlens.domain.paper import PaperConfig, PaperSignal, PaperTradeResult, compute_metrics, simulate
 from marketlens.domain.scoring import COMPONENTS
 from marketlens.infrastructure.db import repository as repo

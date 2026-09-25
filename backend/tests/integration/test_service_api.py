@@ -160,3 +160,14 @@ def test_mock_llm_refused_in_live_mode():
     st = Settings(mode=DataMode.LIVE, database_url="sqlite:///:memory:", sec_user_agent=None, llm_provider="mock")
     llm = build_llm(st)
     assert not llm.available
+
+
+def test_universe_and_history_are_persisted(mock_svc):
+    from sqlalchemy import func, select
+
+    from marketlens.infrastructure.db.models import FundamentalVintageRow, PriceBarRow, SecurityRow
+
+    with mock_svc.sf() as s:
+        assert s.scalar(select(func.count()).select_from(SecurityRow)) == 200
+        assert s.scalar(select(func.count()).select_from(FundamentalVintageRow)) > 0
+        assert s.scalar(select(func.count()).select_from(PriceBarRow)) > 0

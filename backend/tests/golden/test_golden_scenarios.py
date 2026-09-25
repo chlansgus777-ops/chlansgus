@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pytest

@@ -22,7 +22,7 @@ from marketlens.application.replay import ReplayOutcome, config_snapshot, replay
 from marketlens.application.scanner import ScanContext, ScanResult, Scanner
 from marketlens.application.theses import ThesisBook
 from marketlens.config import AGENT_PROMPT_VERSION, CONFIG_DIR, SCHEMA_VERSION, ModelConfig, Settings, load_model_config
-from marketlens.domain.enums import BULLISH_ACTIONS, Action, DataMode
+from marketlens.domain.enums import Action, DataMode
 from marketlens.domain.market_calendar import UTC
 from marketlens.domain.portfolio import Holding, Portfolio
 from marketlens.domain.what_changed import AnalysisDigest
@@ -204,6 +204,11 @@ class MarketLensService:
             )
             s.add(scan)
             s.flush()
+            repo.upsert_securities(s, ctx.securities.values(), self.mode.value)
+            for r in result.candidates:
+                inp = result.inputs[r.ticker]
+                repo.store_fundamental_vintages(s, r.ticker, inp.quarters)
+                repo.store_bars(s, r.ticker, inp.bars, inp.source_map.get("bars", "unknown"))
             if ctx.issues:
                 repo.upsert_issues(s, [(i.issue_id, i.category.value, i.importance, encode(i) | {"injection_flagged": False}) for i in ctx.issues.issues])
             committee_run = 0

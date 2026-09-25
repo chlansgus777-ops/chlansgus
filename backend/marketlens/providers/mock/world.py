@@ -16,7 +16,6 @@ from datetime import date, datetime, timedelta
 from marketlens.domain.enums import Exchange
 from marketlens.domain.market_calendar import (
     UTC,
-    add_trading_days,
     is_trading_day,
     last_completed_session,
 )

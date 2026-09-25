@@ -37,7 +37,6 @@ def test_domain_is_pure():
 
 def test_domain_cannot_import_frontend():
     for f in files("domain"):
-        text = f.read_text(encoding="utf-8")
         assert "frontend" not in "".join(imports(f)), f
 
 
@@ -86,3 +85,7 @@ def test_no_hardcoded_api_keys():
     pat = re.compile(r"(sk-ant-[A-Za-z0-9]{10,}|sk-[A-Za-z0-9]{20,}|api_key\s*=\s*['\"][A-Za-z0-9]{16,}['\"])")
     for f in PKG.rglob("*.py"):
         assert not pat.search(f.read_text(encoding="utf-8")), f
+
+
+def test_infrastructure_does_not_depend_on_application_or_api():
+    assert violations("infrastructure", ("marketlens.application", "marketlens.api", "marketlens.workers")) == []

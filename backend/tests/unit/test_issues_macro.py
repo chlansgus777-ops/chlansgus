@@ -1,7 +1,5 @@
 from datetime import date, datetime, timezone
 
-import pytest
-
 from marketlens.domain.enums import ConfirmedStatus, EdgeType, Horizon, IssueCategory, NodeType
 from marketlens.domain.exposure_graph import Edge, ExposureGraph, HopDecay, Node
 from marketlens.domain.issues import Issue, IssueEffect, aggregate_issue_score, compute_issue_impacts
