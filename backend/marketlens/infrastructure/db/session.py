@@ -41,8 +41,9 @@ def migrate(url: str) -> None:
 
     if url.startswith("sqlite:///") and not url.endswith(":memory:"):
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
-    here = Path(__file__).resolve().parents[3]
-    cfg = Config(str(here / "alembic.ini"))
-    cfg.set_main_option("script_location", str(here / "alembic"))
+    from marketlens.config import ALEMBIC_DIR
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(ALEMBIC_DIR))
     cfg.set_main_option("sqlalchemy.url", url)
     command.upgrade(cfg, "head")

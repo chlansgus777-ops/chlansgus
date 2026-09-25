@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 import tomllib
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -27,8 +28,17 @@ from marketlens.domain.portfolio import PortfolioLimits
 from marketlens.domain.scoring import ScoringModel
 from marketlens.domain.sector_models import MetricRule, SectorModel
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+FROZEN = bool(getattr(sys, "frozen", False))
+# In a PyInstaller build resources are unpacked under sys._MEIPASS; in development the repo root is used.
+REPO_ROOT = Path(getattr(sys, "_MEIPASS", "")) if FROZEN else Path(__file__).resolve().parents[2]
 CONFIG_DIR = Path(os.environ.get("MARKETLENS_CONFIG_DIR", REPO_ROOT / "config"))
+ALEMBIC_DIR = REPO_ROOT / "alembic" if FROZEN else REPO_ROOT / "backend" / "alembic"
+
+
+def default_data_dir() -> Path:
+    if FROZEN and os.name == "nt":
+        return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "MarketLens"
+    return REPO_ROOT / "data" if not FROZEN else Path.home() / ".marketlens"
 
 SECRET_ENV_KEYS = (
     "FINNHUB_API_KEY",
@@ -48,7 +58,7 @@ def _load_dotenv() -> None:
         from dotenv import load_dotenv
     except ImportError:  # pragma: no cover - optional
         return
-    env_path = Path(os.environ.get("MARKETLENS_ENV_FILE", REPO_ROOT / ".env"))
+    env_path = Path(os.environ.get("MARKETLENS_ENV_FILE", (default_data_dir() / ".env") if FROZEN else REPO_ROOT / ".env"))
     if env_path.exists():
         load_dotenv(env_path, override=False)
 
@@ -100,7 +110,7 @@ def _bool(v: str | None, default: bool) -> bool:
 def load_settings() -> Settings:
     _load_dotenv()
     mode = DataMode(os.environ.get("MARKETLENS_MODE", "MOCK").upper())
-    data_dir = Path(os.environ.get("MARKETLENS_DATA_DIR", REPO_ROOT / "data"))
+    data_dir = Path(os.environ.get("MARKETLENS_DATA_DIR", default_data_dir()))
     default_db = f"sqlite:///{(data_dir / ('marketlens_mock.db' if mode == DataMode.MOCK else 'marketlens.db')).as_posix()}"
     return Settings(
         mode=mode,

@@ -131,6 +131,20 @@ def _pct(x: float | None) -> str:
     return "N/A" if x is None else f"{x * 100:+.1f}%"
 
 
+_PCT_HINTS = ("growth", "margin", "yield", "roe", "roic", "rotce", "cet1", "nim", "rate", "share", "dilution", "change", "payout", "occupancy", "nrr", "discount", "to_loans", "to_revenue", "vs_revenue")
+
+
+def fmt_metric(metric: str, value: float) -> str:
+    """Human-readable metric value for explanations (percent / multiple / plain)."""
+    if metric == "rule_of_40":
+        return f"{value:.0f}"
+    if metric.endswith("_to_ebitda") or "coverage" in metric or metric in ("book_to_bill",):
+        return f"{value:.2f}x"
+    if any(h in metric for h in _PCT_HINTS):
+        return f"{value * 100:.1f}%"
+    return f"{value:.3g}"
+
+
 def _fundamental(inp: ScoringInputs) -> tuple[float | None, list[Reason], list[str]]:
     rs = inp.fundamental
     if rs is None or rs.subscore is None:
@@ -139,10 +153,10 @@ def _fundamental(inp: ScoringInputs) -> tuple[float | None, list[Reason], list[s
     ranked = sorted((i for i in rs.items if i.subscore is not None), key=lambda i: -(i.subscore or 0) * i.weight)
     for i in ranked[:3]:
         if (i.subscore or 0) >= 0.6:
-            reasons.append(Reason(f"{i.label} {i.value:.4g} (strong for {inp.sector_model_id})", +1, (f"fund.{i.metric}",)))
+            reasons.append(Reason(f"{i.label} {fmt_metric(i.metric, i.value)} (strong for {inp.sector_model_id})", +1, (f"fund.{i.metric}",)))
     for i in sorted((i for i in rs.items if i.subscore is not None), key=lambda i: (i.subscore or 0))[:2]:
         if (i.subscore or 0) <= 0.35:
-            reasons.append(Reason(f"{i.label} {i.value:.4g} (weak for {inp.sector_model_id})", -1, (f"fund.{i.metric}",)))
+            reasons.append(Reason(f"{i.label} {fmt_metric(i.metric, i.value)} (weak for {inp.sector_model_id})", -1, (f"fund.{i.metric}",)))
     return rs.subscore, reasons, list(rs.missing)
 
 

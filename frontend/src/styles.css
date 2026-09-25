@@ -1,0 +1,54 @@
+:root {
+  --bg: #0b0f14; --panel: #121821; --panel2: #18202b; --border: #243040; --text: #d7dee8; --muted: #8796a8;
+  --accent: #4ea1ff; --pos: #2fbf71; --neg: #ef5b5b; --warn: #f0b429; --info: #8b7cf6;
+  font-family: Inter, "Segoe UI", system-ui, sans-serif; font-size: 14px; color: var(--text); background: var(--bg);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); }
+a { color: var(--accent); text-decoration: none; }
+.layout { display: grid; grid-template-columns: 210px 1fr; min-height: 100vh; }
+.nav { background: var(--panel); border-right: 1px solid var(--border); padding: 12px 0; position: sticky; top: 0; height: 100vh; overflow: auto; }
+.nav .brand { font-weight: 700; font-size: 18px; padding: 4px 18px 14px; letter-spacing: .5px; }
+.nav a { display: block; padding: 8px 18px; color: var(--muted); }
+.nav a.active, .nav a:hover { color: var(--text); background: var(--panel2); border-left: 3px solid var(--accent); padding-left: 15px; }
+.main { padding: 16px 22px 60px; min-width: 0; }
+.banner { padding: 8px 14px; font-weight: 700; text-align: center; letter-spacing: 1px; }
+.banner.mock { background: #6b1f1f; color: #ffd6d6; }
+.banner.live { background: #123b26; color: #c9f5dc; }
+h1 { font-size: 20px; margin: 6px 0 14px; }
+h2 { font-size: 15px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+.grid { display: grid; gap: 14px; }
+.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .g3, .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .g2 { grid-template-columns: 1fr; } }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; min-width: 0; }
+.kpi .v { font-size: 22px; font-weight: 700; }
+.kpi .l { color: var(--muted); font-size: 12px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; position: sticky; top: 0; background: var(--panel); cursor: default; }
+tr:hover td { background: var(--panel2); }
+.scroll { overflow: auto; max-height: 70vh; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; border: 1px solid transparent; }
+.a-BUY { background: #0f3d26; color: #5ff0a0; border-color: #1f7a4a; }
+.a-BUY-SMALL, .a-ADD { background: #173a2b; color: #a6f0c6; border-color: #2c6b4c; }
+.a-HOLD, .a-WATCH { background: #1d2a3a; color: #9cc7ff; border-color: #2f4966; }
+.a-WAIT { background: #3a3218; color: #f5d57a; border-color: #6b5a24; }
+.a-REDUCE, .a-SELL { background: #3d1717; color: #ff9d9d; border-color: #7a2c2c; }
+.a-DATA-INSUFFICIENT { background: #2d2d2d; color: #d0d0d0; border-color: #555; }
+.q-FRESH { color: var(--pos); } .q-DELAYED { color: var(--warn); } .q-STALE, .q-MISSING, .q-CONFLICTING { color: var(--neg); }
+.pos { color: var(--pos); } .neg { color: var(--neg); } .muted { color: var(--muted); } .warn { color: var(--warn); }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.spread { justify-content: space-between; }
+button, input, select { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font: inherit; }
+button { cursor: pointer; } button:hover { border-color: var(--accent); } button:disabled { opacity: .5; cursor: wait; }
+.bar { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; }
+.bar > div { height: 100%; background: var(--accent); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; }
+.kv .k { color: var(--muted); }
+.list { margin: 0; padding-left: 18px; } .list li { margin: 3px 0; }
+.big-action { font-size: 28px; font-weight: 800; }
+.err { color: var(--neg); padding: 12px; }
+.pill { display: inline-block; padding: 1px 6px; border-radius: 4px; background: var(--panel2); color: var(--muted); font-size: 11px; margin-right: 4px; cursor: help; }
+details summary { cursor: pointer; color: var(--accent); margin: 8px 0; }

@@ -27,15 +27,17 @@ class Edge:
     last_updated: date
 
 
-# How an effect on ``src`` transmits to ``dst`` across an edge (sign multiplier).
-# e.g. MSFT CUSTOMER_OF-> NVDA stored as NVDA SUPPLIER_OF MSFT: MSFT demand ↑ → NVDA ↑ (+1).
-# A competitor's positive news is mildly negative (share shift).
-TRANSMISSION: dict[EdgeType, float] = {
+# Direction-aware transmission. For an edge ``src -[type]-> dst``:
+#   FROM_DST[type] = multiplier when an effect on dst travels to src
+#   FROM_SRC[type] = multiplier when an effect on src travels to dst
+# e.g. NVDA SUPPLIER_OF MSFT: MSFT demand ↑ → NVDA ↑ (1.0), but NVDA's own problem barely moves MSFT (0.2).
+# Macro/theme exposures only flow from the factor to the company, never back.
+FROM_DST: dict[EdgeType, float] = {
     EdgeType.SUPPLIER_OF: 1.0,
-    EdgeType.CUSTOMER_OF: 1.0,
-    EdgeType.PARTNER_OF: 0.8,
-    EdgeType.DEPENDS_ON: 1.0,
     EdgeType.PROVIDES_TO: 1.0,
+    EdgeType.CUSTOMER_OF: 0.2,
+    EdgeType.DEPENDS_ON: 1.0,
+    EdgeType.PARTNER_OF: 0.8,
     EdgeType.COMPETITOR_OF: -0.5,
     EdgeType.EXPOSED_TO_REGION: 1.0,
     EdgeType.EXPOSED_TO_RATE: 1.0,
@@ -43,6 +45,23 @@ TRANSMISSION: dict[EdgeType, float] = {
     EdgeType.EXPOSED_TO_AI: 1.0,
     EdgeType.EXPOSED_TO_CLOUD: 1.0,
 }
+FROM_SRC: dict[EdgeType, float] = {
+    EdgeType.SUPPLIER_OF: 0.2,
+    EdgeType.PROVIDES_TO: 0.2,
+    EdgeType.CUSTOMER_OF: 1.0,
+    EdgeType.DEPENDS_ON: 0.2,
+    EdgeType.PARTNER_OF: 0.8,
+    EdgeType.COMPETITOR_OF: -0.5,
+    EdgeType.EXPOSED_TO_REGION: 0.0,
+    EdgeType.EXPOSED_TO_RATE: 0.0,
+    EdgeType.EXPOSED_TO_COMMODITY: 0.0,
+    EdgeType.EXPOSED_TO_AI: 0.0,
+    EdgeType.EXPOSED_TO_CLOUD: 0.0,
+}
+
+
+def transmission(edge: "Edge", from_node: str) -> float:
+    return FROM_SRC[edge.edge_type] if from_node == edge.src else FROM_DST[edge.edge_type]
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +116,7 @@ class ExposureGraph:
                 for nb, e in self.neighbors(p.target):
                     if nb in p.path:
                         continue
-                    sign = TRANSMISSION.get(e.edge_type, 0.0)
+                    sign = transmission(e, p.target)
                     if sign == 0:
                         continue
                     m = raw_mult * sign * e.weight * decay.for_hops(hop)

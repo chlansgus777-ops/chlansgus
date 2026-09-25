@@ -15,3 +15,6 @@ frontend/dist/
 frontend/src-tauri/target/
 .venv/
 venv/
+frontend/src-tauri/gen/
+frontend/src-tauri/binaries/*.exe
+frontend/src-tauri/binaries/marketlens-backend-*

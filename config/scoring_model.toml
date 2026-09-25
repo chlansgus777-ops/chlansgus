@@ -1,5 +1,5 @@
 # MarketLens model configuration — every change must bump the relevant version.
-scoring_model_version = "scoring-1.0.0"
+scoring_model_version = "scoring-1.1.0"   # 1.1.0: direction-aware exposure-graph transmission
 decision_model_version = "decision-1.0.0"
 config_version = "config-1.0.0"
 

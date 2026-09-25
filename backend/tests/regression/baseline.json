@@ -5,7 +5,7 @@
    "first analysis for this ticker"
   ],
   "components": {
-   "catalyst": 0.3247,
+   "catalyst": 0.3437,
    "earnings_revision": 0.2419,
    "entry_rr": 0.706,
    "fundamental": 0.1916,
@@ -21,12 +21,11 @@
    1.95
   ],
   "issues": {
-   "ISSUE_AI_0eb0d7d4": 4.43,
-   "ISSUE_EXPORT_CONTROL_4ab502c7": -12.93
+   "ISSUE_EXPORT_CONTROL_4ab502c7": -2.59
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-1.0.0",
-  "total": 38.02,
+  "scoring_model_version": "scoring-1.1.0",
+  "total": 38.19,
   "vetoes": []
  },
  "JPM": {
@@ -54,7 +53,7 @@
    "ISSUE_INFLATION_e6a97115": 3.97
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-1.0.0",
+  "scoring_model_version": "scoring-1.1.0",
   "total": 52.34,
   "vetoes": [
    "THESIS_INVALIDATED"
@@ -86,7 +85,7 @@
    "ISSUE_EXPORT_CONTROL_4ab502c7": -30.39
   },
   "raw_action": "BUY SMALL",
-  "scoring_model_version": "scoring-1.0.0",
+  "scoring_model_version": "scoring-1.1.0",
   "total": 79.76,
   "vetoes": []
  },
@@ -116,7 +115,7 @@
    "ISSUE_EXPORT_CONTROL_4ab502c7": -17.4
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-1.0.0",
+  "scoring_model_version": "scoring-1.1.0",
   "total": 52.33,
   "vetoes": []
  },
@@ -145,7 +144,7 @@
    "ISSUE_OIL_fa0811d0": 9.68
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-1.0.0",
+  "scoring_model_version": "scoring-1.1.0",
   "total": 65.39,
   "vetoes": []
  }

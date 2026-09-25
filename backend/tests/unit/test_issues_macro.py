@@ -112,3 +112,19 @@ def test_macro_transmits_through_exposure():
     energy = macro_impact(MacroExposure(oil=0.9), moves)
     assert growth.net < 0 < bank.net and energy.net > 0
     assert any("headwind" in c[2] for c in growth.contributions)
+
+
+def test_supplier_problem_barely_moves_customer():
+    imps = {i.ticker: i for i in compute_issue_impacts(issue([IssueEffect("NVDA", -1.0, ("x",))], IssueCategory.EXPORT_CONTROL), graph())}
+    nvda = imps["NVDA"].at(Horizon.SWING).impact_score
+    tsm = imps["TSM"].at(Horizon.SWING).impact_score  # supplier of NVDA: demand shock transmits fully
+    msft = imps.get("MSFT")  # customer of NVDA: weak transmission
+    assert tsm < 0 and abs(tsm) > abs(nvda) * 0.5
+    assert msft is None or abs(msft.at(Horizon.SWING).impact_score) < abs(nvda) * 0.2
+
+
+def test_macro_factor_flows_only_to_companies():
+    g = ExposureGraph([Node("XOM", NodeType.COMPANY, "x"), Node("COMMODITY:OIL", NodeType.COMMODITY, "oil")],
+                      [Edge("XOM", "COMMODITY:OIL", EdgeType.EXPOSED_TO_COMMODITY, 0.9, 1.0, "s", D)])
+    assert "COMMODITY:OIL" not in g.propagate(["XOM"]) or abs(g.propagate(["XOM"])["COMMODITY:OIL"].multiplier) == 0
+    assert g.propagate(["COMMODITY:OIL"])["XOM"].multiplier > 0

@@ -1,0 +1,46 @@
+name: windows-build
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install backend
+        run: pip install -e "./backend[anthropic,windows]"
+      - name: Backend tests
+        run: |
+          pip install pytest
+          python -m pytest -q backend/tests
+      - name: Frontend build (desktop mode)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build:desktop
+      - name: PyInstaller sidecar
+        working-directory: backend
+        run: pyinstaller --noconfirm packaging/marketlens-backend.spec
+      - name: Place sidecar
+        run: Copy-Item backend/dist/marketlens-backend.exe frontend/src-tauri/binaries/marketlens-backend-x86_64-pc-windows-msvc.exe
+      - name: Icons
+        working-directory: frontend
+        run: npx tauri icon ../docs/assets/marketlens-icon.png
+      - name: Tauri bundle
+        working-directory: frontend
+        run: npx tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: marketlens-windows
+          path: |
+            frontend/src-tauri/target/release/bundle/nsis/*.exe
+            frontend/src-tauri/target/release/bundle/msi/*.msi
+            backend/dist/marketlens-backend.exe

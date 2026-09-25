@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "The UI talks to the local backend over HTTP only; no shell access from the webview.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
