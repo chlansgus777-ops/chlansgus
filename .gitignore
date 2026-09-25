@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+.env
+*.db
+*.sqlite3
+data/
+backend/build/
+backend/dist/
+*.egg-info/
+node_modules/
+frontend/dist/
+frontend/src-tauri/target/
+.venv/
+venv/

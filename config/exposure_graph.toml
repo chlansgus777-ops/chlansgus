@@ -1,0 +1,81 @@
+# Curated company exposure graph (reference data, not market data).
+# weight: strength of dependency 0..1; for EXPOSED_TO_RATE / EXPOSED_TO_COMMODITY the weight is a signed
+# sensitivity (+ benefits when the factor rises). confidence 0..1. Review and update periodically.
+version = "graph-1.0.0"
+last_updated = "2026-09-01"
+source = "curated: public filings (10-K customer/supplier disclosures) and industry structure"
+
+nodes = [
+  { id = "THEME:AI", type = "TechnologyTheme", label = "AI infrastructure" },
+  { id = "THEME:CLOUD", type = "TechnologyTheme", label = "Cloud computing" },
+  { id = "COUNTRY:CN", type = "Country", label = "China" },
+  { id = "COUNTRY:TW", type = "Country", label = "Taiwan" },
+  { id = "COMMODITY:OIL", type = "Commodity", label = "Crude oil" },
+  { id = "MACRO:RATES", type = "MacroFactor", label = "US interest rates" },
+]
+
+edges = [
+  { src = "NVDA", dst = "MSFT", type = "SUPPLIER_OF", weight = 0.8, confidence = 0.9 },
+  { src = "NVDA", dst = "AMZN", type = "SUPPLIER_OF", weight = 0.7, confidence = 0.9 },
+  { src = "NVDA", dst = "GOOGL", type = "SUPPLIER_OF", weight = 0.6, confidence = 0.85 },
+  { src = "NVDA", dst = "META", type = "SUPPLIER_OF", weight = 0.7, confidence = 0.9 },
+  { src = "TSM", dst = "NVDA", type = "SUPPLIER_OF", weight = 0.9, confidence = 0.95 },
+  { src = "TSM", dst = "AMD", type = "SUPPLIER_OF", weight = 0.8, confidence = 0.95 },
+  { src = "TSM", dst = "AAPL", type = "SUPPLIER_OF", weight = 0.8, confidence = 0.95 },
+  { src = "ASML", dst = "TSM", type = "SUPPLIER_OF", weight = 0.8, confidence = 0.9 },
+  { src = "VRT", dst = "MSFT", type = "SUPPLIER_OF", weight = 0.5, confidence = 0.8 },
+  { src = "VRT", dst = "AMZN", type = "SUPPLIER_OF", weight = 0.5, confidence = 0.8 },
+  { src = "VRT", dst = "META", type = "SUPPLIER_OF", weight = 0.4, confidence = 0.75 },
+  { src = "ANET", dst = "MSFT", type = "SUPPLIER_OF", weight = 0.6, confidence = 0.85 },
+  { src = "ANET", dst = "META", type = "SUPPLIER_OF", weight = 0.6, confidence = 0.85 },
+  { src = "AMD", dst = "NVDA", type = "COMPETITOR_OF", weight = 0.6, confidence = 0.9 },
+  { src = "ARM", dst = "AAPL", type = "SUPPLIER_OF", weight = 0.5, confidence = 0.8 },
+  { src = "NVDA", dst = "COUNTRY:CN", type = "EXPOSED_TO_REGION", weight = 0.3, confidence = 0.8 },
+  { src = "AMD", dst = "COUNTRY:CN", type = "EXPOSED_TO_REGION", weight = 0.25, confidence = 0.8 },
+  { src = "AAPL", dst = "COUNTRY:CN", type = "EXPOSED_TO_REGION", weight = 0.4, confidence = 0.85 },
+  { src = "TSM", dst = "COUNTRY:TW", type = "EXPOSED_TO_REGION", weight = 0.9, confidence = 0.95 },
+  { src = "XOM", dst = "COMMODITY:OIL", type = "EXPOSED_TO_COMMODITY", weight = 0.9, confidence = 0.95 },
+  { src = "CVX", dst = "COMMODITY:OIL", type = "EXPOSED_TO_COMMODITY", weight = 0.9, confidence = 0.95 },
+  { src = "NVDA", dst = "THEME:AI", type = "EXPOSED_TO_AI", weight = 0.9, confidence = 0.95 },
+  { src = "TSM", dst = "THEME:AI", type = "EXPOSED_TO_AI", weight = 0.6, confidence = 0.9 },
+  { src = "AMD", dst = "THEME:AI", type = "EXPOSED_TO_AI", weight = 0.6, confidence = 0.85 },
+  { src = "VRT", dst = "THEME:AI", type = "EXPOSED_TO_AI", weight = 0.6, confidence = 0.8 },
+  { src = "ANET", dst = "THEME:AI", type = "EXPOSED_TO_AI", weight = 0.6, confidence = 0.8 },
+  { src = "MSFT", dst = "THEME:AI", type = "EXPOSED_TO_AI", weight = 0.5, confidence = 0.8 },
+  { src = "MSFT", dst = "THEME:CLOUD", type = "EXPOSED_TO_CLOUD", weight = 0.7, confidence = 0.9 },
+  { src = "AMZN", dst = "THEME:CLOUD", type = "EXPOSED_TO_CLOUD", weight = 0.7, confidence = 0.9 },
+  { src = "GOOGL", dst = "THEME:CLOUD", type = "EXPOSED_TO_CLOUD", weight = 0.5, confidence = 0.85 },
+  { src = "JPM", dst = "MACRO:RATES", type = "EXPOSED_TO_RATE", weight = 0.4, confidence = 0.8 },
+  { src = "BAC", dst = "MACRO:RATES", type = "EXPOSED_TO_RATE", weight = 0.5, confidence = 0.8 },
+  { src = "NEE", dst = "MACRO:RATES", type = "EXPOSED_TO_RATE", weight = -0.6, confidence = 0.85 },
+  { src = "PLD", dst = "MACRO:RATES", type = "EXPOSED_TO_RATE", weight = -0.6, confidence = 0.85 },
+]
+
+# Explicit macro sensitivities (−1..1). Fallback for tickers not listed: [sector_defaults].
+[macro_exposure]
+NVDA = { rates = -0.5, oil = 0.0, usd = -0.3, ai = 0.9 }
+AMD = { rates = -0.5, usd = -0.3, ai = 0.6 }
+TSM = { rates = -0.4, usd = -0.2, ai = 0.6 }
+MSFT = { rates = -0.4, usd = -0.4, ai = 0.5 }
+AMZN = { rates = -0.4, usd = -0.3, ai = 0.3 }
+JPM = { rates = 0.4, usd = 0.0 }
+XOM = { rates = 0.0, oil = 0.9, usd = -0.2 }
+CVX = { rates = 0.0, oil = 0.9, usd = -0.2 }
+NEE = { rates = -0.7 }
+PLD = { rates = -0.6 }
+
+[sector_defaults]
+"Technology" = { rates = -0.4, usd = -0.3, ai = 0.2 }
+"Communication Services" = { rates = -0.3, usd = -0.2, ai = 0.2 }
+"Consumer Cyclical" = { rates = -0.3, oil = -0.2 }
+"Consumer Defensive" = { rates = -0.1, oil = -0.1 }
+"Financial Services" = { rates = 0.3 }
+"Healthcare" = { rates = -0.2, usd = -0.2 }
+"Energy" = { oil = 0.8 }
+"Industrials" = { rates = -0.2, oil = -0.1 }
+"Real Estate" = { rates = -0.6 }
+"Utilities" = { rates = -0.6 }
+
+[industry_defaults]
+"Semiconductors" = { ai = 0.5 }
+"Airlines" = { oil = -0.8 }

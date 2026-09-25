@@ -1,0 +1,121 @@
+# MarketLens model configuration — every change must bump the relevant version.
+scoring_model_version = "scoring-1.0.0"
+decision_model_version = "decision-1.0.0"
+config_version = "config-1.0.0"
+
+[scoring.weights]            # points; normalised to 0-100
+fundamental = 25
+valuation = 15
+earnings_revision = 15
+catalyst = 10
+macro = 10
+technical = 10
+risk = 10
+entry_rr = 15
+
+[scoring]
+missing_component_subscore = 0.35   # conservative value for a component with no data (flagged)
+
+[decision]
+buy_enter = 80
+buy_exit = 76
+buy_small_enter = 72
+buy_small_exit = 68
+watch_floor = 55
+hold_floor = 55
+reduce_floor = 45
+min_completeness = 0.6
+min_liquidity_dollar_volume = 20000000
+material_score_delta = 5.0
+material_rr_delta = 0.5
+material_revision_delta = 0.02
+committee_max_confidence_adjustment = 10.0
+
+[entry]
+min_rr = 2.0
+stop_atr_buffer = 0.5
+max_stop_atr = 3.0
+fallback_stop_atr = 2.0
+min_target_atr = 1.0
+fallback_target1_atr = 3.0
+fallback_target2_atr = 5.0
+ideal_entry_atr_above_support = 0.25
+add_zone_atr = 0.5
+
+[freshness]
+realtime_max_age_seconds = 120
+delayed_max_age_seconds = 1200
+
+[scanner]
+min_price = 5.0
+min_market_cap = 1000000000
+min_avg_dollar_volume = 20000000
+include_etfs = false
+stage2_keep = 400
+stage3_keep = 150
+stage4_keep = 60
+final_candidates = 40
+ai_committee_top_n = 20
+
+[scanner.stage2_weights]     # cheap quant filter (fundamental-first; technicals are minor)
+revenue_growth = 0.18
+eps_growth = 0.14
+eps_revision = 0.20
+relative_strength = 0.08
+volume_trend = 0.04
+distance_from_52w_high = 0.06
+forward_pe = 0.10
+fcf_yield = 0.10
+liquidity = 0.05
+volatility = 0.05
+
+[issues]
+max_hops = 2
+decay_direct = 1.0
+decay_one_hop = 0.65
+decay_two_hop = 0.35
+major_importance = 0.7
+
+[event_risk]
+earnings_window_days = 5
+binary_window_days = 3
+extreme_expected_move = 0.15
+high_expected_move = 0.08
+
+[portfolio]
+max_single_name = 0.10
+max_sector = 0.30
+max_theme = 0.40
+high_correlation = 0.75
+full_position = 0.05
+half_position = 0.025
+small_position = 0.0125
+
+[paper]
+slippage_bps = 5.0
+default_half_spread_bps = 2.0
+max_holding_days = 60
+t1_exit_fraction = 0.5
+position_notional = 10000
+
+[calibration]
+min_samples = 100
+max_weight_change = 0.05
+horizon = 20
+min_ic_improvement = 0.01
+min_shadow_samples = 100
+min_segment_samples = 60
+
+[evaluation]
+min_ic_samples = 30
+min_period_samples = 5
+min_ic_periods = 5
+
+[cache_ttl_seconds]
+price = 15
+news = 300
+fundamentals = 86400
+macro = 3600
+analyst = 21600
+options = 900
+universe = 86400
