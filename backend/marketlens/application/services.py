@@ -112,7 +112,7 @@ class MarketLensService:
         # LIVE: provider → local point-in-time store → scanner. MOCK data is generated in memory.
         store_on = (self.registry.mode == DataMode.LIVE) if use_store is None else use_store
         self.store = MarketStore(session_factory, self.registry.mode.value) if store_on else None
-        self.data = DataAccess(self.registry, self.base_cfg.cache_ttl, store=self.store)
+        self.data = DataAccess(self.registry, self.base_cfg.cache_ttl, store=self.store, now_fn=self.now)
         self._lock = threading.Lock()
         self.last_scan_context: ScanContext | None = None
         self._check_db_environment()

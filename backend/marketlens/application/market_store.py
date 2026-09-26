@@ -22,7 +22,8 @@ from marketlens.domain.market_calendar import NY, UTC
 from marketlens.domain.corporate_actions import SplitEvent, split_factor
 from marketlens.domain.estimates import EstimateObservation
 from marketlens.domain.guidance import GuidanceItem
-from marketlens.infrastructure.db.models import AppSettingRow, CorporateActionRow, EstimateSnapshotRow, GuidanceRow, FundamentalVintageRow, PriceBarRow, SecurityRow
+from marketlens.infrastructure.db.models import (AppSettingRow, CorporateActionRow, EstimateSnapshotRow, FundamentalVintageRow, GuidanceRow, IngestionManifestRow,
+                                               PriceBarRow, SecurityRow, TickerHistoryRow)
 
 
 def _now() -> datetime:
@@ -187,6 +188,8 @@ class MarketStore:
             fund = {t for (t,) in s.execute(select(FundamentalVintageRow.ticker).distinct())}
             days = s.execute(select(func.count(func.distinct(PriceBarRow.day))).where(PriceBarRow.day >= today - timedelta(days=400))).scalar() or 0
             est_first = s.execute(select(func.min(EstimateSnapshotRow.observed_on)).where(EstimateSnapshotRow.provider == "finnhub")).scalar()
+            man = dict(s.execute(select(IngestionManifestRow.ticker, IngestionManifestRow.status)
+                                 .where(IngestionManifestRow.mode == self.mode, IngestionManifestRow.dataset == "fundamentals")).all())
         listed = [a for a in active if a[3] != "OTC"]
         big = [a for a in listed if a[1] is not None and a[1] >= min_market_cap]
         return {
@@ -198,9 +201,57 @@ class MarketStore:
             "bars_240": sum(1 for a in listed if counts.get(a[0], 0) >= 240),
             "large_with_sector": sum(1 for a in big if a[2] not in (None, "", "Unknown")),
             "large_with_fundamentals": sum(1 for a in big if a[0] in fund),
+            # large names with no quarterly us-gaap facts at all (20-F / IFRS filers) — not "missing"
+            "large_fund_not_supported": sum(1 for a in big if a[0] not in fund and man.get(a[0]) == "NOT_SUPPORTED"),
+            "large_fund_failed": sum(1 for a in big if a[0] not in fund and man.get(a[0]) in ("FAILED", "RATE_LIMITED")),
             "market_days": int(days),
             "estimate_history_days": (today - est_first).days if est_first else 0,
         }
+
+    def tickers_with_fundamentals(self) -> set[str]:
+        with self.sf() as s:
+            return {t for (t,) in s.execute(select(FundamentalVintageRow.ticker).distinct())}
+
+    # ------------------------------------------------------------------ ingestion manifest
+    RETRY_NOT_SUPPORTED = timedelta(days=30)  # e.g. a 20-F filer has no quarterly us-gaap facts
+    RETRY_MAX = timedelta(hours=24)
+
+    def ingestion(self, dataset: str, ticker: str) -> IngestionManifestRow | None:
+        with self.sf() as s:
+            row = s.get(IngestionManifestRow, (self.mode, dataset, ticker))
+            if row is not None:
+                s.expunge(row)
+            return row
+
+    def ingestion_all(self, dataset: str) -> dict[str, IngestionManifestRow]:
+        with self.sf() as s:
+            rows = list(s.scalars(select(IngestionManifestRow).where(IngestionManifestRow.mode == self.mode, IngestionManifestRow.dataset == dataset)))
+            for r in rows:
+                s.expunge(r)
+        return {r.ticker: r for r in rows}
+
+    def record_ingestion(self, dataset: str, ticker: str, now: datetime, status: str, error: str | None = None, rows: int = 0) -> None:
+        """OK resets the failure count. A failure schedules the next attempt: NOT_SUPPORTED after 30 days,
+        otherwise 1h, 2h, 4h … capped at 24h (never a tight retry loop against a free provider)."""
+        with self.sf() as s:
+            row = s.get(IngestionManifestRow, (self.mode, dataset, ticker))
+            if row is None:
+                row = IngestionManifestRow(mode=self.mode, dataset=dataset, ticker=ticker, status=status, attempts=0, last_attempt_at=now, rows=0)
+                s.add(row)
+            row.status, row.last_attempt_at = status, now
+            if status == "OK":
+                row.attempts, row.last_success_at, row.next_attempt_at, row.error, row.rows = 0, now, None, None, rows
+            else:
+                row.attempts = (row.attempts or 0) + 1
+                row.error = (error or status)[:300]
+                wait = self.RETRY_NOT_SUPPORTED if status == "NOT_SUPPORTED" else min(self.RETRY_MAX, timedelta(hours=2 ** (row.attempts - 1)))
+                row.next_attempt_at = now + wait
+            s.commit()
+
+    def ingestion_stats(self, dataset: str) -> dict[str, int]:
+        with self.sf() as s:
+            return {st: n for st, n in s.execute(select(IngestionManifestRow.status, func.count()).where(IngestionManifestRow.mode == self.mode, IngestionManifestRow.dataset == dataset)
+                                                 .group_by(IngestionManifestRow.status)).all()}
 
     # ------------------------------------------------------------------ checkpoints
     def get_setting(self, key: str) -> str | None:
@@ -347,11 +398,12 @@ class MarketStore:
                 row.retrieved_at = _now()
             s.commit()
 
-    def quarters(self, ticker: str, max_age: timedelta) -> list[QuarterlyFinancials] | None:
-        """Stored quarters if retrieved within ``max_age``; None means "fetch from the provider"."""
+    def quarters(self, ticker: str, max_age: timedelta | None) -> list[QuarterlyFinancials] | None:
+        """Stored quarters if retrieved within ``max_age`` (None = whatever is stored, any age; the data is
+        point in time, only the check for newer filings is due); None means "fetch from the provider"."""
         with self.sf() as s:
             rows = list(s.scalars(select(FundamentalVintageRow).where(FundamentalVintageRow.ticker == ticker)))
-        if not rows or _now() - max(r.retrieved_at for r in rows) > max_age:
+        if not rows or (max_age is not None and _now() - max(r.retrieved_at for r in rows) > max_age):
             return None
         latest: dict[date, QuarterlyFinancials] = {}
         for r in sorted(rows, key=lambda r: r.filed_date):

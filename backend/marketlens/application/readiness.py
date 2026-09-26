@@ -18,6 +18,7 @@ from typing import Any
 MIN_PRICE_HISTORY = 0.90  # ≥ 60 sessions of bars
 MIN_MARKET_CAP = 0.80
 MIN_SECTOR = 0.80  # of large caps
+MIN_FUNDAMENTALS = 0.80  # of large caps that file quarterly us-gaap XBRL (20-F filers excluded)
 MIN_MARKET_DAYS = 60
 
 
@@ -94,7 +95,7 @@ def evaluate(mode: str, reg: Any, stats: dict[str, Any] | None, sync_state: str 
             "long_history": round(stats["bars_240"] / listed, 4),
             "market_cap": round(stats["with_market_cap"] / listed, 4),
             "sector": round(stats["large_with_sector"] / large, 4),
-            "fundamentals": round(stats["large_with_fundamentals"] / large, 4),
+            "fundamentals": round(stats["large_with_fundamentals"] / max(1, large - stats.get("large_fund_not_supported", 0)), 4),
             "market_days": round(min(1.0, stats["market_days"] / MIN_MARKET_DAYS), 4),
             "estimate_history": round(min(1.0, stats["estimate_history_days"] / 90), 4),
         }
@@ -106,6 +107,9 @@ def evaluate(mode: str, reg: Any, stats: dict[str, Any] | None, sync_state: str 
             reasons.append(f"시가총액 확인 종목 {prog['market_cap']:.0%} < {MIN_MARKET_CAP:.0%}")
         if prog["sector"] < MIN_SECTOR:
             reasons.append(f"대형주 업종 정보 {prog['sector']:.0%} < {MIN_SECTOR:.0%}")
+        if prog["fundamentals"] < MIN_FUNDAMENTALS:
+            failed = stats.get("large_fund_failed", 0)
+            reasons.append(f"대형주 분기 재무 수집 {prog['fundamentals']:.0%} < {MIN_FUNDAMENTALS:.0%}" + (f" (수집 실패 {failed}종목, 재시도 대기)" if failed else " — 동기화가 나눠서 수집 중"))
     if sync.get("status") != "SYNC_COMPLETE":
         reasons.append(f"마지막 동기화 상태: {sync.get('status')} (남은 가격 거래일 {sync.get('bar_days_remaining', '?')})")
     scanner = "SCANNER_READY" if not reasons else "SCANNER_NOT_READY"

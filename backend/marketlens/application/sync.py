@@ -21,6 +21,7 @@ from marketlens.providers.contracts import ProviderError
 
 log = logging.getLogger("marketlens.sync")
 PROFILE_MAX_AGE = timedelta(days=30)
+FUNDAMENTALS_REFRESH = timedelta(days=7)  # look for a new 10-Q/10-K weekly; stored vintages never expire
 
 
 @dataclass
@@ -32,6 +33,9 @@ class SyncReport:
     shares_updated: int = 0
     market_caps: int = 0
     profiles_updated: int = 0
+    fundamentals_ingested: int = 0  # SEC quarterly facts fetched this run (bounded, see the manifest)
+    fundamentals_failed: int = 0
+    fundamentals_pending: int = 0  # liquid names still waiting for their first/refreshed ingestion
     estimate_snapshots: int = 0
     splits_new: int = 0
     bars_split_adjusted: int = 0
@@ -56,7 +60,8 @@ class MarketSync:
         self.store = store
 
     def run(self, now: Any, backfill_days: int = 300, max_bar_calls: int = 30, max_profiles: int = 300,
-            min_market_cap: float = 1e9, min_dollar_volume: float = 2e7) -> SyncReport:
+            min_market_cap: float = 1e9, min_dollar_volume: float = 2e7, max_fundamentals: int = 150,
+            fundamentals_refresh: timedelta = FUNDAMENTALS_REFRESH) -> SyncReport:
         rep = SyncReport()
         today = last_completed_session(now)
         # 1) universe
@@ -150,5 +155,52 @@ class MarketSync:
                     rep.profiles_updated += 1
                 except ProviderError as e:
                     rep.errors.append(f"profile {t}: {e}")
+        # 5) SEC quarterly fundamentals for the names the scanner can use — here, bounded per run and
+        #    recorded in the ingestion manifest, instead of one SEC request per ticker inside every scan
+        fund = _find(self.reg, "fundamental", "get_quarterly")
+        if fund is not None:
+            self._ingest_fundamentals(fund, now, rep, max_fundamentals, fundamentals_refresh, min_market_cap, min_dollar_volume, today)
         log.info("sync finished", extra={"fields": {"bars": rep.bar_days_loaded, "missing": rep.bar_days_missing, "profiles": rep.profiles_updated}})
         return rep
+
+    def _ingest_fundamentals(self, fund: Any, now: Any, rep: SyncReport, budget: int, refresh: timedelta, min_market_cap: float, min_dollar_volume: float, today: date) -> None:
+        from marketlens.application.data_access import FUNDAMENTALS, _failure_status
+        from marketlens.providers.contracts import NotSupported, RateLimited
+
+        bars = self.store.last_bars_all(today - timedelta(days=40), today)
+        manifest = self.store.ingestion_all(FUNDAMENTALS)
+        never: list[tuple[float, str]] = []
+        stale: list[tuple[Any, str]] = []
+        for s in self.store.securities(None):
+            b = bars.get(s.ticker, [])
+            if s.is_etf or len(b) < 5 or (s.market_cap or 0) < min_market_cap:
+                continue
+            if sum(x.close * x.volume for x in b[-20:]) / len(b[-20:]) < min_dollar_volume:
+                continue
+            m = manifest.get(s.ticker)
+            if m is not None and m.next_attempt_at is not None and m.next_attempt_at > now:
+                continue  # back-off after a failure (NOT_SUPPORTED: 30 days)
+            if m is None or m.last_success_at is None:
+                never.append((-(s.market_cap or 0), s.ticker))
+            elif now - m.last_success_at >= refresh:
+                stale.append((m.last_success_at, s.ticker))
+        todo = [t for _, t in sorted(never)] + [t for _, t in sorted(stale)]  # first-time names first, largest first
+        rep.fundamentals_pending = max(0, len(todo) - budget)
+        for t in todo[:budget]:
+            try:
+                qs = fund.get_quarterly(t)
+            except RateLimited as e:
+                self.store.record_ingestion(FUNDAMENTALS, t, now, "RATE_LIMITED", str(e))
+                rep.errors.append(f"fundamentals: 요청 한도 — 다음 동기화에서 계속 ({e})")
+                rep.fundamentals_pending += 1
+                break
+            except NotSupported as e:
+                self.store.record_ingestion(FUNDAMENTALS, t, now, "NOT_SUPPORTED", str(e))
+                continue  # not an error of the sync: e.g. a 20-F filer (annual IFRS only)
+            except ProviderError as e:
+                self.store.record_ingestion(FUNDAMENTALS, t, now, _failure_status(f"{type(e).__name__}: {e}"), str(e))
+                rep.fundamentals_failed += 1
+                continue
+            self.store.save_quarters(t, qs)
+            self.store.record_ingestion(FUNDAMENTALS, t, now, "OK", rows=len(qs))
+            rep.fundamentals_ingested += 1

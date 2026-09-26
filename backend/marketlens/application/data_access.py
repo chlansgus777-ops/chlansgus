@@ -9,7 +9,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Sequence
 
 from marketlens.application.registry import ProviderRegistry
@@ -51,16 +51,31 @@ class TTLCache:
             self._d[(kind, key)] = (self._clock(), value)
 
 
+FUNDAMENTALS = "fundamentals"
+
+
+def _failure_status(err: str | None) -> str:
+    """Manifest status from the router's error text (``AllProvidersFailed`` lists each provider's outcome)."""
+    e = (err or "").lower()
+    if "ratelimited" in e or "429" in e:
+        return "RATE_LIMITED"
+    if "not supported" in e and "error:" not in e and "unavailable" not in e and "not configured" not in e:
+        return "NOT_SUPPORTED"  # e.g. an IFRS / 20-F filer: no quarterly us-gaap facts exist
+    return "FAILED"
+
+
 class DataAccess:
     """Provider access with TTL caching and (optionally) the local point-in-time store in front.
 
     Reads prefer the store (no API call); provider results are written back to the store."""
 
-    def __init__(self, registry: ProviderRegistry, ttl: dict[str, timedelta], cache: TTLCache | None = None, store: Any = None) -> None:
+    def __init__(self, registry: ProviderRegistry, ttl: dict[str, timedelta], cache: TTLCache | None = None, store: Any = None,
+                 now_fn: Callable[[], datetime] | None = None) -> None:
         self.reg = registry
         self.ttl = ttl
         self.cache = cache or TTLCache()
         self.store = store
+        self.now_fn = now_fn or (lambda: datetime.now(timezone.utc))
 
     def _get(self, kind: str, chain: str, method: str, key: str, *args: Any, cross_check: Any = None) -> Fetched:
         ttl = self.ttl.get(kind, timedelta(minutes=5))
@@ -105,8 +120,10 @@ class DataAccess:
         it (mock / first run) it falls back to per-ticker provider calls."""
         out: dict[str, list[Bar]] = {}
         if self.store is not None:
+            # the market sync fills the store with ONE grouped request per day; a ticker without stored
+            # bars is simply not eligible yet — never one provider call per ticker from the scanner
             stored = self.store.last_bars_all(start, end)
-            out = {t: stored[t] for t in tickers if t in stored and stored[t]}
+            return {t: stored[t] for t in tickers if t in stored and stored[t]}
         for t in tickers:
             if t not in out:
                 v = self.bars(t, start, end).value
@@ -118,14 +135,38 @@ class DataAccess:
         """Stock splits recorded by the market sync (LIVE store); MOCK data is generated split-free."""
         return self.store.splits(t) if self.store is not None else []
 
-    def quarters(self, t: str) -> Fetched:
-        if self.store is not None:
-            stored = self.store.quarters(t, self.ttl.get("fundamentals", timedelta(days=1)))
-            if stored:
-                return Fetched(stored, "store")
+    def quarters(self, t: str, allow_fetch: bool = True) -> Fetched:
+        """LIVE: the store first. ``allow_fetch=False`` (scanner stage 2, hundreds of names) never calls the
+        provider — stored data of any retrieval age is used and a name the sync has not ingested yet is
+        MISSING with the manifest's reason. A fetch is skipped while the manifest's retry back-off runs,
+        and every attempt is recorded in the ingestion manifest."""
+        if self.store is None:
+            return self._get("fundamentals", "fundamental", "get_quarterly", t, t)
+        stored = self.store.quarters(t, self.ttl.get("fundamentals", timedelta(days=1)))
+        if stored:
+            return Fetched(stored, "store")
+        man = self.store.ingestion(FUNDAMENTALS, t)
+        if not allow_fetch:
+            anyage = self.store.quarters(t, None)
+            if anyage:
+                return Fetched(anyage, "store")
+            why = f"최근 수집 실패({man.status}: {man.error})" if man is not None and man.status != "OK" else "아직 수집되지 않음 — 다음 동기화에서 수집"
+            return Fetched(None, None, f"저장된 재무 없음: {why}")
+        now = self.now_fn()
+        if man is not None and man.next_attempt_at is not None and man.next_attempt_at > now:
+            anyage = self.store.quarters(t, None)
+            if anyage:
+                return Fetched(anyage, "store")
+            return Fetched(None, None, f"재시도 대기({man.next_attempt_at.isoformat(timespec='minutes')}까지): {man.status} {man.error or ''}".strip())
         f = self._get("fundamentals", "fundamental", "get_quarterly", t, t)
-        if self.store is not None and f.value:
+        if f.value:
             self.store.save_quarters(t, f.value)
+            self.store.record_ingestion(FUNDAMENTALS, t, now, "OK", rows=len(f.value))
+        else:
+            self.store.record_ingestion(FUNDAMENTALS, t, now, _failure_status(f.error), f.error)
+            anyage = self.store.quarters(t, None)
+            if anyage:  # a failed refresh keeps the (point-in-time) data already stored
+                return Fetched(anyage, "store", None)
         return f
 
     def annuals(self, t: str) -> Fetched:

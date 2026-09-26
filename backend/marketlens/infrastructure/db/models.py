@@ -62,6 +62,45 @@ class SecurityRow(Base):
     profile_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     shares_outstanding: Mapped[float | None] = mapped_column(Float, nullable=True)
     shares_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # security master: the SEC CIK is the company identity; a ticker is only a label that can change
+    cik: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    predecessor: Mapped[str | None] = mapped_column(String(16), nullable=True)  # old ticker of the same CIK (rename)
+    successor: Mapped[str | None] = mapped_column(String(16), nullable=True)  # new ticker after a rename
+    renamed_on: Mapped[date | None] = mapped_column(Date, nullable=True)  # first day under the successor ticker
+
+
+class TickerHistoryRow(Base):
+    """Security master events (append-only): NEW, RENAME (same CIK, new ticker), REUSE (a ticker now
+    names a different company; the old company's stored rows were archived under ``archived_as``)."""
+
+    __tablename__ = "ticker_history"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mode: Mapped[str] = mapped_column(String(8))
+    event: Mapped[str] = mapped_column(String(12))
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    cik: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    other_ticker: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    other_cik: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    archived_as: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    effective: Mapped[date] = mapped_column(Date)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class IngestionManifestRow(Base):
+    """Per (dataset, ticker) ingestion state: what was fetched, when, and why it failed. Used to bound
+    provider calls (retry back-off) and to report coverage honestly."""
+
+    __tablename__ = "ingestion_manifest"
+    mode: Mapped[str] = mapped_column(String(8), primary_key=True)
+    dataset: Mapped[str] = mapped_column(String(24), primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(16), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16))  # OK | FAILED | NOT_SUPPORTED | RATE_LIMITED
+    attempts: Mapped[int] = mapped_column(Integer, default=0)  # consecutive failures
+    last_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    rows: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class PriceBarRow(Base):

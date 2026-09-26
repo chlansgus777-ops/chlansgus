@@ -198,7 +198,9 @@ class Scanner:
         if not full:
             missing["price"] = "3단계(펀더멘털 선별)는 실시간 시세를 조회하지 않음"
         bars = take("bars", self.data.bars(t, d - timedelta(days=HISTORY_CALENDAR_DAYS), d)) or []
-        quarters = take("fundamentals", self.data.quarters(t)) or []
+        # stage 3 (full=False, the ~150 stage-2 names) reads only what the sync ingested; the final names may
+        # fetch a missing filing (bounded by the manifest back-off)
+        quarters = take("fundamentals", self.data.quarters(t, allow_fetch=full)) or []
         annuals = []
         if not quarters and full:  # foreign private issuer (20-F, IFRS): annual statements only
             af = self.data.annuals(t)
@@ -331,7 +333,7 @@ class Scanner:
         raw: dict[str, dict[str, float | None]] = {k: {} for k in w}
         d = to_ny(ctx.as_of).date()
         for t, bars in sorted(eligible.items()):
-            q = self.data.quarters(t).value or []
+            q = self.data.quarters(t, allow_fetch=False).value or []  # store only: no per-ticker SEC call
             pq = pit_quarters(q, filing_visibility_day(ctx.as_of)) if q else []
             m = compute_metrics(pq) if pq else None
             est = self.data.estimates(t, d).value
@@ -374,7 +376,15 @@ class Scanner:
         stages.append(StageStats("1-eligibility", len(only) if only else len(ctx.securities), len(eligible), f"주가≥{sc.min_price}, 시총≥{sc.min_market_cap:.0e}, 거래대금≥{sc.min_avg_dollar_volume:.0e}; 제외: {top or '없음'}"))
 
         s2 = self.stage2(ctx, eligible)
-        stages.append(StageStats("2-cheap-quant", len(eligible), len(s2), "펀더멘털 우선 백분위 순위(동점 평균 순위)"))
+        fund_note = ""
+        if self.data.store is not None:
+            from marketlens.application.data_access import FUNDAMENTALS
+
+            have = self.data.store.tickers_with_fundamentals()
+            with_f = sum(1 for t in eligible if t in have)
+            st = self.data.store.ingestion_stats(FUNDAMENTALS)
+            fund_note = f"; 저장된 재무 {with_f}/{len(eligible)}종목(수집 실패 {st.get('FAILED', 0) + st.get('RATE_LIMITED', 0)}, 분기 XBRL 없음 {st.get('NOT_SUPPORTED', 0)}) — 스캔 중 종목별 SEC 호출 없음"
+        stages.append(StageStats("2-cheap-quant", len(eligible), len(s2), "펀더멘털 우선 백분위 순위(동점 평균 순위)" + fund_note))
 
         # stage 3: sector-model deep filter (no live quotes) — also collects peer multiples
         lite: dict[str, AnalysisResult] = {}
