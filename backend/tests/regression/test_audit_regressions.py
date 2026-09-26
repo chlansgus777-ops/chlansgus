@@ -82,8 +82,12 @@ def test_row_counts_alone_never_make_data_fresh():
 
 def test_stored_recommendation_freshness_is_rejudged_now():
     made = datetime(2026, 9, 21, 15, tzinfo=UTC)  # Monday 11:00 ET
+    soon = recommendation_freshness(made, "FRESH", made + timedelta(minutes=30))
+    assert soon.status == "CURRENT" and "추천 당시 데이터 최신" in soon.reason_ko
+    # 3 hours later in the same session the price may have moved: not CURRENT without a current quote
+    # (the second audit found "same day = CURRENT" let a 6-hour-old intraday BUY look actionable)
     same_day = recommendation_freshness(made, "FRESH", made + timedelta(hours=3))
-    assert same_day.status == "CURRENT" and "추천 당시 데이터 최신" in same_day.reason_ko
+    assert same_day.status == "NEEDS_REVALIDATION" and "추천 당시 데이터 최신" in same_day.reason_ko
     later = recommendation_freshness(made, "FRESH", datetime(2026, 9, 25, 15, tzinfo=UTC))
     assert later.status == "EXPIRED" and later.at_creation == "FRESH" and later.sessions_since >= 3
     stale_then = recommendation_freshness(made, "STALE", made + timedelta(minutes=5))

@@ -1,14 +1,22 @@
-"""FINRA consolidated short interest (free public data via the FINRA Query API; published twice a month).
+"""FINRA consolidated short interest (FINRA Query API; published twice a month).
 
-POST https://api.finra.org/data/group/otcMarket/name/consolidatedShortInterest with a JSON filter.
-Optional FINRA_API_KEY / FINRA_API_SECRET (free developer account) raise rate limits.
+Data:  POST https://api.finra.org/data/group/otcMarket/name/consolidatedShortInterest with a JSON filter.
+Auth:  FINRA API uses OAuth 2.0 client credentials. With FINRA_API_KEY / FINRA_API_SECRET (free API
+       console account) an access token is requested from the FINRA Identity Platform with HTTP Basic
+       credentials, and the data request carries ``Authorization: Bearer <token>`` — the client
+       credentials are never sent to the data endpoint. Without credentials the public (rate-limited)
+       access is used.
+Coverage: the dataset is published under FINRA's "otcMarket" group. Whether it covers a given
+       exchange-listed symbol must be confirmed by the live smoke test (NVDA/AAPL rows present); until
+       then this provider is IMPLEMENTED_NOT_LIVE_VERIFIED and a symbol without rows is MISSING.
 """
 
 from __future__ import annotations
 
 import base64
+import time
 from datetime import date
-from typing import Any
+from typing import Any, Callable
 
 from marketlens.domain.enums import DataMode
 from marketlens.domain.options import OwnershipSnapshot
@@ -17,18 +25,36 @@ from marketlens.providers.contracts import NotSupported, ProviderDataError
 from marketlens.providers.live.http import HttpClient
 
 DATASET = "/data/group/otcMarket/name/consolidatedShortInterest"
+TOKEN_URL = "https://ews.fip.finra.org"
+TOKEN_PATH = "/fip/rest/ews/oauth2/access_token"
 
 
 class FinraShortInterestProvider:
     mode = DataMode.LIVE
 
-    def __init__(self, api_key: str | None = None, api_secret: str | None = None, transport: Any = None, rate_per_s: float = 1.0) -> None:
+    def __init__(self, api_key: str | None = None, api_secret: str | None = None, transport: Any = None, rate_per_s: float = 1.0,
+                 clock: Callable[[], float] = time.monotonic) -> None:
         self.name = "finra"
         self.configured = True  # public dataset; credentials only raise limits
-        headers = {"Accept": "application/json"}
-        if api_key and api_secret:
-            headers["Authorization"] = "Basic " + base64.b64encode(f"{api_key}:{api_secret}".encode()).decode()
-        self._http = HttpClient("https://api.finra.org", headers=headers, bucket=TokenBucket(rate_per_s, 3), transport=transport)
+        self._basic = "Basic " + base64.b64encode(f"{api_key}:{api_secret}".encode()).decode() if api_key and api_secret else None
+        self._http = HttpClient("https://api.finra.org", headers={"Accept": "application/json"}, bucket=TokenBucket(rate_per_s, 3), transport=transport)
+        self._auth = HttpClient(TOKEN_URL, headers={"Accept": "application/json"}, transport=transport)
+        self._token: tuple[str, float] | None = None
+        self._clock = clock
+
+    def _bearer(self) -> dict[str, str] | None:
+        """OAuth2 client-credentials token (cached until shortly before it expires)."""
+        if self._basic is None:
+            return None
+        now = self._clock()
+        if self._token is None or now >= self._token[1]:
+            d = self._auth.post_json(f"{TOKEN_PATH}?grant_type=client_credentials", None, headers={"Authorization": self._basic})
+            tok = d.get("access_token") if isinstance(d, dict) else None
+            if not tok:
+                raise ProviderDataError("FINRA: access token missing in OAuth response")
+            ttl = float(d.get("expires_in", 1800) or 1800)
+            self._token = (str(tok), now + max(60.0, ttl - 60.0))
+        return {"Authorization": f"Bearer {self._token[0]}"}
 
     def get_short_interest(self, ticker: str) -> OwnershipSnapshot:
         body = {
@@ -36,7 +62,7 @@ class FinraShortInterestProvider:
             "compareFilters": [{"compareType": "equal", "fieldName": "symbolCode", "fieldValue": ticker.upper()}],
             "sortFields": ["-settlementDate"],
         }
-        rows = self._http.post_json(DATASET, body)
+        rows = self._http.post_json(DATASET, body, headers=self._bearer())
         if not isinstance(rows, list):
             raise ProviderDataError("FINRA: malformed payload")
         if not rows:

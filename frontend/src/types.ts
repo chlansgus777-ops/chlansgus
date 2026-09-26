@@ -6,6 +6,7 @@ export interface OppRow {
   catalyst: string | null; catalyst_date: string | null; risk: string | null; data_quality: string; mode: string; vetoes: string[]; as_of: string;
   current_status: string | null; current_status_reason: string | null; sessions_since: number | null; actionable_now: boolean | null;
   action_ko: string; valuation_price_basis: string | null; sector_known: boolean;
+  revalidated_price?: number | null; status_problems?: string[]; version?: number; supersedes_id?: number | null; issued_at?: string | null;
 }
 
 export interface FreshnessCheck { data_type: string; quality: string; effective: string | null; published: string | null; age: number | null; unit: string; fresh_max: number; usable_max: number; reason_ko: string }
@@ -75,4 +76,4 @@ export interface CommitteeResult {
   consensus_pct: number | null; divergence: string | null; guard: Record<string, { rejected_claims: string[]; invalid_evidence_ids: string[]; confidence_scale?: number }>; injection_flags: string[]; prompt_version: string;
 }
 
-export interface StockDetail { recommendation: OppRow; analysis: Analysis; price_history?: { day: string; close: number }[]; committee: CommitteeResult | null; history: { id: number; as_of: string; score: number; action: string }[]; versions: Record<string, string> }
+export interface StockDetail { recommendation: OppRow; analysis: Analysis; price_history?: { day: string; close: number }[]; committee: CommitteeResult | null; committee_recommendation_id?: number | null; history: { id: number; as_of: string; score: number; action: string }[]; versions: Record<string, string> }

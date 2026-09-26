@@ -267,6 +267,9 @@ def live_transport(seen: list[str] | None = None) -> httpx.MockTransport:
                 return httpx.Response(200, json=companyfacts(by_cik[path.split("CIK")[1][:10]]))
             if "/Archives/edgar/data/" in path:
                 return httpx.Response(200, text=FORM4)
+        if "polygon.io" in u.netloc and path == "/v3/reference/splits":
+            # shape of Polygon's reference/splits response (one unrelated split in the window)
+            return httpx.Response(200, json={"status": "OK", "results": [{"id": "E1", "ticker": "OTCX", "execution_date": "2026-06-01", "split_from": 1, "split_to": 2}]})
         if "polygon.io" in u.netloc and "/grouped/" in path:
             day = date.fromisoformat(path.rsplit("/", 1)[-1])
             return httpx.Response(200, json={"status": "OK", "resultsCount": 1, "results": grouped(day)})
@@ -276,7 +279,12 @@ def live_transport(seen: list[str] | None = None) -> httpx.MockTransport:
         if "stlouisfed.org" in u.netloc:
             vintage = date.fromisoformat(q["realtime_end"][0])
             return httpx.Response(200, json=fred_observations(q["series_id"][0], vintage))
+        if u.netloc == "ews.fip.finra.org" and path.endswith("/oauth2/access_token"):
+            ok = req.headers.get("authorization", "").startswith("Basic ")
+            return httpx.Response(200, json={"access_token": "tok-123", "expires_in": 1800}) if ok else httpx.Response(401)
         if "finra.org" in u.netloc and req.method == "POST":
+            if req.headers.get("authorization", "").startswith("Basic "):
+                return httpx.Response(401)  # client credentials are never valid on the data endpoint
             return httpx.Response(200, json=finra(json.loads(req.content)))
         return httpx.Response(404)
 

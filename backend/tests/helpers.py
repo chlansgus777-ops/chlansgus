@@ -12,7 +12,8 @@ DEFAULT_WEIGHTS = {"fundamental": 25, "valuation": 15, "earnings_revision": 15, 
 
 
 def card(total: float, available: bool = True) -> ScoreCard:
-    comps = tuple(ComponentScore(n, DEFAULT_WEIGHTS[n], total / 100, available, ()) for n in COMPONENTS)
+    # fully measured components (coverage 1): the measured sub-score equals the published one
+    comps = tuple(ComponentScore(n, DEFAULT_WEIGHTS[n], total / 100, available, (), measured=total / 100 if available else None) for n in COMPONENTS)
     return ScoreCard("T", "test", comps, "generic", "test")
 
 

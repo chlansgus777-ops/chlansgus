@@ -38,15 +38,45 @@ class QuarterlyFinancials:
     field_filed: Mapping[str, date] = field(default_factory=dict)
     # sector specific extras, e.g. {"rpo": .., "nim": .., "cet1": .., "ffo": ..}
     extras: Mapping[str, float] = field(default_factory=dict)
+    # later filings that reported a *different* value for the same period and field (restatements and
+    # split-adjusted comparatives), oldest first: {"eps_diluted": ((filed, value), ...)}. The main fields
+    # always hold the FIRST REPORTED value; nothing is ever overwritten.
+    revisions: Mapping[str, tuple[tuple[date, float], ...]] = field(default_factory=dict)
+    restated: tuple[str, ...] = ()  # fields whose value was replaced by a later filing in ``as_of``
 
 
-def as_of(quarters: Sequence[QuarterlyFinancials], d: date) -> list[QuarterlyFinancials]:
+FIRST_REPORTED = "FIRST_REPORTED"
+LATEST_KNOWN_AS_OF = "LATEST_KNOWN_AS_OF"
+
+
+def as_of(quarters: Sequence[QuarterlyFinancials], d: date, basis: str = LATEST_KNOWN_AS_OF) -> list[QuarterlyFinancials]:
+    """The fundamentals an investor could have known on day ``d``.
+
+    - Periods and fields first filed after ``d`` are invisible.
+    - ``LATEST_KNOWN_AS_OF`` (analysis default): a field restated by a filing on/before ``d`` shows the
+      restated value; restatements filed after ``d`` are invisible.
+    - ``FIRST_REPORTED`` (research): the originally reported value, whatever was filed later.
+    """
     out: list[QuarterlyFinancials] = []
     for q in quarters:
         if q.filed_date > d:
             continue
-        late = {k: None for k, fd in q.field_filed.items() if fd > d}
-        out.append(replace(q, **late) if late else q)
+        upd: dict[str, object] = {k: None for k, fd in q.field_filed.items() if fd > d}
+        restated: list[str] = []
+        filed = dict(q.field_filed)
+        if basis == LATEST_KNOWN_AS_OF:
+            for k, obs in q.revisions.items():
+                if k in upd:
+                    continue
+                known = [(fd, v) for fd, v in obs if fd <= d]
+                if known:
+                    fd, v = max(known, key=lambda o: o[0])
+                    upd[k] = v
+                    filed[k] = fd
+                    restated.append(k)
+        if upd:
+            q = replace(q, **upd, restated=tuple(sorted(restated)), field_filed=filed)  # type: ignore[arg-type]
+        out.append(q)
     return sorted(out, key=lambda q: q.period_end)
 
 

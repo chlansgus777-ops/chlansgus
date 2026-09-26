@@ -139,6 +139,33 @@ class NumericClaim:
     claimed_class: str  # from nearby keywords ("other" when none)
     entity: str | None  # ticker named nearest before the number (None = not named)
     direction: int  # -1 / +1 from direction words near the number, 0 = none
+    basis: str | None = None  # ACTUAL | FORECAST when the sentence says so ("forward", "trailing", "예상", …)
+
+
+# words that say whether a number is a reported value or an estimate/forecast (longest first)
+_BASIS_WORDS: list[tuple[str, str]] = [
+    ("next fiscal year", "FORECAST"), ("next quarter", "FORECAST"), ("next year", "FORECAST"), ("forward", "FORECAST"),
+    ("expected", "FORECAST"), ("expects", "FORECAST"), ("estimate", "FORECAST"), ("estimated", "FORECAST"), ("consensus", "FORECAST"),
+    ("projected", "FORECAST"), ("forecast", "FORECAST"), ("guidance", "FORECAST"), ("outlook", "FORECAST"), ("fy+1", "FORECAST"),
+    ("선행", "FORECAST"), ("예상", "FORECAST"), ("추정", "FORECAST"), ("컨센서스", "FORECAST"), ("전망", "FORECAST"), ("가이던스", "FORECAST"), ("내년", "FORECAST"), ("다음 분기", "FORECAST"),
+    ("trailing", "ACTUAL"), ("ttm", "ACTUAL"), ("reported", "ACTUAL"), ("actual", "ACTUAL"), ("last quarter", "ACTUAL"), ("last year", "ACTUAL"), ("past 12 months", "ACTUAL"),
+    ("최근 12개월", "ACTUAL"), ("지난 12개월", "ACTUAL"), ("발표한", "ACTUAL"), ("실제", "ACTUAL"), ("지난 분기", "ACTUAL"), ("과거", "ACTUAL"),
+]
+
+
+def _basis(before: str, after: str) -> str | None:
+    low = before[-40:].lower()
+    best, pos = None, -1
+    for w, b in _BASIS_WORDS:
+        i = low.rfind(w)
+        if i > pos:
+            best, pos = b, i
+    if best is None:
+        tail = after[:14].lower()
+        for w, b in _BASIS_WORDS:
+            if w in tail:
+                return b
+    return best
 
 
 def _nearest_keyword(before: str) -> str:
@@ -198,7 +225,7 @@ def extract_claims(text: str, known_tickers: Iterable[str] = ()) -> list[Numeric
                 entity = hits[-1].group(1)
         low = (before[-30:] + " " + after).lower()
         direction = -1 if any(w in low for w in _NEG_WORDS) else 1 if any(w in low for w in _POS_WORDS) else 0
-        out.append(NumericClaim(raw, v, bool(sign), kind, dec, scale, claimed, entity, direction))
+        out.append(NumericClaim(raw, v, bool(sign), kind, dec, scale, claimed, entity, direction, _basis(before, after)))
     return out
 
 
@@ -248,6 +275,12 @@ def supported(c: NumericClaim, evidence: Sequence[Evidence], ticker: str) -> tup
             pool = [e for e in pool if metric_class(e.metric) in allowed]
         if not pool:
             return False, f"'{c.claimed_class}' 지표 근거 없음"
+    if c.basis is not None:
+        # "forward EPS $5" cannot be supported by trailing EPS = 5, and "reported revenue" not by a consensus
+        same = [e for e in pool if e.basis in (c.basis, None)]
+        if not same:
+            return False, f"{'예상치' if c.basis == 'FORECAST' else '실적치'} 근거 없음 (실적/예상 구분 불일치)"
+        pool = same
     unit_ok = False
     for e in pool:
         for ev in _candidates(c, e):

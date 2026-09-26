@@ -32,6 +32,7 @@ from marketlens.domain.enums import BULLISH_ACTIONS, Action, DataMode, DataQuali
 from marketlens.domain.exposure_graph import Edge, ExposureGraph, Node
 from marketlens.domain.facts import DataQualityReport, Fact, build_quality_report
 from marketlens.domain.freshness import FreshnessCheck, check_age, missing as fresh_missing, rules_from_config
+from marketlens.domain.corporate_actions import SplitEvent, normalize_quarters
 from marketlens.domain.fundamentals import FundamentalMetrics, QuarterlyFinancials, as_of, compute_metrics
 from marketlens.domain.indicators import TechnicalSnapshot, aligned_closes, compute_technicals
 from marketlens.domain.issues import CompanyIssueImpact, Issue, aggregate_issue_score, compute_issue_impacts
@@ -87,9 +88,17 @@ class AnalysisInputs:
     source_map: Mapping[str, str] = field(default_factory=dict)  # field -> provider name
     missing_reasons: Mapping[str, str] = field(default_factory=dict)
     insider: OwnershipSnapshot | None = None  # SEC Form 4 aggregate (separate from short interest)
+    splits: tuple[SplitEvent, ...] = ()  # stock splits known at analysis time (per-share basis normalisation)
 
     def fingerprint(self) -> str:
-        return hashlib.sha256(json.dumps(_canonical(encode(self)), sort_keys=True).encode()).hexdigest()
+        enc = encode(self)
+        for k in _ADDED_LATER:  # fields added after schema-2 hash only when present, so stored snapshots still replay
+            if not enc.get(k):
+                enc.pop(k, None)
+        return hashlib.sha256(json.dumps(_canonical(enc), sort_keys=True).encode()).hexdigest()
+
+
+_ADDED_LATER = ("splits",)
 
 
 def _canonical(x: object) -> object:
@@ -160,6 +169,7 @@ class AnalysisResult:
     sector_known: bool = True
     short_interest_pct: float | None = None  # short interest / shares outstanding (FINRA ÷ SEC cover page)
     valuation_price_basis: str = "현재가"
+    fundamental_adjustments: tuple[str, ...] = ()  # restated values used (as known then) and split normalisation
 
 
 # ------------------------------------------------------------------------------------------------ helpers
@@ -328,7 +338,11 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
     beta = _beta(bars, bench)
 
     # ---------------------------------------------------------------- fundamentals (point-in-time)
-    pit_quarters = as_of(list(inp.quarters), filing_visibility_day(inp.as_of))
+    pit_quarters = as_of(list(inp.quarters), filing_visibility_day(inp.as_of))  # latest value known on that day
+    split_notes: list[str] = []
+    if inp.splits:  # per-share values on the share basis of the (split-adjusted) price bars
+        pit_quarters, split_notes = normalize_quarters(pit_quarters, inp.splits, inp.as_of.date())
+    restated = sorted({f"{q.period_end.isoformat()} {k}" for q in pit_quarters for k in q.restated})
     latest_q = pit_quarters[-1] if pit_quarters else None
     fund_check = _check_or_missing("fundamentals", bool(pit_quarters), latest_q.period_end if latest_q else None, inp.as_of, rules, "재무제표(분기)", latest_q.filed_date if latest_q else None, miss.get("fundamentals"))
     if pit_quarters and len(pit_quarters) < MIN_QUARTERS:
@@ -515,6 +529,8 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         data_completeness=dq.completeness,
     )
     card = score(si, cfg.scoring_model)
+    # the sector model must be able to judge the business and its price; a gap here is "unknown", not "bad"
+    coverage_gaps = tuple(f"{n}({card.component(n).coverage:.0%})" for n in ("fundamental", "valuation") if not card.component(n).available)
 
     # ---------------------------------------------------------------- what changed + decision
     guidance_sig = hashlib.sha1(json.dumps(encode(last_er.guidance), sort_keys=True).encode()).hexdigest()[:10] if last_er is not None else None
@@ -562,6 +578,7 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         binary_event=ev_risk.binary,
         prior_stop_breached=prior_stop_breached,
         sector_unknown=not sector_known,
+        model_coverage_gaps=coverage_gaps,
     )
     decision = decide(card, entry, ctx, cfg.decision)
     unchanged = prev is not None and prev.action == decision.action.value
@@ -649,4 +666,5 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         sector_known=sector_known,
         short_interest_pct=si_pct,
         valuation_price_basis=val_basis,
+        fundamental_adjustments=tuple([f"재작성 반영: {r}" for r in restated] + split_notes),
     )

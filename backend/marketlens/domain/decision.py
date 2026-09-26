@@ -53,6 +53,7 @@ class DecisionContext:
     binary_event: bool = False  # EXTREME risk comes from a binary outcome (FDA/antitrust/regulatory)
     prior_stop_breached: bool = False  # price is below the stop of the previous bullish recommendation
     sector_unknown: bool = False  # no reliable sector/industry → generic model, lower confidence, no full BUY
+    model_coverage_gaps: tuple[str, ...] = ()  # core sector-model components that could not be scored (e.g. "fundamental")
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +84,8 @@ def evaluate_vetoes(ctx: DecisionContext, th: DecisionThresholds) -> list[HardVe
         v.append(HardVeto.UNACCEPTABLE_LIQUIDITY)
     if ctx.event_risk_level == "EXTREME":
         v.append(HardVeto.EXTREME_EVENT_RISK)
+    if ctx.model_coverage_gaps:
+        v.append(HardVeto.INSUFFICIENT_MODEL_COVERAGE)
     return v
 
 
@@ -90,8 +93,10 @@ def _plan_ok(plan: EntryPlan | None, th: DecisionThresholds) -> bool:
     return plan is not None and plan.in_buy_zone and (plan.rr_at_current or 0) >= th.min_rr - 1e-9
 
 
-def _raw_action(score: float, held: bool, plan: EntryPlan | None, prev: Action | None, th: DecisionThresholds) -> tuple[Action, list[str]]:
+def _raw_action(score: float, held: bool, plan: EntryPlan | None, prev: Action | None, th: DecisionThresholds, sell_score: float | None = None) -> tuple[Action, list[str]]:
+    """``sell_score`` (missing inputs = neutral) decides REDUCE/SELL; ``score`` (missing = conservative) decides buys."""
     reasons: list[str] = []
+    sell_score = score if sell_score is None else sell_score
     # hysteresis per level: a previous BUY/ADD keeps BUY until the BUY exit; a previous BUY SMALL keeps
     # BUY SMALL until its exit but must still reach the full BUY *enter* threshold to become BUY.
     buy_th = th.buy_exit if prev in (Action.BUY, Action.ADD) else th.buy_enter
@@ -99,10 +104,12 @@ def _raw_action(score: float, held: bool, plan: EntryPlan | None, prev: Action |
     if prev in BULLISH_ACTIONS:
         reasons.append(f"히스테리시스 적용: 매수 유지 기준 {buy_th:g}, 소량 매수 유지 기준 {small_th:g}")
     if held:
-        if score < th.reduce_floor:
-            return Action.SELL, reasons + [f"점수 {score} < {th.reduce_floor:g} → 매도"]
+        if sell_score < th.reduce_floor:
+            return Action.SELL, reasons + [f"매도 판단 점수(누락 데이터는 중립 처리) {sell_score} < {th.reduce_floor:g} → 매도"]
+        if sell_score < th.hold_floor:
+            return Action.REDUCE, reasons + [f"매도 판단 점수(누락 데이터는 중립 처리) {sell_score} < {th.hold_floor:g} → 비중 축소"]
         if score < th.hold_floor:
-            return Action.REDUCE, reasons + [f"점수 {score} < {th.hold_floor:g} → 비중 축소"]
+            reasons.append(f"점수 {score}는 낮지만 누락 데이터를 중립으로 보면 {sell_score} → 데이터 부족을 매도 근거로 쓰지 않음")
         if score >= buy_th and plan is not None and plan.add_zone_low <= plan.current_price <= plan.add_zone_high:
             if (plan.rr_at_current or 0) >= th.min_rr:
                 return Action.ADD, reasons + [f"점수 {score} ≥ {buy_th:g}, 추가매수 구간 진입, 손익비 {plan.rr_at_current} ≥ {th.min_rr:g}"]
@@ -132,6 +139,13 @@ def _apply_vetoes(action: Action, vetoes: list[HardVeto], ctx: DecisionContext) 
     if HardVeto.THESIS_INVALIDATED in vetoes:
         notes.append("하드 거부권: 투자 논리 훼손")
         return (Action.SELL if held else Action.WAIT), None, notes
+    if HardVeto.INSUFFICIENT_MODEL_COVERAGE in vetoes:
+        gaps = ", ".join(ctx.model_coverage_gaps)
+        if held and ctx.prior_stop_breached:  # a price fact, not a data gap
+            notes.append(f"업종 모델 데이터 부족({gaps})이지만 직전 추천의 손절가 이탈은 가격 사실 → 매도")
+            return Action.SELL, None, notes
+        notes.append(f"하드 거부권: 업종 모델의 핵심 데이터 부족({gaps}) → 매수·매도 판단을 하지 않음 (데이터 부족은 매도 근거가 아님)")
+        return Action.DATA_INSUFFICIENT, None, notes
     if HardVeto.UNACCEPTABLE_LIQUIDITY in vetoes and action in BULLISH_ACTIONS:
         notes.append("하드 거부권: 유동성 기준 미달")
         return (Action.HOLD if held else Action.WAIT), None, notes
@@ -175,7 +189,7 @@ def compute_confidence(card: ScoreCard, action: Action, th: DecisionThresholds, 
 def decide(card: ScoreCard, plan: EntryPlan | None, ctx: DecisionContext, th: DecisionThresholds | None = None) -> Decision:
     th = th or DecisionThresholds()
     vetoes = evaluate_vetoes(ctx, th)
-    raw, reasons = _raw_action(card.total, ctx.held, plan, ctx.previous_action, th)
+    raw, reasons = _raw_action(card.total, ctx.held, plan, ctx.previous_action, th, card.sell_side_total)
     if ctx.prior_stop_breached and raw in BULLISH_ACTIONS | {Action.HOLD}:
         raw = Action.SELL if ctx.held else Action.WAIT
         reasons.append("직전 추천의 손절가 이탈 → " + ("매도" if ctx.held else "대기"))

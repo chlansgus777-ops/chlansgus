@@ -11,7 +11,7 @@ export interface AdviceInput {
   eventRisk?: string | null;
   vetoes?: string[];
   sizeLimit?: string | null;
-  status?: string | null; // CURRENT | AGING | EXPIRED
+  status?: string | null; // CURRENT | NEEDS_REVALIDATION | PLAN_INVALIDATED | AGING | EXPIRED
   sectorKnown?: boolean;
   held?: boolean;
 }
@@ -28,6 +28,8 @@ export function advise(a: AdviceInput): { headline: string; details: string[] } 
   const d: string[] = [];
   const v = a.vetoes ?? [];
   if (a.status && a.status !== "CURRENT" && ["BUY", "BUY SMALL", "ADD"].includes(a.action)) {
+    if (a.status === "PLAN_INVALIDATED") return { headline: "현재가 기준으로 매수 조건(최대 매수가·손절가·손익비)을 벗어났습니다. 지금은 이 계획대로 사지 마세요.", details: [] };
+    if (a.status === "NEEDS_REVALIDATION") return { headline: "장중 분석 후 시간이 지나 가격이 바뀌었을 수 있습니다. ‘분석 다시하기’로 현재가를 확인하기 전에는 실행하지 마세요.", details: [] };
     return { headline: "추천 이후 시간이 지나 지금 가격 기준으로는 유효하지 않습니다. ‘분석 다시하기’를 눌러 최신 판단을 확인하세요.", details: [] };
   }
   if (a.eventRisk === "HIGH" || a.eventRisk === "EXTREME") d.push("실적 발표 등 중요한 이벤트가 가까워 단기 변동이 클 수 있습니다.");

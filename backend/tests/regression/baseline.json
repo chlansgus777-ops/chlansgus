@@ -1,6 +1,6 @@
 {
  "AMZN": {
-  "action": "WATCH",
+  "action": "DATA INSUFFICIENT",
   "changes": [
    "\uc774 \uc885\ubaa9\uc758 \uccab \ubd84\uc11d"
   ],
@@ -26,7 +26,9 @@
   "raw_action": "WATCH",
   "scoring_model_version": "scoring-2.0.0",
   "total": 43.13,
-  "vetoes": []
+  "vetoes": [
+   "INSUFFICIENT_MODEL_COVERAGE"
+  ]
  },
  "JPM": {
   "action": "WAIT",

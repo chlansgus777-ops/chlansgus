@@ -25,7 +25,7 @@ from marketlens.application.scanner import ScanContext, ScanResult, Scanner
 from marketlens.application.theses import ThesisBook
 from marketlens.config import AGENT_PROMPT_VERSION, CONFIG_DIR, SCHEMA_VERSION, ModelConfig, Settings, code_version, load_model_config
 from marketlens.domain.enums import BULLISH_ACTIONS, Action, DataMode
-from marketlens.domain.freshness import RecommendationFreshness, recommendation_freshness
+from marketlens.domain.freshness import PlanCheck, RecommendationFreshness, recommendation_freshness
 from marketlens.domain.market_calendar import UTC
 from marketlens.domain.paper import position_notional
 from marketlens.domain.portfolio import Holding, Portfolio
@@ -71,6 +71,31 @@ class ScanSummary:
     paper_opened: int
 
 
+class MixedEnvironmentError(RuntimeError):
+    pass
+
+
+def assert_db_environment(settings: Settings) -> None:
+    """Pre-start check (before migrations/server): the database must belong to ``settings.mode``."""
+    import os
+
+    from sqlalchemy import inspect
+
+    from marketlens.infrastructure.db.session import make_engine, make_session_factory
+
+    eng = make_engine(settings.database_url)
+    try:
+        if "app_settings" not in inspect(eng).get_table_names():
+            return  # a new database is claimed by the first service that opens it
+        with make_session_factory(eng)() as s:
+            have = repo.get_setting(s, "db_environment", "")
+    finally:
+        eng.dispose()
+    if have and have != settings.mode.value and os.environ.get("MARKETLENS_ALLOW_MIXED_DB") != "1":
+        raise MixedEnvironmentError(f"이 데이터베이스는 {have} 모드용입니다. {settings.mode.value} 모드로 열 수 없습니다 — 데이터 혼합 방지. "
+                                    f"MARKETLENS_DATABASE_URL을 모드별로 분리하세요.")
+
+
 class MarketLensService:
     def __init__(self, settings: Settings, session_factory: sessionmaker[Session], registry: ProviderRegistry | None = None, llm: LLMProvider | None = None, cfg: ModelConfig | None = None, now_fn: Any = None, use_store: bool | None = None) -> None:
         self.settings = settings
@@ -88,6 +113,22 @@ class MarketLensService:
         self.data = DataAccess(self.registry, self.base_cfg.cache_ttl, store=self.store)
         self._lock = threading.Lock()
         self.last_scan_context: ScanContext | None = None
+        self._check_db_environment()
+
+    def _check_db_environment(self) -> None:
+        """A database belongs to one data mode. MOCK and LIVE rows share tables (securities are keyed by
+        ticker), so opening a LIVE database in MOCK mode (or the reverse) is refused instead of silently
+        mixing synthetic and real data. Override only with MARKETLENS_ALLOW_MIXED_DB=1 (tests/migration)."""
+        import os
+
+        with self.sf() as s:
+            have = repo.get_setting(s, "db_environment", "")
+            if not have:
+                repo.set_setting(s, "db_environment", self.mode.value)
+                s.commit()
+            elif have != self.mode.value and os.environ.get("MARKETLENS_ALLOW_MIXED_DB") != "1":
+                raise MixedEnvironmentError(f"이 데이터베이스는 {have} 모드용입니다. {self.mode.value} 모드로 열 수 없습니다 — 데이터 혼합 방지. "
+                                            f"MARKETLENS_DATABASE_URL을 모드별로 분리하세요.")
 
     # ------------------------------------------------------------------ helpers
     def now(self) -> datetime:
@@ -136,9 +177,25 @@ class MarketLensService:
         names = sorted({p.name for ch in self.registry.chains.values() for p in ch.providers})
         return f"{self.mode.value}:{__version__}:" + ",".join(names)[:100]
 
-    def recommendation_status(self, row: RecommendationRow) -> RecommendationFreshness:
-        """Is this stored recommendation still current NOW (not just: was it fresh when it was made)?"""
-        return recommendation_freshness(row.as_of, row.data_quality, self.now())
+    def recommendation_status(self, row: RecommendationRow, fetch_quote: bool = False) -> RecommendationFreshness:
+        """Is this stored recommendation still current NOW (not just: was it fresh when it was made)?
+
+        Same-session recommendations are re-checked against a current quote (max buy, stop, reward/risk,
+        move since analysis). Listings only use an already cached quote; the stock page may fetch one."""
+        entry = (row.result or {}).get("entry") or {}
+        bullish = row.final_action in {a.value for a in BULLISH_ACTIONS}
+        plan = PlanCheck(row.price, entry.get("max_buy"), entry.get("stop"), entry.get("target1"), self.base_cfg.decision.min_rr, bullish)
+        f = self.data.peek_quote(row.ticker)
+        if f is None and fetch_quote:
+            f = self.data.quote(row.ticker)
+        q = f.value if f is not None else None
+        majors: tuple[str, ...] = ()
+        ctx = self.last_scan_context
+        if ctx is not None and ctx.issues is not None:
+            cut = self.base_cfg.major_issue_importance
+            majors = tuple(i.title for i in ctx.issues.issues if i.importance >= cut and i.publish_time > row.as_of and row.ticker in i.affected_companies)
+        return recommendation_freshness(row.as_of, row.data_quality, self.now(), plan=plan,
+                                        quote_price=getattr(q, "price", None), quote_ts=getattr(q, "timestamp", None), new_major_events=majors)
 
     # ------------------------------------------------------------------ persistence
     def _persist(self, s: Session, r: AnalysisResult, inp: AnalysisInputs, cfg: ModelConfig, scan_id: int | None, rank: int | None, committee: CommitteeResult | None) -> RecommendationRow:
@@ -267,41 +324,37 @@ class MarketLensService:
             return r, committee, rec_id
 
     def committee_for_recommendation(self, rec_id: int) -> dict[str, Any]:
+        """Run the AI committee on a stored recommendation snapshot.
+
+        The issued recommendation is never edited. The committee result is stored as a NEW version that
+        supersedes it (same analysis snapshot and ``as_of``, ``created_at`` = now); paper trading and
+        outcome evaluation keep using the version as it was issued."""
         with self.sf() as s:
-            row = repo.get_recommendation(s, rec_id)
-            if row is None:
+            base = repo.get_recommendation(s, rec_id)
+            if base is None:
                 raise KeyError(rec_id)
-            existing = repo.committee_for(s, rec_id)
-            if existing is not None:
-                return existing.payload
-            r = decode(AnalysisResult, row.result)
+            cur = repo.current_version(s, rec_id) or base
+            for r in (cur, base):
+                existing = repo.committee_for(s, r.id)
+                if existing is not None:
+                    return existing.payload | {"recommendation_id": r.id}
+            r = decode(AnalysisResult, base.result)
             c = self.run_committee(r, self.last_scan_context, s)
-            s.add(CommitteeRow(recommendation_id=row.id, status=c.status, payload=c.as_dict(), consensus=c.consensus_pct, divergence=c.divergence, prompt_version=c.prompt_version, created_at=repo.now()))
             for call in c.calls:
                 repo.record_llm_call(s, call)
-            row.committee_status = c.status
-            if c.status in COMMITTEE_OK:
-                row.final_action, row.confidence, row.size_class = c.final_action, c.final_confidence, c.size_class
-                models = sorted({x.model for x in c.calls if x.model not in ("?", "cache")})
-                row.llm_model_ids = ",".join(models)[:200] or None
-                snap = s.get(FactorSnapshotRow, row.id)
-                if snap is not None:
-                    snap.action, snap.confidence = c.final_action, c.final_confidence
-                self._sync_paper_with_final(s, row)
+            ok = c.status in COMMITTEE_OK
+            models = sorted({x.model for x in c.calls if x.model not in ("?", "cache")})
+            cols = {k: getattr(cur, k) for k in RecommendationRow.__table__.columns.keys() if k not in ("id", "created_at", "supersedes_id", "version")}
+            new = RecommendationRow(**cols, created_at=repo.now(), supersedes_id=cur.id, version=(cur.version or 1) + 1)
+            new.committee_status = c.status
+            if ok:
+                new.final_action, new.confidence, new.size_class = c.final_action, c.final_confidence, c.size_class
+                new.llm_model_ids = ",".join(models)[:200] or None
+            s.add(new)
+            s.flush()
+            s.add(CommitteeRow(recommendation_id=new.id, status=c.status, payload=c.as_dict(), consensus=c.consensus_pct, divergence=c.divergence, prompt_version=c.prompt_version, created_at=repo.now()))
             s.commit()
-            return c.as_dict()
-
-    def _sync_paper_with_final(self, s: Session, row: RecommendationRow) -> None:
-        """A committee downgrade after persistence must be reflected in the paper signal."""
-        pos = next((p for p in repo.all_paper_positions(s) if p.recommendation_id == row.id), None)
-        if pos is None:
-            return
-        if Action(row.final_action) not in BULLISH_ACTIONS:
-            if pos.status == "PENDING":
-                pos.status, pos.skip_reason = "SKIPPED", f"AI 위원회 하향 조정({row.deterministic_action} → {row.final_action})"
-        elif pos.status == "PENDING" and pos.action != row.final_action:
-            pos.action, pos.notional = row.final_action, position_notional(row.final_action, self.base_cfg.paper)
-        pos.updated_at = repo.now()
+            return c.as_dict() | {"recommendation_id": new.id, "supersedes_id": cur.id}
 
     def replay_recommendation(self, rec_id: int) -> ReplayOutcome:
         with self.sf() as s:
@@ -323,4 +376,5 @@ class MarketLensService:
         limits.setdefault("min_dollar_volume", sc.min_avg_dollar_volume)
         rep = MarketSync(self.registry, self.store).run(self.now(), **limits)
         self.data.cache = type(self.data.cache)()  # the store changed → drop cached provider reads
-        return {"status": "OK" if not rep.errors else "PARTIAL", **rep.__dict__}
+        # "sync finished" is not "data complete": a partial sync says how much is still missing
+        return {"status": "SYNC_COMPLETE" if rep.complete else "SYNC_PARTIAL", "bar_days_remaining": max(0, rep.bar_days_missing - rep.bar_days_loaded - rep.bar_days_empty), **rep.__dict__}

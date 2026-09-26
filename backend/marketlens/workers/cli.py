@@ -42,8 +42,16 @@ def _serve(settings: Any, host: str, port: int) -> int:
         except PortInUse as e:
             print(str(e), file=sys.stderr)
             return 3
+        from marketlens.application.services import MixedEnvironmentError, assert_db_environment
+
+        try:
+            assert_db_environment(settings)
+            app = create_app(settings)
+        except MixedEnvironmentError as e:
+            print(str(e), file=sys.stderr)
+            return 5
         print(f"MARKETLENS_PORT={port}", flush=True)  # read by the desktop shell
-        uvicorn.run(create_app(settings), host=host, port=port, log_level="warning")
+        uvicorn.run(app, host=host, port=port, log_level="warning")
         return 0
     finally:
         lock.release()

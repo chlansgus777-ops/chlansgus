@@ -50,14 +50,21 @@ def rec_session_day(as_of: datetime) -> date:
     return next_trading_day(d)
 
 
+def known_at(r: Any) -> datetime:
+    """When a recommendation version became known: its analysis time, or later for a version issued
+    afterwards (e.g. a committee review of an earlier snapshot). Nothing acts on it before that."""
+    created = getattr(r, "created_at", None)
+    return max(r.as_of, created) if created is not None else r.as_of
+
+
 def exit_events_for(later: list[Any], after: datetime) -> list[tuple[datetime, ExitReason]]:
     """Exit signals from later recommendations (full timestamps — fills happen at the next open)."""
-    for r in sorted((x for x in later if x.as_of > after), key=lambda x: (x.as_of, x.id)):
+    for r in sorted((x for x in later if known_at(x) > after), key=lambda x: (known_at(x), x.id)):
         if (r.result or {}).get("thesis_invalidated"):
-            return [(r.as_of, ExitReason.THESIS_INVALIDATION)]
+            return [(known_at(r), ExitReason.THESIS_INVALIDATION)]
         act = Action(r.final_action)
         if act not in BULLISH_ACTIONS and act != Action.HOLD:
-            return [(r.as_of, ExitReason.RECOMMENDATION_DOWNGRADE)]
+            return [(known_at(r), ExitReason.RECOMMENDATION_DOWNGRADE)]
     return []
 
 
@@ -68,10 +75,11 @@ class EvaluationService:
     def _bars(self, ticker: str, start: date, end: date) -> list[Bar]:
         return [b for b in (self.svc.data.bars(ticker, start, end).value or []) if b.day <= end]
 
-    def _delisted_on(self, ticker: str) -> date | None:
-        ctx = self.svc.last_scan_context
-        sec = ctx.securities.get(ticker) if ctx else None
-        return sec.delisted_at if sec else None
+    def _delisted_on(self, s: Any, ticker: str) -> date | None:
+        """From the persisted security master (history), never from the current scan's universe: a name
+        that disappeared from today's listing is exactly the one whose outcome must still be recorded.
+        Uses the caller's session (a nested session would reset a shared SQLite connection)."""
+        return repo.delisted_on(s, ticker, self.svc.mode.value)
 
     # ------------------------------------------------------------------ outcomes
     def update_outcomes(self, as_of: datetime | None = None) -> int:
@@ -79,7 +87,8 @@ class EvaluationService:
         today = last_completed_session(as_of)
         written = 0
         with self.svc.sf() as s:
-            for rec in repo.all_recommendations(s, mode=self.svc.mode.value, until=as_of):
+            # one outcome per issued recommendation; later versions of the same snapshot are not new evidence
+            for rec in repo.all_recommendations(s, mode=self.svc.mode.value, until=as_of, originals_only=True):
                 have = {o.horizon for o in repo.outcomes_for(s, rec.id)}
                 base_day = rec_session_day(rec.as_of)
                 todo = [h for h in HORIZONS if h not in have and is_mature(base_day, h, today)]
@@ -87,7 +96,7 @@ class EvaluationService:
                     continue
                 bars = self._bars(rec.ticker, base_day - timedelta(days=10), today)
                 bench = self._bars(BENCH, base_day - timedelta(days=10), today)
-                delisted = self._delisted_on(rec.ticker)
+                delisted = self._delisted_on(s, rec.ticker)
                 for h in todo:
                     o = forward_outcome(bars, base_day, h, today, delisted)
                     if o.value is None:
@@ -123,8 +132,6 @@ class EvaluationService:
                 if rec is not None and Action(rec.final_action) not in BULLISH_ACTIONS:
                     committee_skips.append(pos)  # the final (post-committee) action is no longer bullish
                     continue
-                if rec is not None and pos.action != rec.final_action:
-                    pos.action = rec.final_action  # e.g. BUY → BUY SMALL by the risk manager: size follows
                 later = repo.recommendation_history(s, pos.ticker, 500, mode=self.svc.mode.value, until=as_of)
                 spread_bps = None
                 if rec is not None:
@@ -278,6 +285,23 @@ class EvaluationService:
         return {k: (v.isoformat() if isinstance(v, (date, datetime)) else v) for k, v in p.__dict__.items() if not k.startswith("_")}
 
     # ------------------------------------------------------------------ calibration
+    def promote_shadow(self) -> dict[str, Any]:
+        """Human approval of a shadow model. Allowed only when the latest comparison found it eligible."""
+        with self.svc.sf() as s:
+            shadow = repo.shadow_model(s)
+            runs = [r for r in repo.calibration_runs(s) if shadow is not None and r.candidate_version == shadow.version]
+            last = runs[0] if runs else None
+            if shadow is None or last is None or last.status != "PROMOTION_ELIGIBLE":
+                return {"status": "REFUSED", "reason": "승격 가능 판정을 받은 후보 모델이 없습니다(최신 비교 결과 필요)."}
+            prev = repo.production_model(s)
+            if prev is not None:
+                prev.status = "RETIRED"
+            shadow.status, shadow.promoted_at = "PRODUCTION", repo.now()
+            repo.add_calibration_run(s, "PROMOTED", shadow.version, {"approved_from_run": last.id})
+            s.commit()
+            log_event(log, Event.MODEL_PROMOTED, version=shadow.version)
+            return {"status": "PROMOTED", "version": shadow.version}
+
     def calibrate(self) -> dict[str, Any]:
         cfg = self.svc.model_config()
         ccfg = self.svc.base_cfg.calibration
@@ -289,6 +313,12 @@ class EvaluationService:
             if shadow is not None and shadow.shadow_started is not None:
                 cmp = compare_shadow(samples, prod_weights, dict(shadow.weights), shadow.shadow_started, today, ccfg)
                 payload = {"comparison": encode(cmp), "production": prod_weights, "shadow": shadow.weights}
+                if cmp.promote and not ccfg.auto_promote:
+                    # eligible, but a production weight change is a human decision (POST /calibration/promote)
+                    repo.add_calibration_run(s, "PROMOTION_ELIGIBLE", shadow.version, payload)
+                    s.commit()
+                    log_event(log, Event.CALIBRATION_RUN, status="promotion_eligible", promote=True)
+                    return {"status": "PROMOTION_ELIGIBLE", **payload}
                 if cmp.promote:
                     prev = repo.production_model(s)
                     if prev is not None:

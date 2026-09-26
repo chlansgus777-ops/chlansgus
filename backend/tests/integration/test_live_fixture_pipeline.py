@@ -36,7 +36,8 @@ def live():
 
 def test_sync_builds_market_caps_and_sectors_from_free_sources(live):
     svc, sync, _scan, _seen = live
-    assert sync["status"] == "OK", sync["errors"]
+    assert sync["status"] == "SYNC_COMPLETE", sync["errors"]
+    assert sync["splits_new"] == 1 and sync["bar_days_remaining"] == 0
     assert sync["bar_days_loaded"] >= 60 and sync["shares_updated"] >= 3
     secs = {s.ticker: s for s in svc.store.securities(None)}
     assert "OTCX" not in secs  # OTC names are out of scope
@@ -71,7 +72,10 @@ def test_live_recommendation_uses_real_data_states(live):
     assert checks["fundamentals"] == "FRESH" and checks["price_history"] == "FRESH" and checks["macro"] == "FRESH"
     assert checks["analyst"] == "MISSING" and checks["options"] == "MISSING"  # paid data → honestly missing
     assert checks["short_interest"] == "FRESH" and res["short_interest_pct"] == pytest.approx(0.012, rel=1e-3)  # FINRA ÷ SEC shares
-    assert nvda.deterministic_action != Action.DATA_INSUFFICIENT.value
+    # without forward estimates the semiconductor valuation model (forward P/E, PEG = 6 of 8 weight) cannot judge
+    # the price → "unknown", never "bad": no BUY and no SELL (audit P0: missing sector data became REDUCE)
+    assert nvda.deterministic_action == Action.DATA_INSUFFICIENT.value
+    assert "INSUFFICIENT_MODEL_COVERAGE" in res["decision"]["vetoes"] and "STALE_PRICE" not in res["decision"]["vetoes"]
     assert res["sector_model_id"] == "semiconductor" and res["multiples"]["market_cap"] is not None
     # TSM files IFRS 20-F reports: no us-gaap quarterly facts → fundamentals missing → no recommendation
     assert tsm.deterministic_action == Action.DATA_INSUFFICIENT.value

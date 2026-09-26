@@ -72,6 +72,7 @@ class HardVeto(StrEnum):
     THESIS_INVALIDATED = "THESIS_INVALIDATED"
     UNACCEPTABLE_LIQUIDITY = "UNACCEPTABLE_LIQUIDITY"
     EXTREME_EVENT_RISK = "EXTREME_EVENT_RISK"
+    INSUFFICIENT_MODEL_COVERAGE = "INSUFFICIENT_MODEL_COVERAGE"  # sector model cannot judge the core (fundamental/valuation)
 
 
 class Stance(StrEnum):

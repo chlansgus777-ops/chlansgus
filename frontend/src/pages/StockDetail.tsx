@@ -23,19 +23,34 @@ function Metric({ k, label }: { k: string; label: string }) {
   return GLOSSARY[k] ? <Term k={k}>{label}</Term> : <>{label}</>;
 }
 
-export default function StockDetail() {
+/** One instance per ticker: every piece of local state (busy flags, notes, pending AI runs) starts fresh
+ * when the ticker changes, so nothing from another stock can be shown on this page. */
+export default function StockDetailPage() {
   const { ticker = "" } = useParams();
+  return <StockDetail key={ticker.toUpperCase()} ticker={ticker.toUpperCase()} />;
+}
+
+/** The AI committee shown must belong to the recommendation version on screen (same ticker and id). */
+export function committeeFor(data: SD | null, ticker: string): CommitteeResult | null {
+  if (!data || !data.committee) return null;
+  if (data.analysis.ticker !== ticker || data.recommendation.ticker !== ticker) return null;
+  if (data.committee_recommendation_id != null && data.committee_recommendation_id !== data.recommendation.id) return null;
+  if (data.committee.ticker && data.committee.ticker !== ticker) return null;
+  return data.committee;
+}
+
+function StockDetail({ ticker }: { ticker: string }) {
   const [refreshTick, setRefreshTick] = useState(0);
   const d = useApi<SD>(`/stocks/${ticker}${refreshTick ? "?refresh=true" : ""}`, [refreshTick]);
-  const [committee, setCommittee] = useState<CommitteeResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const evIndex = useMemo(() => new Map<string, Evidence>((d.data?.analysis.evidence ?? []).map((e) => [e.evidence_id, e])), [d.data]);
   if (d.state === "loading") return <Loading what={`${ticker} 분석`} steps={["가격·재무 데이터 확인", "업종 모델 적용", "이슈·거시 반영", "가격 계획 계산"]} />;
   if (!d.data) return <Err error={d.error} retry={d.reload} />;
+  if (d.data.analysis.ticker !== ticker) return <Loading what={`${ticker} 분석`} />;  // never render another stock's data
   const { recommendation: rec, analysis: a } = d.data;
-  const com = committee ?? d.data.committee;
+  const com = committeeFor(d.data, ticker);
   const comps = a.scorecard.components;
   const positives = comps.flatMap((c) => c.reasons.filter((r) => r.sign > 0)).slice(0, 5);
   const negatives = comps.flatMap((c) => c.reasons.filter((r) => r.sign < 0)).slice(0, 5);
@@ -178,7 +193,7 @@ export default function StockDetail() {
         )}
       </Card>
 
-      <Card title="AI 투자위원회" icon="◈" explain="7명의 AI 분석가 요약 — 결정론적 판단을 올릴 수는 없고 낮추기만 할 수 있습니다." right={<button disabled={!!busy} onClick={() => run("com", async () => { setCommittee(await api.post<CommitteeResult>(`/recommendations/${rec.id}/committee`)); })}>{busy === "com" ? "AI 위원회 분석 중…" : com ? "결과 새로 보기" : "AI 위원회 실행"}</button>}>
+      <Card title="AI 투자위원회" icon="◈" explain="7명의 AI 분석가 요약 — 결정론적 판단을 올릴 수는 없고 낮추기만 할 수 있습니다." right={<button disabled={!!busy} onClick={() => run("com", async () => { await api.post<CommitteeResult>(`/recommendations/${rec.id}/committee`); d.reload(); })}>{busy === "com" ? "AI 위원회 분석 중…" : com ? "결과 새로 보기" : "AI 위원회 실행"}</button>}>
         {busy === "com" && <Loading what="AI 위원회" steps={["분석가 7명 의견", "강세·약세 토론 2라운드", "리스크 검토", "근거 수치 검증"]} />}
         {com ? <CommitteeView c={com} evidence={evIndex} /> : <Empty hint="스캔 상위 후보에는 자동으로 실행됩니다. 이 종목은 버튼을 눌러 실행할 수 있습니다.">아직 실행하지 않았습니다.</Empty>}
       </Card>

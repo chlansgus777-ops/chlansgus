@@ -40,3 +40,12 @@ describe("glossary", () => {
     expect(tip("forward_pe")).toContain("낮을수록 유리");
   });
 });
+
+describe("stale intraday recommendations are never presented as executable", () => {
+  it("explains revalidation and invalidated plans", () => {
+    const base = { action: "BUY", price: 100, maxBuy: 101, stop: 95, rr: 2.4, eventRisk: "LOW", vetoes: [] as string[] };
+    expect(advise({ ...base, status: "NEEDS_REVALIDATION" }).headline).toContain("현재가를 확인하기 전에는 실행하지 마세요");
+    expect(advise({ ...base, status: "PLAN_INVALIDATED" }).headline).toContain("사지 마세요");
+    expect(advise({ ...base, status: "CURRENT" }).headline).toContain("매수 조건을 충족");
+  });
+});

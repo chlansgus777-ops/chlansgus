@@ -28,10 +28,18 @@ class SyncReport:
     universe: dict[str, int] = field(default_factory=dict)
     bar_days_loaded: int = 0
     bar_days_missing: int = 0
+    bar_days_empty: int = 0  # trading days the provider returned no rows for (outside its history window)
     shares_updated: int = 0
     market_caps: int = 0
     profiles_updated: int = 0
+    splits_new: int = 0
+    bars_split_adjusted: int = 0
     errors: list[str] = field(default_factory=list)
+
+    @property
+    def complete(self) -> bool:
+        """Every wanted price day was loaded and no step failed. A partial sync is NOT scanner-ready."""
+        return not self.errors and self.bar_days_loaded + self.bar_days_empty >= self.bar_days_missing
 
 
 def _find(registry: ProviderRegistry, kind: str, attr: str) -> Any:
@@ -59,7 +67,9 @@ class MarketSync:
         # 2) bars via grouped daily
         grouped = _find(self.reg, "price", "get_grouped_daily")
         if grouped is not None:
-            have = self.store.stored_days(grouped.name)
+            empty_s = self.store.get_setting("grouped_empty_days") or ""
+            empty = {date.fromisoformat(x) for x in empty_s.split(",") if x}
+            have = self.store.stored_days(grouped.name) | empty
             wanted = []
             d = today
             while d >= today - timedelta(days=backfill_days):
@@ -76,6 +86,22 @@ class MarketSync:
                 if bars:
                     self.store.save_grouped(d, bars, grouped.name)
                     rep.bar_days_loaded += 1
+                else:
+                    empty.add(d)
+                    rep.bar_days_empty += 1
+            if rep.bar_days_empty:
+                self.store.set_setting("grouped_empty_days", ",".join(sorted(x.isoformat() for x in empty)))
+        # 2b) stock splits (one bulk request) → rescale stored bars fetched before the split
+        splitter = _find(self.reg, "price", "get_splits")
+        if splitter is not None:
+            since_s = self.store.get_setting("splits_checked_through")
+            since = date.fromisoformat(since_s) - timedelta(days=7) if since_s else today - timedelta(days=3 * 365)
+            try:
+                rep.splits_new = len(self.store.save_splits(splitter.get_splits(since)))
+                self.store.set_setting("splits_checked_through", today.isoformat())
+            except ProviderError as e:
+                rep.errors.append(f"splits: {e}")
+        rep.bars_split_adjusted = self.store.adjust_bars_for_splits()
         # 3) shares outstanding → market caps
         sec = _find(self.reg, "universe", "shares_outstanding_all")
         if sec is not None:

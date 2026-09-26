@@ -38,7 +38,7 @@ from marketlens.domain.issues import Issue, aggregate_issue_score, compute_issue
 from marketlens.domain.macro import MacroSnapshot
 from marketlens.domain.market import Bar, Security
 from marketlens.domain.market_calendar import last_completed_session, to_ny
-from marketlens.domain.portfolio import CandidateProfile, Portfolio, review_candidate
+from marketlens.domain.portfolio import common_valuation, CandidateProfile, Portfolio, review_candidate
 from marketlens.domain.sector_models import select_sector_model
 from marketlens.domain.valuation import compute_multiples
 from marketlens.domain.what_changed import AnalysisDigest
@@ -224,16 +224,17 @@ class Scanner:
         if portfolio is not None:
             held = any(h.ticker == t for h in portfolio.holdings)
             hold_rets: dict[str, dict[date, float]] = {}
-            prices: dict[str, float] = {}
+            closes: dict[str, dict[date, float]] = {}
             for h in portfolio.holdings:
                 hb = self.data.bars(h.ticker, d - timedelta(days=200), d).value or []
                 hb = [b for b in hb if b.day <= last_completed_session(ctx.as_of)]
-                if hb:
-                    prices[h.ticker] = hb[-1].close  # every holding valued at the same session's close
+                closes[h.ticker] = {b.day: b.close for b in hb}
                 hold_rets[h.ticker] = _returns_by_date(hb)
+            # same policy as the portfolio page: one common valuation session, missing prices never = cost
+            val_day, prices, _missing = common_valuation(closes, [h.ticker for h in portfolio.holdings])
             exp = self.seed.macro_exposure(sec)
             themes = tuple(k for k, v in (("AI", exp.ai),) if v >= 0.4)
-            review = review_candidate(portfolio, prices, CandidateProfile(t, sec.sector, themes, exp.rates, _returns_by_date(bars)), hold_rets, self.cfg.portfolio)
+            review = review_candidate(portfolio, prices, CandidateProfile(t, sec.sector, themes, exp.rates, _returns_by_date(bars)), hold_rets, self.cfg.portfolio, valuation_day=val_day)
 
         prev_digest, prev_action = self.previous_lookup(t, ctx.as_of)
         return AnalysisInputs(
@@ -268,6 +269,7 @@ class Scanner:
             source_map=src,
             missing_reasons=missing,
             insider=insider,
+            splits=tuple(self.data.splits(t)),
         )
 
     # ------------------------------------------------------------------ stages

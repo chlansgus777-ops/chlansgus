@@ -59,7 +59,7 @@ def evidence_pack(evidence: tuple[Evidence, ...], role: str) -> list[dict[str, A
     cats = ROLE_CATEGORIES[role]
     return [
         {"id": e.evidence_id, "metric": e.metric, "ticker": e.ticker, "label": e.label, "value": e.value, "unit": e.unit,
-         "period": e.period, "source": e.source, "quality": e.quality}
+         "period": e.period, "basis": e.basis, "source": e.source, "quality": e.quality}
         for e in evidence
         if e.category in cats and e.value is not None
     ]

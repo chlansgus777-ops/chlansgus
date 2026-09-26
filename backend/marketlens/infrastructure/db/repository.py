@@ -25,6 +25,7 @@ from marketlens.infrastructure.db.models import (
     ProviderHealthRow,
     RecommendationRow,
     ScanRunRow,
+    SecurityRow,
     WatchlistRow,
 )
 
@@ -41,8 +42,30 @@ def latest_scan(s: Session, mode: str | None = None) -> ScanRunRow | None:
     return s.scalars(q.order_by(desc(ScanRunRow.id)).limit(1)).first()
 
 
+def _superseded_ids() -> Any:
+    return select(RecommendationRow.supersedes_id).where(RecommendationRow.supersedes_id.is_not(None))
+
+
 def recommendations_for_scan(s: Session, scan_id: int) -> list[RecommendationRow]:
-    return list(s.scalars(select(RecommendationRow).where(RecommendationRow.scan_run_id == scan_id).order_by(RecommendationRow.rank)))
+    """The current version of each recommendation of a scan (superseded versions stay in history)."""
+    return list(s.scalars(select(RecommendationRow).where(RecommendationRow.scan_run_id == scan_id, RecommendationRow.id.not_in(_superseded_ids())).order_by(RecommendationRow.rank)))
+
+
+def current_version(s: Session, rec_id: int) -> RecommendationRow | None:
+    row = s.get(RecommendationRow, rec_id)
+    while row is not None:
+        nxt = s.scalars(select(RecommendationRow).where(RecommendationRow.supersedes_id == row.id).order_by(desc(RecommendationRow.id)).limit(1)).first()
+        if nxt is None:
+            return row
+        row = nxt
+    return None
+
+
+def original_version(s: Session, rec_id: int) -> RecommendationRow | None:
+    row = s.get(RecommendationRow, rec_id)
+    while row is not None and row.supersedes_id is not None:
+        row = s.get(RecommendationRow, row.supersedes_id)
+    return row
 
 
 def latest_recommendation(s: Session, ticker: str, before: datetime | None = None, mode: str | None = None, inclusive: bool = False, exclude_id: int | None = None) -> RecommendationRow | None:
@@ -67,12 +90,19 @@ def recommendation_history(s: Session, ticker: str, limit: int = 20, mode: str |
     return list(s.scalars(q.order_by(desc(RecommendationRow.as_of), desc(RecommendationRow.id)).limit(limit)))
 
 
+def delisted_on(s: Session, ticker: str, mode: str) -> date | None:
+    row = s.get(SecurityRow, ticker)
+    return row.delisted_at if row is not None and row.mode == mode else None
+
+
 def get_recommendation(s: Session, rec_id: int) -> RecommendationRow | None:
     return s.get(RecommendationRow, rec_id)
 
 
-def all_recommendations(s: Session, mode: str | None = None, until: datetime | None = None) -> list[RecommendationRow]:
+def all_recommendations(s: Session, mode: str | None = None, until: datetime | None = None, originals_only: bool = False) -> list[RecommendationRow]:
     q = select(RecommendationRow)
+    if originals_only:
+        q = q.where(RecommendationRow.supersedes_id.is_(None))
     if mode is not None:
         q = q.where(RecommendationRow.mode == mode)
     if until is not None:

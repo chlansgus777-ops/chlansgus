@@ -28,6 +28,8 @@ class CalibrationConfig:
     max_hit_rate_drop: float = 0.0
     max_downside_worsening: float = 0.0
     min_segment_samples: int = 60
+    max_worst_worsening: float = 0.0  # worst top-quintile outcome (drawdown proxy) may not get worse
+    auto_promote: bool = False  # promotion is a human decision by default; the comparison only makes it eligible
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +106,17 @@ class ShadowComparison:
     downside_shadow: float | None
     promote: bool
     reasons: tuple[str, ...]
+    worst_production: float | None = None
+    worst_shadow: float | None = None
+    ic_halves: tuple[tuple[float | None, float | None], ...] = ()  # (production, shadow) IC per time half
+
+
+def _worst_top_quintile(scored: list[tuple[date, float, float]]) -> float | None:
+    by_day: dict[date, list[tuple[float, float]]] = {}
+    for d, sc, r in scored:
+        by_day.setdefault(d, []).append((sc, r))
+    rets = [r for rows in by_day.values() if len(rows) >= 5 for _, r in sorted(rows, key=lambda x: -x[0])[: max(1, len(rows) // 5)]]
+    return min(rets) if len(rets) >= 5 else None
 
 
 def _top_quintile_stats(scored: list[tuple[date, float, float]]) -> tuple[float | None, float | None]:
@@ -152,8 +165,26 @@ def compare_shadow(
     ic_s = spearman([a for _, a, _ in sh_pts], [b for _, _, b in sh_pts]) if n >= 3 else None
     hp, dp = _top_quintile_stats(prod_pts)
     hs, ds = _top_quintile_stats(sh_pts)
+    wp, ws = _worst_top_quintile(prod_pts), _worst_top_quintile(sh_pts)
+    # stability: the improvement must hold in both halves of the out-of-sample period, not just on average
+    days = sorted({d for d, _, _ in prod_pts})
+    halves: list[tuple[float | None, float | None]] = []
+    if len(days) >= 2:
+        mid = days[len(days) // 2]
+        for sel in (lambda d: d < mid, lambda d: d >= mid):
+            p_h = [(a, b) for d, a, b in prod_pts if sel(d)]
+            s_h = [(a, b) for d, a, b in sh_pts if sel(d)]
+            halves.append((spearman([a for a, _ in p_h], [b for _, b in p_h]) if len(p_h) >= 3 else None,
+                           spearman([a for a, _ in s_h], [b for _, b in s_h]) if len(s_h) >= 3 else None))
     reasons: list[str] = []
     promote = True
+    # fail closed: every safety metric must be measurable; "could not check" never counts as "passed"
+    required = {"IC(운영)": ic_p, "IC(후보)": ic_s, "적중률(운영)": hp, "적중률(후보)": hs, "하방(운영)": dp, "하방(후보)": ds,
+                "최악 결과(운영)": wp, "최악 결과(후보)": ws}
+    missing = [k for k, v in required.items() if v is None]
+    if missing or len(halves) < 2 or any(a is None or b is None for a, b in halves):
+        promote = False
+        reasons.append("필수 안전 지표를 계산할 수 없음(" + ", ".join(missing or ["기간별 안정성"]) + ") → 승격 불가, 후보 모델 유지")
     if n < cfg.min_shadow_samples:
         promote = False
         reasons.append(f"표본 외 표본 {n}개 (< {cfg.min_shadow_samples})")
@@ -166,9 +197,15 @@ def compare_shadow(
     if dp is not None and ds is not None and ds < dp - cfg.max_downside_worsening:
         promote = False
         reasons.append("하방 위험(낙폭 대용치)이 운영 모델보다 나쁨")
+    if wp is not None and ws is not None and ws < wp - cfg.max_worst_worsening:
+        promote = False
+        reasons.append("최악 결과(낙폭 대용치)가 운영 모델보다 나쁨")
+    if halves and all(a is not None and b is not None for a, b in halves) and any(b < a for a, b in halves):  # type: ignore[operator]
+        promote = False
+        reasons.append("기간별 안정성 부족: 한쪽 기간에서 후보 모델 IC가 운영 모델보다 낮음")
     if promote:
         reasons.append("모든 승격 조건 통과")
-    return ShadowComparison(n, ic_p, ic_s, hp, hs, dp, ds, promote, tuple(reasons))
+    return ShadowComparison(n, ic_p, ic_s, hp, hs, dp, ds, promote, tuple(reasons), wp, ws, tuple(halves))
 
 
 def segment_samples(samples: Sequence[OutcomeSample], key: str, value: str, min_n: int) -> tuple[list[OutcomeSample], bool]:

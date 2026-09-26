@@ -7,6 +7,7 @@ for point-in-time analysis and replay.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Mapping
 
@@ -18,7 +19,8 @@ from marketlens.domain.enums import Exchange
 from marketlens.domain.fundamentals import QuarterlyFinancials
 from marketlens.domain.market import Bar, Security
 from marketlens.domain.market_calendar import UTC
-from marketlens.infrastructure.db.models import FundamentalVintageRow, PriceBarRow, SecurityRow
+from marketlens.domain.corporate_actions import SplitEvent, split_factor
+from marketlens.infrastructure.db.models import AppSettingRow, CorporateActionRow, FundamentalVintageRow, PriceBarRow, SecurityRow
 
 
 def _now() -> datetime:
@@ -123,7 +125,10 @@ class MarketStore:
                     continue
                 bar = s.scalars(select(PriceBarRow).where(PriceBarRow.ticker == row.ticker, PriceBarRow.day == d).limit(1)).first()
                 if bar is not None and row.shares_outstanding:
-                    row.market_cap = bar.close * row.shares_outstanding
+                    splits = [SplitEvent(e.ticker, e.execution_date, e.split_from, e.split_to, e.source)
+                              for e in s.scalars(select(CorporateActionRow).where(CorporateActionRow.ticker == row.ticker))]
+                    f = split_factor(splits, row.shares_as_of, d) if row.shares_as_of else 1.0
+                    row.market_cap = bar.close * row.shares_outstanding * f
                     n += 1
             s.commit()
         return n
@@ -169,13 +174,73 @@ class MarketStore:
                 out.setdefault(r.ticker, {}).setdefault(r.day, Bar(r.day, r.open, r.high, r.low, r.close, r.volume))
         return {t: [d[k] for k in sorted(d)] for t, d in out.items()}
 
+    # ------------------------------------------------------------------ checkpoints
+    def get_setting(self, key: str) -> str | None:
+        with self.sf() as s:
+            row = s.get(AppSettingRow, f"{self.mode}:{key}")
+            return row.value if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self.sf() as s:
+            row = s.get(AppSettingRow, f"{self.mode}:{key}")
+            if row is None:
+                s.add(AppSettingRow(key=f"{self.mode}:{key}", value=value))
+            else:
+                row.value = value
+            s.commit()
+
+    # ------------------------------------------------------------------ corporate actions (splits)
+    def save_splits(self, events: Iterable[SplitEvent]) -> list[SplitEvent]:
+        """Append new split events; returns the ones not seen before."""
+        new: list[SplitEvent] = []
+        with self.sf() as s:
+            for e in events:
+                if s.get(CorporateActionRow, (e.ticker, e.execution_date, e.source)) is None:
+                    s.add(CorporateActionRow(ticker=e.ticker, execution_date=e.execution_date, source=e.source, kind="SPLIT",
+                                             split_from=e.split_from, split_to=e.split_to, observed_at=_now()))
+                    new.append(e)
+            s.commit()
+        return new
+
+    def splits(self, ticker: str) -> list[SplitEvent]:
+        with self.sf() as s:
+            rows = list(s.scalars(select(CorporateActionRow).where(CorporateActionRow.ticker == ticker).order_by(CorporateActionRow.execution_date)))
+        return [SplitEvent(r.ticker, r.execution_date, r.split_from, r.split_to, r.source) for r in rows]
+
+    def adjust_bars_for_splits(self) -> int:
+        """Rescale stored bars that were retrieved *before* a split became effective (vendor-adjusted bars
+        fetched after the split are already on the new basis). Each split is applied exactly once."""
+        n = 0
+        with self.sf() as s:
+            for ev in list(s.scalars(select(CorporateActionRow).where(CorporateActionRow.bars_adjusted_at.is_(None)))):
+                if ev.split_from <= 0 or ev.split_to <= 0:
+                    continue
+                ratio = ev.split_to / ev.split_from
+                effective = datetime.combine(ev.execution_date, datetime.min.time(), tzinfo=UTC)
+                for b in s.scalars(select(PriceBarRow).where(PriceBarRow.ticker == ev.ticker, PriceBarRow.day < ev.execution_date, PriceBarRow.retrieved_at < effective)):
+                    b.open, b.high, b.low, b.close, b.volume = b.open / ratio, b.high / ratio, b.low / ratio, b.close / ratio, b.volume * ratio
+                    n += 1
+                ev.bars_adjusted_at = _now()
+            s.commit()
+        return n
+
     # ------------------------------------------------------------------ fundamentals (vintages)
     def save_quarters(self, ticker: str, quarters: Iterable[QuarterlyFinancials]) -> None:
+        """One row per (period, first filing). Re-fetching the same period only ever *adds* revisions
+        (later filings with different values) and refreshes ``retrieved_at`` so a TTL-valid store is not
+        downloaded again. First-reported values are never overwritten."""
         with self.sf() as s:
             for q in quarters:
                 key = (ticker, q.period_end, q.filed_date, q.source)
-                if s.get(FundamentalVintageRow, key) is None:
+                row = s.get(FundamentalVintageRow, key)
+                if row is None:
                     s.add(FundamentalVintageRow(ticker=ticker, period_end=q.period_end, filed_date=q.filed_date, source=q.source, payload=encode(q), retrieved_at=_now()))
+                    continue
+                old = decode(QuarterlyFinancials, row.payload)
+                merged = _merge_revisions(old.revisions, q.revisions)
+                if merged != dict(old.revisions):
+                    row.payload = encode(replace(old, revisions=merged))
+                row.retrieved_at = _now()
             s.commit()
 
     def quarters(self, ticker: str, max_age: timedelta) -> list[QuarterlyFinancials] | None:
@@ -186,5 +251,21 @@ class MarketStore:
             return None
         latest: dict[date, QuarterlyFinancials] = {}
         for r in sorted(rows, key=lambda r: r.filed_date):
-            latest.setdefault(r.period_end, decode(QuarterlyFinancials, r.payload))  # earliest vintage = PIT value
+            q = decode(QuarterlyFinancials, r.payload)
+            if r.period_end not in latest:
+                latest[r.period_end] = q  # earliest vintage = first reported
+            else:  # a later first-filing row for the same period: its values are revisions of the first
+                base = latest[r.period_end]
+                extra = {k: ((r.filed_date, v),) for k in ("revenue", "net_income", "eps_diluted", "shares_diluted", "shares_outstanding")
+                         if (v := getattr(q, k)) is not None and getattr(base, k) is not None and abs(v - getattr(base, k)) > 1e-9 * max(1.0, abs(getattr(base, k)))}
+                latest[r.period_end] = replace(base, revisions=_merge_revisions(_merge_revisions(base.revisions, q.revisions), extra))
         return [latest[d] for d in sorted(latest)]
+
+
+def _merge_revisions(a: Mapping[str, Iterable[Iterable[Any]]], b: Mapping[str, Iterable[Iterable[Any]]]) -> dict[str, tuple[tuple[date, float], ...]]:
+    out: dict[str, set[tuple[date, float]]] = {}
+    for src in (a, b):
+        for k, obs in src.items():
+            for fd, v in obs:
+                out.setdefault(k, set()).add((fd if isinstance(fd, date) else date.fromisoformat(str(fd)), float(v)))
+    return {k: tuple(sorted(v)) for k, v in out.items()}

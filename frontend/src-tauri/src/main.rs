@@ -20,6 +20,7 @@ const MAX_RESTARTS: u32 = 3;
 const EXIT_NOT_LOCAL: i32 = 2;
 const EXIT_PORT_IN_USE: i32 = 3;
 const EXIT_ALREADY_RUNNING: i32 = 4;
+const EXIT_MIXED_DATABASE: i32 = 5; // database belongs to the other data mode (MOCK vs LIVE)
 
 struct Backend {
     child: Mutex<Option<CommandChild>>,
@@ -64,7 +65,7 @@ fn spawn_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                         break;
                     }
                     let code = payload.code.unwrap_or(-1);
-                    if code == EXIT_NOT_LOCAL || code == EXIT_PORT_IN_USE || code == EXIT_ALREADY_RUNNING {
+                    if code == EXIT_NOT_LOCAL || code == EXIT_PORT_IN_USE || code == EXIT_ALREADY_RUNNING || code == EXIT_MIXED_DATABASE {
                         eprintln!("marketlens-backend refused to start (exit {code}); not restarting");
                         break;
                     }

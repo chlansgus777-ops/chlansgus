@@ -1,7 +1,7 @@
 # MarketLens model configuration — every change must bump the relevant version.
 scoring_model_version = "scoring-2.0.0"   # 2.0.0: coverage-blended components, point-in-time freshness inputs
-decision_model_version = "decision-2.0.0" # 2.0.0: stale-core veto, portfolio gate on all bullish actions, ADD R/R, prior-stop, sector-unknown
-config_version = "config-2.0.0"           # 2.0.0: per-type freshness rules, paper account limits
+decision_model_version = "decision-3.0.0" # 3.0.0: model-coverage veto, missing data neutral for REDUCE/SELL; 2.0.0: stale-core veto, portfolio gate, ADD R/R, prior-stop, sector-unknown
+config_version = "config-2.1.0"           # 2.1.0: calibration auto_promote=false; 2.0.0: per-type freshness rules, paper account limits
 
 [scoring.weights]            # points; normalised to 0-100
 fundamental = 25
@@ -127,6 +127,7 @@ horizon = 20
 min_ic_improvement = 0.01
 min_shadow_samples = 100
 min_segment_samples = 60
+auto_promote = false  # a shadow model that passes every check is only PROMOTION_ELIGIBLE; a person approves it
 
 [evaluation]
 min_ic_samples = 30

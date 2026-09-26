@@ -82,6 +82,23 @@ class PortfolioReview:
     size_cap: SizeClass
     warnings: tuple[str, ...]
     fit: str  # GOOD | NEUTRAL | POOR
+    valuation_status: str = "COMPLETE"  # COMPLETE | PARTIAL (some holding has no price on the valuation day)
+    missing_prices: tuple[str, ...] = ()
+    valuation_day: date | None = None
+
+
+def common_valuation(closes: Mapping[str, Mapping[date, float]], tickers: Sequence[str]) -> tuple[date | None, dict[str, float], tuple[str, ...]]:
+    """The one pricing policy shared by the portfolio page and the recommendation engine: every holding at
+    the close of the latest session for which all *priced* holdings have a close. Holdings without any
+    price are reported missing — never valued at their cost basis."""
+    have = {t: closes[t] for t in tickers if closes.get(t)}
+    missing = tuple(t for t in tickers if t not in have)
+    common = set.intersection(*(set(v) for v in have.values())) if have else set()
+    day = max(common) if common else None
+    prices = {t: v[day] for t, v in have.items()} if day is not None else {}
+    if day is None:
+        missing = tuple(tickers)
+    return day, prices, missing
 
 
 def review_candidate(
@@ -90,15 +107,21 @@ def review_candidate(
     cand: CandidateProfile,
     holding_returns: Mapping[str, Mapping[date, float]],
     limits: PortfolioLimits | None = None,
+    valuation_day: date | None = None,
 ) -> PortfolioReview:
     limits = limits or PortfolioLimits()
-    values = {h.ticker: h.quantity * prices.get(h.ticker, h.cost_basis) for h in pf.holdings}
+    missing = tuple(h.ticker for h in pf.holdings if h.ticker not in prices)
+    # unknown value is unknown: a holding without a price is left out of the weights (VALUATION PARTIAL),
+    # and the size of any new position is capped below because the concentration cannot be measured
+    values = {h.ticker: h.quantity * prices[h.ticker] for h in pf.holdings if h.ticker in prices}
     total = sum(values.values()) + pf.cash
     total = total if total > 0 else 1.0
     sector_w: dict[str, float] = {}
     theme_w: dict[str, float] = {}
     rate = 0.0
     for h in pf.holdings:
+        if h.ticker not in values:
+            continue
         w = values[h.ticker] / total
         sector_w[h.sector] = sector_w.get(h.sector, 0.0) + w
         for t in h.themes:
@@ -120,7 +143,7 @@ def review_candidate(
     avg_c = sum(c for _, c in corrs) / len(corrs) if corrs else None
     max_c = max(corrs, key=lambda x: x[1]) if corrs else None
 
-    warnings: list[str] = [f"{h.ticker}: 현재가 없음 → 매입 단가로 평가(비중 추정 오차 가능)" for h in pf.holdings if h.ticker not in prices]
+    warnings: list[str] = []
     cap = SizeClass.FULL
     rank = {SizeClass.FULL: 3, SizeClass.HALF: 2, SizeClass.SMALL: 1, SizeClass.WATCH: 0}
 
@@ -130,6 +153,8 @@ def review_candidate(
             cap = to
         warnings.append(why)
 
+    if missing:
+        limit(SizeClass.SMALL, f"PRICE MISSING: {', '.join(missing)} — 평가금액에서 제외, 비중 계산 불완전(VALUATION PARTIAL) → 소량만")
     cur_w = values.get(cand.ticker, 0.0) / total
     if cur_w >= limits.max_single_name:
         limit(SizeClass.WATCH, f"{cand.ticker} 이미 포트폴리오의 {cur_w:.0%} (한도 {limits.max_single_name:.0%})")
@@ -170,6 +195,9 @@ def review_candidate(
         size_cap=cap,
         warnings=tuple(warnings),
         fit=fit,
+        valuation_status="PARTIAL" if missing else "COMPLETE",
+        missing_prices=missing,
+        valuation_day=valuation_day,
     )
 
 
@@ -219,8 +247,7 @@ def portfolio_snapshot(pf: Portfolio, closes: Mapping[str, Mapping[date, float]]
     notes: list[str] = []
     tickers = [h.ticker for h in pf.holdings]
     have = [set(closes[t]) for t in tickers if closes.get(t)]
-    common = set.intersection(*have) if have else set()
-    val_day = max(common) if common else None
+    val_day, _prices, missing = common_valuation(closes, tickers)
     missing = tuple(t for t in tickers if not closes.get(t))
     if missing:
         notes.append(f"가격 데이터 없는 보유 종목(평가금액에서 제외): {', '.join(missing)}")

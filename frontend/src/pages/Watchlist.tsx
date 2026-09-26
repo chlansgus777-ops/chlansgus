@@ -14,7 +14,7 @@ export default function Watchlist() {
   if (!w.data) return <Err error={w.error} retry={w.reload} />;
   const act = async (f: () => Promise<unknown>) => { setErr(null); try { await f(); w.reload(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } };
   return (
-    <div className="grid">
+    <div className="grid" data-testid="watchlist">
       <h3>관심 종목</h3>
       <Card>
         <form className="row" onSubmit={(e) => { e.preventDefault(); if (t.trim()) void act(async () => { await api.post(`/watchlist/${encodeURIComponent(t.trim().toUpperCase())}`); setT(""); }); }}>

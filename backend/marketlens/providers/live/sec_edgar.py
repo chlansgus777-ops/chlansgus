@@ -273,10 +273,21 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
     per_period: dict[date, dict[str, float]] = defaultdict(dict)
     field_filed: dict[date, dict[str, date]] = defaultdict(dict)
 
+    revisions: dict[date, dict[str, list[tuple[date, float]]]] = defaultdict(lambda: defaultdict(list))
+
     def put(end: date, field_name: str, val: float, fdate: date) -> None:
+        """First filing wins the main value; later filings with a different value are kept as revisions
+        (restatements, split-adjusted comparatives) — append-only, nothing is overwritten."""
         if field_name not in per_period[end]:
             per_period[end][field_name] = val
             field_filed[end][field_name] = fdate
+            return
+        if fdate <= field_filed[end][field_name]:
+            return
+        seen = revisions[end][field_name]
+        last = seen[-1][1] if seen else per_period[end][field_name]
+        if abs(val - last) > 1e-9 * max(1.0, abs(last)):
+            seen.append((fdate, val))
 
     def earliest(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return sorted((it for it in items if it.get("form") in ("10-Q", "10-K")), key=lambda it: it.get("filed", ""))
@@ -353,7 +364,8 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
             ff["eps_diluted"] = max(ff.get("net_income", date.min), ff.get("shares_diluted", date.min))
         filed = min(ff.values())
         fields = {k: vals.get(k) for k in list(CONCEPTS) + ["total_debt", "shares_outstanding"]}
-        out.append(QuarterlyFinancials(period_end=end, filed_date=filed, fiscal_label=end.isoformat(), source="sec-edgar", field_filed=ff, **fields))
+        rev = {k: tuple(v) for k, v in revisions.get(end, {}).items() if v}
+        out.append(QuarterlyFinancials(period_end=end, filed_date=filed, fiscal_label=end.isoformat(), source="sec-edgar", field_filed=ff, revisions=rev, **fields))
     if not out:
         raise NotSupported(f"{ticker}: 분기 10-Q/10-K 데이터 없음")
     return out[-16:]

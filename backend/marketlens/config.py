@@ -51,7 +51,7 @@ SECRET_ENV_KEYS = (
 )
 
 SCHEMA_VERSION = "schema-2"
-AGENT_PROMPT_VERSION = "prompts-2.0.0"
+AGENT_PROMPT_VERSION = "prompts-2.1.0"  # 2.1.0: evidence carries ACTUAL/FORECAST basis
 
 
 @lru_cache(maxsize=1)

@@ -27,7 +27,9 @@ export const QUALITY_INFO: Record<string, Info> = {
 };
 
 export const STATUS_INFO: Record<string, Info> = {
-  CURRENT: { label: "현재 유효", help: "추천 이후 새로 마감된 거래일이 없어 추천 당시 가격 기준이 아직 유효합니다." },
+  CURRENT: { label: "현재 유효", help: "분석한 지 얼마 안 됐거나, 현재가로 최대 매수가·손절가·손익비를 다시 확인해 통과했습니다." },
+  NEEDS_REVALIDATION: { label: "현재가 재확인 필요", help: "장중에 분석한 지 시간이 지나 가격이 바뀌었을 수 있습니다. 현재가로 다시 확인하기 전에는 실행하지 마세요." },
+  PLAN_INVALIDATED: { label: "가격 조건 이탈", help: "현재가가 최대 매수가를 넘었거나 손절 기준 아래이거나 손익비가 부족해 이 매수 계획은 지금 유효하지 않습니다." },
   AGING: { label: "재분석 필요", help: "추천 이후 거래일이 지나 가격이 달라졌을 수 있습니다. 가격 계획은 참고만 하고 재분석하세요." },
   EXPIRED: { label: "만료", help: "추천 이후 여러 거래일이 지났거나 추천 당시에도 데이터가 부족했습니다. 현재 판단 근거로 사용하지 마세요." },
 };
@@ -47,6 +49,7 @@ export const DATA_TYPE_KO: Record<string, string> = {
 export const VETO_KO: Record<string, string> = {
   STALE_PRICE: "현재가 오래됨/없음", STALE_CORE_DATA: "핵심 데이터 오래됨", MISSING_CORE_DATA: "핵심 데이터 부족", SEVERE_DATA_CONFLICT: "데이터 충돌",
   THESIS_INVALIDATED: "투자 논리 훼손", UNACCEPTABLE_LIQUIDITY: "유동성 부족", EXTREME_EVENT_RISK: "극단적 이벤트 위험",
+  INSUFFICIENT_MODEL_COVERAGE: "업종 모델 판단 데이터 부족",
 };
 
 export const SESSION_KO: Record<string, string> = { PREMARKET: "프리마켓", REGULAR: "정규장", AFTER_HOURS: "애프터마켓", CLOSED: "장 마감", OVERNIGHT: "야간" };

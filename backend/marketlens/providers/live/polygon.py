@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from marketlens.domain.corporate_actions import SplitEvent
 from marketlens.domain.enums import DataMode
 from marketlens.domain.market import Bar, Quote
 from marketlens.infrastructure.resilience import TokenBucket
@@ -38,6 +39,19 @@ class PolygonProvider:
         d = self._get(f"/v2/aggs/ticker/{ticker}/range/1/day/{start.isoformat()}/{end.isoformat()}", adjusted="true", sort="asc", limit=50000)
         return _bars(d.get("results"))
 
+    def get_splits(self, since: date, max_pages: int = 5) -> list[SplitEvent]:
+        """All US stock splits executed on/after ``since`` (one request per 1,000 events)."""
+        out: list[SplitEvent] = []
+        params: dict[str, Any] = {"execution_date.gte": since.isoformat(), "order": "asc", "sort": "execution_date", "limit": 1000}
+        for _ in range(max_pages):
+            d = self._get("/v3/reference/splits", **params)
+            out += parse_splits(d.get("results"))
+            nxt = d.get("next_url")
+            if not nxt or "cursor=" not in nxt:
+                break
+            params = {"cursor": nxt.split("cursor=", 1)[1].split("&", 1)[0]}
+        return out
+
     def get_grouped_daily(self, day: date) -> dict[str, Bar]:
         d = self._get(f"/v2/aggs/grouped/locale/us/market/stocks/{day.isoformat()}", adjusted="true")
         rows = d.get("results") or []
@@ -48,6 +62,16 @@ class PolygonProvider:
             except (KeyError, TypeError, ValueError):
                 continue
         return out
+
+
+def parse_splits(rows: Any, source: str = "polygon") -> list[SplitEvent]:
+    out: list[SplitEvent] = []
+    for r in rows or []:
+        try:
+            out.append(SplitEvent(str(r["ticker"]), date.fromisoformat(str(r["execution_date"])), float(r["split_from"]), float(r["split_to"]), source))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
 
 
 def _bars(rows: Any) -> list[Bar]:

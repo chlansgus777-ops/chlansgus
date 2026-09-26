@@ -68,18 +68,20 @@ def system(req: Request) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- opportunities / scan
-def _row_summary(r: Any, s: MarketLensService | None = None) -> dict[str, Any]:
+def _row_summary(r: Any, s: MarketLensService | None = None, fetch_quote: bool = False) -> dict[str, Any]:
     res = r.result
     entry = res.get("entry") or {}
     er = res.get("event_risk") or {}
     nxt = (er.get("nearest") or {})
-    status = s.recommendation_status(r) if s is not None else None
+    status = s.recommendation_status(r, fetch_quote=fetch_quote) if s is not None else None
     bullish = r.final_action in {a.value for a in BULLISH_ACTIONS}
     return {
         "current_status": status.status if status else None,  # CURRENT | AGING | EXPIRED (re-judged now)
         "current_status_reason": status.reason_ko if status else None,
         "sessions_since": status.sessions_since if status else None,
-        "actionable_now": bool(status and status.status == "CURRENT" and r.data_quality in ("FRESH", "DELAYED")) if bullish else None,
+        "actionable_now": bool(status and status.actionable and r.data_quality in ("FRESH", "DELAYED")) if bullish else None,
+        "revalidated_price": status.revalidated_price if status else None,
+        "status_problems": list(status.problems) if status else [],
         "action_ko": ACTION_KO.get(Action(r.final_action), r.final_action),
         "valuation_price_basis": res.get("valuation_price_basis"),
         "sector_known": res.get("sector_known", True),
@@ -91,6 +93,8 @@ def _row_summary(r: Any, s: MarketLensService | None = None) -> dict[str, Any]:
         "stop": entry.get("stop"), "downside": entry.get("downside_pct"), "rr": entry.get("rr_at_current"),
         "catalyst": nxt.get("title"), "catalyst_date": nxt.get("event_date"), "risk": er.get("level"),
         "data_quality": r.data_quality, "mode": r.mode, "vetoes": res["decision"]["vetoes"], "as_of": r.as_of.isoformat(),
+        "version": getattr(r, "version", 1) or 1, "supersedes_id": getattr(r, "supersedes_id", None),
+        "issued_at": r.created_at.isoformat() if getattr(r, "created_at", None) else None,
     }
 
 
@@ -133,10 +137,11 @@ def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
         history = [{"id": h.id, "as_of": h.as_of.isoformat(), "score": h.score, "action": h.final_action} for h in repo.recommendation_history(ss, t, 30, mode=mode)]
         bars = (row.inputs or {}).get("bars") or []
         return {
-            "recommendation": _row_summary(row, s),
+            "recommendation": _row_summary(row, s, fetch_quote=True),
             "analysis": row.result,
             "price_history": [{"day": b["day"], "close": b["close"]} for b in bars[-130:]],
             "committee": com.payload if com else None,
+            "committee_recommendation_id": com.recommendation_id if com else None,  # the UI shows it only for this version
             "history": history,
             "versions": {"scoring": row.scoring_model_version, "decision": row.decision_model_version, "prompt": row.agent_prompt_version, "config": row.config_version,
                          "provider": row.provider_version, "schema": row.schema_version, "code": row.code_version, "app": row.app_version, "llm_models": row.llm_model_ids,
@@ -361,6 +366,11 @@ def sync(req: Request) -> dict[str, Any]:
 @router.post("/calibration/run")
 def run_calibration(req: Request) -> dict[str, Any]:
     return EvaluationService(svc(req)).calibrate()
+
+
+@router.post("/calibration/promote")
+def promote_calibration(req: Request) -> dict[str, Any]:
+    return EvaluationService(svc(req)).promote_shadow()
 
 
 @router.get("/calibration")

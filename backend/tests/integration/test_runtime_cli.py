@@ -86,3 +86,26 @@ def test_cli_commands_end_to_end(cli_env, capsys):
     assert main(["replay", "1"]) == 0
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["matches"] is True
     assert (cli_env / "logs" / "marketlens.log").exists()  # file log in the data directory
+
+
+def test_serve_refuses_a_database_of_the_other_mode(cli_env):
+    """Mock/Live separation: a MOCK database must never be opened in LIVE mode (or vice versa)."""
+    from dataclasses import replace
+
+    from marketlens.application.services import MixedEnvironmentError, assert_db_environment
+    from marketlens.config import load_settings
+    from marketlens.domain.enums import DataMode
+    from marketlens.infrastructure.db import repository as repo
+    from marketlens.infrastructure.db.session import make_engine, make_session_factory, migrate
+    from marketlens.workers import cli
+
+    st = load_settings()
+    migrate(st.database_url)
+    with make_session_factory(make_engine(st.database_url))() as s:
+        repo.set_setting(s, "db_environment", "MOCK")
+        s.commit()
+    live = replace(st, mode=DataMode.LIVE)
+    with pytest.raises(MixedEnvironmentError):
+        assert_db_environment(live)
+    assert cli._serve(live, "127.0.0.1", 0) == 5
+    assert_db_environment(st)  # same mode is fine

@@ -82,6 +82,10 @@ class DataAccess:
                 return Fetched(stored, "store")
         return self._get("universe", "universe", "list_securities", str(as_of), as_of)
 
+    def peek_quote(self, t: str) -> Fetched | None:
+        """The cached quote if one is still within its TTL — never triggers a provider call."""
+        return self.cache.get("price.get_quote", t, self.ttl.get("price", timedelta(minutes=5)))
+
     def quote(self, t: str) -> Fetched:
         return self._get("price", "price", "get_quote", t, t, cross_check=relative_conflicts(("price",), 0.02))
 
@@ -109,6 +113,10 @@ class DataAccess:
                 if v:
                     out[t] = list(v)
         return out
+
+    def splits(self, t: str) -> list[Any]:
+        """Stock splits recorded by the market sync (LIVE store); MOCK data is generated split-free."""
+        return self.store.splits(t) if self.store is not None else []
 
     def quarters(self, t: str) -> Fetched:
         if self.store is not None:

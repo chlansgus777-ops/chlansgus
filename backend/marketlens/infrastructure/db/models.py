@@ -89,6 +89,68 @@ class FundamentalVintageRow(Base):
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class CorporateActionRow(Base):
+    """Stock splits (append-only). ``bars_adjusted_at`` records when stored pre-split bars were rescaled."""
+
+    __tablename__ = "corporate_actions"
+    ticker: Mapped[str] = mapped_column(String(16), primary_key=True)
+    execution_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), default="SPLIT")
+    split_from: Mapped[float] = mapped_column(Float)
+    split_to: Mapped[float] = mapped_column(Float)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    bars_adjusted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class EstimateSnapshotRow(Base):
+    """Append-only consensus snapshots from free providers. Revisions (7/30/60/90 days) are computed from
+    this history; days before the first snapshot are UNKNOWN (never back-filled)."""
+
+    __tablename__ = "estimate_snapshots"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    period: Mapped[str] = mapped_column(String(24))  # e.g. "FY2027", "Q2026-12"
+    period_type: Mapped[str] = mapped_column(String(8))  # quarter | annual
+    period_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    eps_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    revenue_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    analyst_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    eps_high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    eps_low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    provider_revisions: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # provider-reported history (e.g. 7/30/60/90 days ago)
+    provider_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    observed_on: Mapped[date] = mapped_column(Date, index=True)  # snapshot day (NY)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+Index("ux_estimate_snapshot", EstimateSnapshotRow.ticker, EstimateSnapshotRow.provider, EstimateSnapshotRow.period, EstimateSnapshotRow.observed_on, unique=True)
+
+
+class GuidanceRow(Base):
+    """Management guidance extracted from SEC 8-K earnings releases (exact source sentence kept)."""
+
+    __tablename__ = "guidance"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    accession: Mapped[str] = mapped_column(String(32))
+    filed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source_url: Mapped[str] = mapped_column(String(300))
+    metric: Mapped[str] = mapped_column(String(24))  # revenue | eps | gross_margin | operating_margin | capex
+    period_label: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit: Mapped[str] = mapped_column(String(12))  # USD | fraction
+    sentence: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20))  # EXTRACTED | GUIDANCE_UNCLEAR
+    confidence: Mapped[str] = mapped_column(String(8))  # LOW | MEDIUM
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+Index("ux_guidance", GuidanceRow.ticker, GuidanceRow.accession, GuidanceRow.metric, GuidanceRow.sentence, unique=False)
+
+
 class ScanRunRow(Base):
     __tablename__ = "scan_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -139,7 +201,11 @@ class RecommendationRow(Base):
     code_version: Mapped[str | None] = mapped_column(String(64), nullable=True)  # git commit of the running code
     app_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     llm_model_ids: Mapped[str | None] = mapped_column(String(200), nullable=True)  # exact model IDs used by the committee
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))  # when this version became known
+    # append-only versioning: a later committee review creates a NEW row that supersedes this one;
+    # an issued recommendation is never edited (paper trading and evaluation use the version as issued)
+    supersedes_id: Mapped[int | None] = mapped_column(ForeignKey("recommendations.id"), nullable=True, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
 
 
 Index("ix_rec_ticker_asof", RecommendationRow.ticker, RecommendationRow.as_of)

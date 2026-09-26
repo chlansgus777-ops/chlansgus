@@ -37,6 +37,19 @@ _FUND_FRACTION = ("margin", "growth", "_yoy", "roic", "roe", "rotce", "_to_reven
 _FUND_X = ("_to_ebitda", "coverage", "ratio", "book_to_bill", "nrr")
 
 
+_FORECAST_KEYS = ("forward", "estimate", "consensus", "guide", "target_price", "expected_move", "revision")
+
+
+def infer_basis(key: str) -> str | None:
+    """ACTUAL (reported / measured) vs FORECAST (analyst estimate, guidance, consensus). None = not applicable."""
+    head, _, last = key.partition(".")
+    if head == "analyst" or any(k in last for k in _FORECAST_KEYS):
+        return "FORECAST"
+    if head in ("fund", "price", "tech") or key in ("earnings.last", "earnings.revenue_surprise") or last in ("trailing_pe", "earnings_yield"):
+        return "ACTUAL"
+    return None
+
+
 def infer_unit(key: str) -> str | None:
     if key in _EXACT_UNITS:
         return _EXACT_UNITS[key]
@@ -82,6 +95,7 @@ class Evidence:
     ticker: str | None = None  # None = market-wide (macro, regime)
     unit: str | None = None
     period: str | None = None  # e.g. "TTM", "Q2 2026"
+    basis: str | None = None  # ACTUAL | FORECAST (None = not a reported/forecast quantity)
 
 
 def evidence_id(key: str, ticker: str | None, as_of: datetime) -> str:
@@ -102,7 +116,7 @@ class EvidenceBuilder:
         eid = explicit_id or evidence_id(key, self.ticker if ticker_scoped else None, self.as_of)
         if isinstance(value, float):
             value = round(value, 6)
-        self._items[eid] = Evidence(eid, category, label, value, source, source_ts, quality, key, self.ticker if ticker_scoped else None, unit or infer_unit(key), period)
+        self._items[eid] = Evidence(eid, category, label, value, source, source_ts, quality, key, self.ticker if ticker_scoped else None, unit or infer_unit(key), period, infer_basis(key))
         self._key_to_id[key] = eid
         return eid
 

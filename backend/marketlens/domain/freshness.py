@@ -14,12 +14,12 @@ Qualities:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date, datetime
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from typing import Mapping
 
 from marketlens.domain.enums import DataQuality
-from marketlens.domain.market_calendar import last_completed_session, to_ny, trading_days_between
+from marketlens.domain.market_calendar import last_completed_session, market_active_between, to_ny, trading_days_between
 
 SESSIONS = "sessions"
 DAYS = "days"
@@ -133,29 +133,102 @@ def rules_from_config(raw: Mapping[str, Mapping[str, float]] | None) -> Mapping[
 
 @dataclass(frozen=True, slots=True)
 class RecommendationFreshness:
-    status: str  # CURRENT | AGING | EXPIRED
+    status: str  # CURRENT | NEEDS_REVALIDATION | PLAN_INVALIDATED | AGING | EXPIRED
     at_creation: str  # data quality recorded when the recommendation was made
     sessions_since: int
     reason_ko: str
+    problems: tuple[str, ...] = field(default_factory=tuple)
+    revalidated_price: float | None = None
+
+    @property
+    def actionable(self) -> bool:
+        return self.status == "CURRENT"
 
 
-def recommendation_freshness(as_of: datetime, recorded_quality: str, now: datetime, current_max_sessions: int = 0, aging_max_sessions: int = 2) -> RecommendationFreshness:
+@dataclass(frozen=True, slots=True)
+class PlanCheck:
+    """The price plan of a stored recommendation, re-checked against a *current* quote."""
+
+    rec_price: float | None
+    max_buy: float | None
+    stop: float | None
+    target1: float | None
+    min_rr: float = 2.0
+    bullish: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class RevalidationPolicy:
+    max_intraday_age: timedelta = timedelta(minutes=60)  # older than this while the market traded → re-check
+    max_quote_age: timedelta = timedelta(minutes=20)  # a quote older than this cannot re-validate anything
+    max_move: float = 0.03  # a price move larger than this since the analysis → the analysis is out of date
+
+
+STATUS_KO = {
+    "CURRENT": "현재 유효", "NEEDS_REVALIDATION": "현재가 재확인 필요", "PLAN_INVALIDATED": "가격 조건 이탈",
+    "AGING": "오래됨", "EXPIRED": "만료",
+}
+
+
+def _revalidate(plan: PlanCheck, price: float, pol: RevalidationPolicy) -> list[str]:
+    problems: list[str] = []
+    if plan.rec_price and abs(price / plan.rec_price - 1) > pol.max_move:
+        problems.append(f"분석 이후 가격이 {price / plan.rec_price - 1:+.1%} 움직임(허용 ±{pol.max_move:.0%})")
+    if plan.bullish:
+        if plan.max_buy is not None and price > plan.max_buy:
+            problems.append(f"현재가 ${price:,.2f} > 최대 매수가 ${plan.max_buy:,.2f}")
+        if plan.stop is not None and price <= plan.stop:
+            problems.append(f"현재가 ${price:,.2f} ≤ 손절 기준 ${plan.stop:,.2f}")
+        elif plan.stop is not None and plan.target1 is not None and price > plan.stop:
+            rr = (plan.target1 - price) / (price - plan.stop)
+            if rr < plan.min_rr - 1e-9:
+                problems.append(f"현재가 기준 손익비 {rr:.2f} < {plan.min_rr:g}")
+    return problems
+
+
+def recommendation_freshness(
+    as_of: datetime,
+    recorded_quality: str,
+    now: datetime,
+    current_max_sessions: int = 0,
+    aging_max_sessions: int = 2,
+    *,
+    plan: PlanCheck | None = None,
+    quote_price: float | None = None,
+    quote_ts: datetime | None = None,
+    new_major_events: tuple[str, ...] = (),
+    policy: RevalidationPolicy | None = None,
+) -> RecommendationFreshness:
     """A recommendation is a statement about prices *at* ``as_of``.
 
-    It is CURRENT only while no new regular session has completed since it was made; after that it is
-    AGING (plan levels may still apply, but the price used is out of date) and after ``aging_max_sessions``
-    it is EXPIRED — it must be re-run before anyone acts on it, however FRESH its inputs were back then.
+    - After a new regular session has closed it is AGING, and after ``aging_max_sessions`` EXPIRED.
+    - Within the same session it stays CURRENT only while it is young (``max_intraday_age``) or while
+      nothing could have moved it (market closed since). Otherwise it must be re-checked against a
+      *current* quote: max buy, stop, reward/risk and the size of the move since the analysis. Without a
+      fresh quote it is NEEDS_REVALIDATION; if the quote breaks the plan it is PLAN_INVALIDATED.
+    - A major new issue since the analysis always requires re-analysis.
+    Only CURRENT may be shown as actionable.
     """
+    pol = policy or RevalidationPolicy()
     n = trading_days_between(last_completed_session(as_of), last_completed_session(now))
     rec_ok = recorded_quality in (DataQuality.FRESH.value, DataQuality.DELAYED.value)
     when = "추천 당시 데이터 " + ("최신" if recorded_quality == DataQuality.FRESH.value else "지연" if recorded_quality == DataQuality.DELAYED.value else "불충분/오래됨")
-    if n <= current_max_sessions:
-        status = "CURRENT" if rec_ok else "EXPIRED"
-        txt = f"{when}; 이후 새로 마감된 거래일 없음"
-    elif n <= aging_max_sessions:
-        status = "AGING"
-        txt = f"{when}; 이후 {n}거래일 경과 — 현재 가격 기준으로는 재분석 필요"
-    else:
-        status = "EXPIRED"
-        txt = f"{when}; 이후 {n}거래일 경과 — 만료된 추천(현재 판단 근거로 사용 금지)"
-    return RecommendationFreshness(status, recorded_quality, n, txt)
+    if n > aging_max_sessions:
+        return RecommendationFreshness("EXPIRED", recorded_quality, n, f"{when}; 이후 {n}거래일 경과 — 만료된 추천(현재 판단 근거로 사용 금지)")
+    if n > current_max_sessions:
+        return RecommendationFreshness("AGING", recorded_quality, n, f"{when}; 이후 {n}거래일 경과 — 현재 가격 기준으로는 재분석 필요")
+    if not rec_ok:
+        return RecommendationFreshness("EXPIRED", recorded_quality, n, f"{when}; 데이터가 불충분해 실행 근거가 될 수 없음")
+    if new_major_events:
+        return RecommendationFreshness("NEEDS_REVALIDATION", recorded_quality, n, f"{when}; 분석 이후 중요한 새 이슈 발생({', '.join(new_major_events[:3])}) — 재분석 필요")
+    age = now - as_of
+    if age <= pol.max_intraday_age or not market_active_between(as_of, now):
+        return RecommendationFreshness("CURRENT", recorded_quality, n, f"{when}; 분석 {int(age.total_seconds() // 60)}분 경과, 이후 가격 변동 가능 시간 없음" if age > pol.max_intraday_age else f"{when}; 분석 {int(age.total_seconds() // 60)}분 경과")
+    minutes = int(age.total_seconds() // 60)
+    quote_ok = quote_price is not None and quote_ts is not None and timedelta(0) <= now - quote_ts <= pol.max_quote_age
+    if plan is None or not quote_ok:
+        return RecommendationFreshness("NEEDS_REVALIDATION", recorded_quality, n, f"{when}; 장중 분석 후 {minutes}분 경과 — 가격이 바뀌었을 수 있어 현재가 확인 전에는 실행 불가")
+    problems = _revalidate(plan, quote_price, pol)  # type: ignore[arg-type]
+    if problems:
+        return RecommendationFreshness("PLAN_INVALIDATED", recorded_quality, n, f"분석 후 {minutes}분 경과, 현재가 기준 조건 이탈: " + "; ".join(problems), problems=tuple(problems))
+    return RecommendationFreshness("CURRENT", recorded_quality, n, f"{when}; 분석 후 {minutes}분 경과, 현재가 ${quote_price:,.2f}로 가격 조건 재확인 통과", revalidated_price=quote_price)

@@ -100,7 +100,7 @@ def test_state_changing_call_from_the_ui_passes_the_csrf_guard(page, server):
     page.goto(f"{server}/#/stocks")
     page.get_by_placeholder("종목 코드 추가").fill("NVDA")
     page.get_by_role("button", name="관심종목 추가").click()
-    page.locator("table tbody tr td a", has_text="NVDA").wait_for()
+    page.get_by_test_id("watchlist").locator("table tbody tr td a", has_text="NVDA").wait_for()
     assert page.errors == []  # type: ignore[attr-defined]
 
 

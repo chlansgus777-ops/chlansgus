@@ -57,9 +57,23 @@ def _observed(d: date) -> date:
     return d
 
 
+# Unscheduled full-day NYSE/Nasdaq closures (national days of mourning, emergencies). These are announced
+# ad hoc by the exchange and cannot be derived from a rule — add new ones here when NYSE announces them.
+# Source: NYSE holiday & closure notices (nyse.com/markets/hours-calendars, NYSE press releases).
+SPECIAL_CLOSURES: frozenset[date] = frozenset({
+    date(1994, 4, 27),  # President Nixon national day of mourning
+    date(2001, 9, 11), date(2001, 9, 12), date(2001, 9, 13), date(2001, 9, 14),  # September 11 attacks
+    date(2004, 6, 11),  # President Reagan national day of mourning
+    date(2007, 1, 2),  # President Ford national day of mourning
+    date(2012, 10, 29), date(2012, 10, 30),  # Hurricane Sandy
+    date(2018, 12, 5),  # President George H. W. Bush national day of mourning
+    date(2025, 1, 9),  # President Carter national day of mourning
+})
+
+
 @lru_cache(maxsize=64)
 def nyse_holidays(year: int) -> frozenset[date]:
-    hs: set[date] = set()
+    hs: set[date] = {d for d in SPECIAL_CLOSURES if d.year == year}
     ny = date(year, 1, 1)
     # NYSE does not observe New Year's on the prior Friday (Dec 31) when Jan 1 is a Saturday.
     if ny.weekday() == 6:
@@ -162,6 +176,26 @@ def trading_days_between(start: date, end: date) -> int:
 
 def session_close_utc(d: date) -> datetime:
     return datetime.combine(d, regular_close_time(d), tzinfo=NY).astimezone(UTC)
+
+
+EXTENDED_OPEN = time(4, 0)
+
+
+def market_active_between(start: datetime, end: datetime) -> bool:
+    """True when any trading session (pre-market 04:00 → after-hours close, ET) overlaps [start, end]:
+    prices could have moved in between. Weekends, holidays and overnight gaps return False."""
+    if end <= start:
+        return False
+    a, b = to_ny(start), to_ny(end)
+    d = a.date()
+    while d <= b.date():
+        if is_trading_day(d):
+            close = time(17, 0) if regular_close_time(d) == EARLY_CLOSE else AFTER_HOURS_CLOSE
+            ws, we = datetime.combine(d, EXTENDED_OPEN, tzinfo=NY), datetime.combine(d, close, tzinfo=NY)
+            if max(ws, a) < min(we, b):
+                return True
+        d += timedelta(days=1)
+    return False
 
 
 def last_completed_session(ts: datetime) -> date:

@@ -56,6 +56,9 @@ class Reason:
     refs: tuple[str, ...] = ()
 
 
+NEUTRAL_SUBSCORE = 0.5
+
+
 @dataclass(frozen=True, slots=True)
 class ComponentScore:
     name: str
@@ -65,6 +68,7 @@ class ComponentScore:
     reasons: tuple[Reason, ...]
     missing: tuple[str, ...] = ()
     coverage: float = 1.0
+    measured: float | None = None  # sub-score from the inputs that exist (before blending with the missing default)
 
     @property
     def points(self) -> float:
@@ -91,6 +95,19 @@ class ScoreCard:
         """Weight-averaged input coverage across components (0..1)."""
         tw = sum(c.weight for c in self.components)
         return round(sum(c.weight * (c.coverage if c.available else 0.0) for c in self.components) / tw, 4) if tw else 0.0
+
+    @property
+    def sell_side_total(self) -> float:
+        """Score used for REDUCE/SELL decisions: missing inputs count as *neutral* (0.5), not as the conservative
+        buy-side default. Missing data may block a BUY, but it must never be evidence for selling."""
+        tw = sum(c.weight for c in self.components)
+        if tw <= 0:
+            return 0.0
+        tot = 0.0
+        for c in self.components:
+            sub = c.measured * c.coverage + NEUTRAL_SUBSCORE * (1 - c.coverage) if (c.available and c.measured is not None) else NEUTRAL_SUBSCORE
+            tot += sub * c.weight
+        return round(tot / tw * 100, 2)
 
     def component(self, name: str) -> ComponentScore:
         return next(c for c in self.components if c.name == name)
@@ -370,6 +387,7 @@ def score(inp: ScoringInputs, model: ScoringModel) -> ScoreCard:
                 reasons=tuple(reasons),
                 missing=tuple(missing),
                 coverage=round(cov, 4),
+                measured=round(sub, 4) if available else None,  # type: ignore[arg-type]
             )
         )
     return ScoreCard(inp.ticker, model.version, tuple(comps), inp.sector_model_id, inp.sector_model_reason)
