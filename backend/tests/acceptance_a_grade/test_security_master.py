@@ -84,3 +84,27 @@ def test_share_classes_of_one_cik_are_not_a_rename(tmp_path):
     out = st.sync_universe([_sec("GOOGL", 1652044), _sec("GOOG", 1652044)], D2)
     assert out["renamed"] == 0 and out["added"] == 1
     assert {s.ticker for s in st.securities(None)} == {"GOOGL", "GOOG"}
+
+
+def test_relist_keeps_the_delisting_and_does_not_bridge_the_price_gap(tmp_path):
+    st = _store(tmp_path)
+    st.sync_universe([_sec("OLDT", 5)], D1)
+    _bars(st, "OLDT", D1 - timedelta(days=10), 10, 20.0)
+    st.sync_universe([], D1 + timedelta(days=1))
+    out = st.sync_universe([_sec("NEWT", 5)], D2 + timedelta(days=60))
+    assert out["relisted"] == 1 and out["renamed"] == 0
+    with st.sf() as s:
+        assert repo.delisted_on(s, "OLDT", "LIVE") == D1 + timedelta(days=1)  # outcomes of old calls see the delisting
+    assert st.bars("NEWT", D1 - timedelta(days=20), D2 + timedelta(days=90)) == []  # no history across the gap
+
+
+def test_listing_order_does_not_change_a_same_day_ticker_swap(tmp_path):
+    for order in (0, 1):
+        st = _store(tmp_path / str(order))
+        st.sync_universe([_sec("FB", 1), _sec("META", 2)], D1)
+        _bars(st, "FB", D1 - timedelta(days=5), 5, 300.0)
+        _bars(st, "META", D1 - timedelta(days=5), 5, 15.0)
+        todays = [_sec("META", 1), _sec("METV", 2)]
+        st.sync_universe(todays if order == 0 else todays[::-1], D2)
+        assert [b.close for b in st.bars("META", D1 - timedelta(days=10), D2)] == [300.0] * 5
+        assert [b.close for b in st.bars("METV", D1 - timedelta(days=10), D2)] == [15.0] * 5

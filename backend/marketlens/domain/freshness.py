@@ -159,7 +159,7 @@ class PlanCheck:
 
 @dataclass(frozen=True, slots=True)
 class RevalidationPolicy:
-    max_intraday_age: timedelta = timedelta(minutes=60)  # older than this while the market traded → re-check
+    max_intraday_age: timedelta = timedelta(minutes=60)  # unused since decision-3.2.0 (kept for config compatibility)
     max_quote_age: timedelta = timedelta(minutes=20)  # a quote older than this cannot re-validate anything
     max_move: float = 0.03  # a price move larger than this since the analysis → the analysis is out of date
 
@@ -202,10 +202,11 @@ def recommendation_freshness(
     """A recommendation is a statement about prices *at* ``as_of``.
 
     - After a new regular session has closed it is AGING, and after ``aging_max_sessions`` EXPIRED.
-    - Within the same session it stays CURRENT only while it is young (``max_intraday_age``) or while
-      nothing could have moved it (market closed since). Otherwise it must be re-checked against a
-      *current* quote: max buy, stop, reward/risk and the size of the move since the analysis. Without a
-      fresh quote it is NEEDS_REVALIDATION; if the quote breaks the plan it is PLAN_INVALIDATED.
+    - Within the same session it stays CURRENT without a new quote only while its own analysis price is as
+      fresh as a quote may be (``max_quote_age``) or while nothing could have moved it (market closed since).
+      Otherwise it must be re-checked against a *current* quote: max buy, stop, reward/risk and the size of
+      the move since the analysis. Without a fresh quote it is NEEDS_REVALIDATION; if the quote breaks the
+      plan it is PLAN_INVALIDATED.
     - A major new issue since the analysis always requires re-analysis.
     - Whenever a fresh quote newer than the analysis is available, the plan is checked against it first,
       whatever the age: a young recommendation whose price already broke the stop / max buy / R:R is
@@ -233,7 +234,10 @@ def recommendation_freshness(
         problems = _revalidate(plan, quote_price, pol)  # type: ignore[arg-type]
         if problems:
             return RecommendationFreshness("PLAN_INVALIDATED", recorded_quality, n, f"분석 후 {minutes}분 경과, 현재가 기준 조건 이탈: " + "; ".join(problems), problems=tuple(problems))
-    if age <= pol.max_intraday_age or not market_active_between(as_of, now):
+    # the analysis price is itself a quote taken at ``as_of``: it proves the plan only as long as any quote would
+    # (``max_quote_age``). After that, while the market has traded, a newer quote is required — listings that
+    # show only cached quotes must say "check the price" instead of calling an unchecked BUY actionable.
+    if not market_active_between(as_of, now) or age <= pol.max_quote_age:
         return RecommendationFreshness("CURRENT", recorded_quality, n, f"{when}; 분석 {int(age.total_seconds() // 60)}분 경과, 이후 가격 변동 가능 시간 없음" if age > pol.max_intraday_age else f"{when}; 분석 {int(age.total_seconds() // 60)}분 경과")
     if plan is None or not quote_ok:
         return RecommendationFreshness("NEEDS_REVALIDATION", recorded_quality, n, f"{when}; 장중 분석 후 {minutes}분 경과 — 가격이 바뀌었을 수 있어 현재가 확인 전에는 실행 불가")

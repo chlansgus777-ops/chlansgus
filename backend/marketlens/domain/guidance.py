@@ -8,11 +8,12 @@ Rules (no LLM, no inference):
   "73.5%, plus or minus 50 basis points", "in the range of 45% to 46%", a single "$X billion".
 - Anything else about a metric in a forward-looking sentence → GUIDANCE_UNCLEAR (kept, value None).
 - "does not provide guidance", "withdraw(s/n) … guidance" → NO_GUIDANCE.
-- Sign: a loss is never read as a profit. EPS / operating-margin guidance worded as a loss ("loss per
-  diluted share of $1.10 to $1.20", "net loss of …") is stored negative (low = -1.20, high = -1.10). A
-  sentence that mixes loss and profit wording ("a loss of $0.05 to earnings of $0.02", "breakeven"),
-  writes an explicit negative number ("-$0.10", "$(0.10)", "negative 3%"), or talks about a loss next to
-  revenue / gross margin / capex → GUIDANCE_UNCLEAR, because the sign cannot be read deterministically.
+- Sign: only wording attached to the guided number decides it. "loss per diluted share of $1.10 to $1.20"
+  and "net loss of $0.30 to $0.40" are stored negative (low = -1.20, high = -1.10). A loss mentioned
+  elsewhere in the sentence ("excluding the loss on the sale …", "compared with a net loss last year",
+  "credit losses") leaves the guided number positive. An explicit negative number ("-$0.10", "$(0.10)"),
+  the word "negative", a range from a loss to a profit, or a loss attached to revenue / gross margin /
+  capex → GUIDANCE_UNCLEAR, because the sign cannot be read deterministically.
 """
 
 from __future__ import annotations
@@ -77,50 +78,55 @@ def _metric(s: str) -> list[str]:
     return found
 
 
-def _parse(metric: str, s: str) -> tuple[float | None, float | None, str, bool]:
-    """(low, high, unit, clean). ``clean`` = matched one of the recognised forms exactly."""
+def _parse(metric: str, s: str) -> tuple[float | None, float | None, str, bool, int]:
+    """(low, high, unit, clean, start). ``clean`` = matched one of the recognised forms exactly; ``start`` =
+    where the guided number expression begins in the sentence (-1 = nothing parsed)."""
     low = s.lower()
     if metric in ("gross_margin", "operating_margin"):
         m = re.search(_NUM + r"\s*%\s*,?\s*plus or minus\s*" + _NUM + r"\s*basis points", low)
         if m:
             c, bp = _val(m.group(1), m.group(2)), _val(m.group(3), m.group(4))
-            return (c - bp / 100) / 100, (c + bp / 100) / 100, "fraction", True
+            return (c - bp / 100) / 100, (c + bp / 100) / 100, "fraction", True, m.start()
         m = re.search(r"(?:between|range of|from)?\s*" + _NUM + r"\s*%?\s*(?:to|and|-|–)\s*" + _NUM + r"\s*%", low)
         if m:
-            return _val(m.group(1), m.group(2)) / 100, _val(m.group(3), m.group(4)) / 100, "fraction", True
-        m = re.findall(_NUM + r"\s*%", low)
-        if len(m) == 1:
-            v = _val(*m[0]) / 100
-            return v, v, "fraction", False
-        return None, None, "fraction", False
+            return _val(m.group(1), m.group(2)) / 100, _val(m.group(3), m.group(4)) / 100, "fraction", True, m.start(1)
+        ms = list(re.finditer(_NUM + r"\s*%", low))
+        if len(ms) == 1:
+            v = _val(ms[0].group(1), ms[0].group(2)) / 100
+            return v, v, "fraction", False, ms[0].start()
+        return None, None, "fraction", False, -1
     unit = "USD/share" if metric == "eps" else "USD"
     scale_word = r"\s*(billion|million|thousand|b|m)?(?![a-z])"
     m = re.search(r"\$\s?" + _NUM + scale_word + r"\s*,?\s*plus or minus\s*" + _NUM + r"\s*%", low)
     if m:
         c = _val(m.group(1), m.group(2)) * (_SCALE.get(m.group(3) or "", 1.0) if metric != "eps" else 1.0)
         p = _val(m.group(4), m.group(5)) / 100
-        return c * (1 - p), c * (1 + p), unit, True
+        return c * (1 - p), c * (1 + p), unit, True, m.start()
     m = re.search(r"\$\s?" + _NUM + scale_word + r"\s*(?:to|and|-|–)\s*\$?\s?" + _NUM + scale_word, low)
     if m:
         sc = _SCALE.get(m.group(6) or m.group(3) or "", 1.0) if metric != "eps" else 1.0
-        return _val(m.group(1), m.group(2)) * sc, _val(m.group(4), m.group(5)) * sc, unit, True
-    m = re.findall(r"\$\s?" + _NUM + scale_word, low)
-    if len(m) == 1:
-        sc = _SCALE.get(m[0][2] or "", 1.0) if metric != "eps" else 1.0
-        v = _val(m[0][0], m[0][1]) * sc
-        return v, v, unit, metric != "eps" and sc > 1
-    return None, None, unit, False
+        return _val(m.group(1), m.group(2)) * sc, _val(m.group(4), m.group(5)) * sc, unit, True, m.start()
+    ms = list(re.finditer(r"\$\s?" + _NUM + scale_word, low))
+    if len(ms) == 1:
+        sc = _SCALE.get(ms[0].group(3) or "", 1.0) if metric != "eps" else 1.0
+        v = _val(ms[0].group(1), ms[0].group(2)) * sc
+        return v, v, unit, metric != "eps" and sc > 1, ms[0].start()
+    return None, None, unit, False, -1
 
 
-_LOSS = re.compile(r"(?<![a-z])(loss|losses|deficit)(?![a-z])")
-_METRIC_PHRASES = re.compile(r"earnings per share|diluted earnings|earnings per diluted share|earnings release|earnings call")
-_PROFIT = re.compile(r"(?<![a-z])(profit|profitable|profitability|net income|income per|earnings|break-?\s?even|positive)(?![a-z])")
-_NEG_MARK = re.compile(r"(?:^|(?<=[\s(]))[-−](?=\s?\$?\s?\d)|\$\s?\(\s?\d|\(\s?\$\s?\d|negative\s+\$?\s?\d|(?<!or )minus\s+\$?\s?\d")
+# A loss phrase that ends right where the guided number starts ("loss per diluted share of $1.10 to …",
+# "net loss of $0.30 to $0.40", "a loss in the range of $0.10 to $0.15"). Only then is the number a loss.
+_LOSS_ATTACHED = re.compile(
+    r"(?<![a-z])(loss|losses)(\s+per\s+(diluted\s+|basic\s+)?(common\s+)?share)?"
+    r"(\s+(is\s+|are\s+)?(expected\s+|projected\s+)?(to\s+be\s+|will\s+be\s+)?)?"
+    r"(\s*,\s*|\s+)?(of\s+|between\s+|in\s+the\s+range\s+of\s+|ranging\s+from\s+|from\s+|approximately\s+|about\s+|of\s+approximately\s+)*$")
+_PROFIT = re.compile(r"(?<![a-z])(profit|profitable|profitability|net income|income|earnings|break-?\s?even|positive)(?![a-z])")
+_NEG_MARK = re.compile(r"(?:^|(?<=[\s(]))[-−](?=\s?\$?\s?\d)|\$\s?\(\s?\d|\(\s?\$\s?\d|(?<!or )minus\s+\$?\s?\d")
 _RANGE_LEFT = re.compile(r"(\d|%|billion|million|thousand|\bb|\bm)\s*$")
 
 
 def _has_negative_number(low: str) -> bool:
-    """An explicitly negative number ("-$0.10", "$(0.10)", "negative 3%"); a dash between two amounts
+    """An explicitly negative number ("-$0.10", "$(0.10)"); a dash between two amounts
     ("$3.2 billion - $3.4 billion", "45% - 46%") is a range, not a sign."""
     for m in _NEG_MARK.finditer(low):
         if m.group(0) in ("-", "−") and _RANGE_LEFT.search(low[: m.start()]):
@@ -129,17 +135,25 @@ def _has_negative_number(low: str) -> bool:
     return False
 
 
-def _sign(metric: str, s: str) -> str:
-    """POS | NEG | UNCLEAR for the numbers of one guidance sentence (see module rules)."""
+def _sign(metric: str, s: str, start: int) -> str:
+    """POS | NEG | UNCLEAR for the guided number that starts at ``start``.
+
+    A loss word elsewhere in the sentence ("excluding the loss on the sale …", "compared with a net loss of
+    $0.50 last year", "credit losses") says nothing about the guided number, which stays positive. Only a
+    loss phrase attached to the guided number makes it negative. An explicit negative sign, the word
+    "negative", or a range that runs from a loss to a profit cannot be read deterministically → UNCLEAR."""
     low = s.lower()
-    if _has_negative_number(low):
+    if _has_negative_number(low) or re.search(r"(?<![a-z])negative(?![a-z])", low):
         return "UNCLEAR"
-    if not _LOSS.search(low):
-        return "POS"
     if metric not in ("eps", "operating_margin"):
-        return "UNCLEAR"  # revenue / gross margin / capex cannot be a loss — something else is being discussed
-    if _PROFIT.search(_METRIC_PHRASES.sub(" ", low)):
-        return "UNCLEAR"  # a range from a loss to a profit, or two different measures
+        # revenue / gross margin / capex cannot be a loss: a loss word in the same sentence means something
+        # else is being discussed next to the number — kept as UNCLEAR rather than guessed (conservative)
+        return "UNCLEAR" if re.search(r"(?<![a-z])(loss|losses|deficit)(?![a-z])", low) else "POS"
+    if start < 0 or not _LOSS_ATTACHED.search(low[max(0, start - 80): start]):
+        return "POS"
+    tail = re.split(r"[,;]\s+(compared|versus|vs\.?|excluding|including|which|reflecting)\b", low[start:])[0]
+    if _PROFIT.search(tail):
+        return "UNCLEAR"  # "a loss of $0.05 to earnings of $0.02": the range crosses zero
     return "NEG"
 
 
@@ -165,8 +179,8 @@ def extract(text: str) -> list[GuidanceItem]:
         if len(ms) > 1:
             out.append(GuidanceItem(ms[0], None, None, "", period, s[:600], "GUIDANCE_UNCLEAR", "LOW"))  # several metrics in one sentence
             continue
-        lo, hi, unit, clean = _parse(ms[0], s)
-        sign = _sign(ms[0], s)
+        lo, hi, unit, clean, start = _parse(ms[0], s)
+        sign = _sign(ms[0], s, start)
         if sign == "UNCLEAR":
             lo = hi = None
         elif sign == "NEG" and lo is not None and hi is not None:

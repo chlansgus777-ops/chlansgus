@@ -60,7 +60,9 @@ def _failure_status(err: str | None) -> str:
     if "ratelimited" in e or "429" in e:
         return "RATE_LIMITED"
     if "not supported" in e and "error:" not in e and "unavailable" not in e and "not configured" not in e:
-        return "NOT_SUPPORTED"  # e.g. an IFRS / 20-F filer: no quarterly us-gaap facts exist
+        if "us-gaap" in e or "ifrs" in e or "20-f" in e:
+            return "NOT_SUPPORTED"  # an IFRS / 20-F filer: no quarterly us-gaap facts exist
+        return "PARSE_GAP"  # a 10-Q filer whose XBRL tags the parser does not read yet
     return "FAILED"
 
 
@@ -105,14 +107,21 @@ class DataAccess:
         return self._get("price", "price", "get_quote", t, t, cross_check=relative_conflicts(("price",), 0.02))
 
     def bars(self, t: str, start: date, end: date) -> Fetched:
+        stored: list[Bar] = []
         if self.store is not None:
             stored = self.store.bars(t, start, end)
             # the store is authoritative when it covers the requested end (±3 sessions for sync lag)
             if stored and (end - stored[-1].day).days <= 5:
                 return Fetched(stored, "store")
+            # an archived company (ticker later reused: "ABC~111") or a delisted / renamed-away name is not a
+            # current provider ticker — asking for it would return another company or nothing
+            if "~" in t or self.store.is_active(t) is False:
+                return Fetched(stored, "store") if stored else Fetched(None, None, f"{t}: 저장된 가격 없음(보관·상장폐지 종목은 공급자에 요청하지 않음)")
         f = self._get("bars", "price", "get_daily_bars", f"{t}:{start}:{end}", t, start, end)
         if self.store is not None and f.value:
             self.store.save_bars(t, f.value, f.provider or "provider")
+        if not f.value and stored:
+            return Fetched(stored, "store")  # a failed refresh keeps the stored history
         return f
 
     def bars_bulk(self, tickers: list[str], start: date, end: date) -> dict[str, list[Bar]]:
@@ -162,7 +171,12 @@ class DataAccess:
             if anyage:
                 return Fetched(anyage, "store")
             return Fetched(None, None, f"재시도 대기({man.next_attempt_at.isoformat(timespec='minutes')}까지): {man.status} {man.error or ''}".strip())
-        f = self._get("fundamentals", "fundamental", "get_quarterly", t, t)
+        # a manifest-tracked call is never answered from the TTL cache: every recorded attempt is a real request
+        try:
+            r = self.reg.chain("fundamental").call("get_quarterly", t)
+            f = Fetched(r.value, r.provider, None, r.conflicts)
+        except ProviderError as e:
+            f = Fetched(None, None, str(e))
         if f.value:
             self.store.save_quarters(t, f.value)
             self.store.record_ingestion(FUNDAMENTALS, t, now, "OK", rows=len(f.value))

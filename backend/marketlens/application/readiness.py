@@ -108,8 +108,9 @@ def evaluate(mode: str, reg: Any, stats: dict[str, Any] | None, sync_state: str 
         if prog["sector"] < MIN_SECTOR:
             reasons.append(f"대형주 업종 정보 {prog['sector']:.0%} < {MIN_SECTOR:.0%}")
         if prog["fundamentals"] < MIN_FUNDAMENTALS:
-            failed = stats.get("large_fund_failed", 0)
-            reasons.append(f"대형주 분기 재무 수집 {prog['fundamentals']:.0%} < {MIN_FUNDAMENTALS:.0%}" + (f" (수집 실패 {failed}종목, 재시도 대기)" if failed else " — 동기화가 나눠서 수집 중"))
+            failed, gap = stats.get("large_fund_failed", 0), stats.get("large_fund_parse_gap", 0)
+            detail = ", ".join(x for x in (f"수집 실패 {failed}종목(재시도 대기)" if failed else "", f"재무 태그 해석 불가 {gap}종목" if gap else "") if x)
+            reasons.append(f"대형주 분기 재무 수집 {prog['fundamentals']:.0%} < {MIN_FUNDAMENTALS:.0%}" + (f" ({detail})" if detail else " — 동기화가 나눠서 수집 중"))
     if sync.get("status") != "SYNC_COMPLETE":
         reasons.append(f"마지막 동기화 상태: {sync.get('status')} (남은 가격 거래일 {sync.get('bar_days_remaining', '?')})")
     scanner = "SCANNER_READY" if not reasons else "SCANNER_NOT_READY"

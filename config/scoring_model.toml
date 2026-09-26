@@ -1,6 +1,6 @@
 # MarketLens model configuration — every change must bump the relevant version.
 scoring_model_version = "scoring-2.0.0"   # 2.0.0: coverage-blended components, point-in-time freshness inputs
-decision_model_version = "decision-3.1.0" # 3.1.0: severe consensus-provider conflict excludes EPS estimates and blocks buying, plan re-checked against a fresh quote at any age; 3.0.0: model-coverage veto, missing data neutral for REDUCE/SELL; 2.0.0: stale-core veto, portfolio gate, ADD R/R, prior-stop, sector-unknown
+decision_model_version = "decision-3.2.0" # 3.2.0: without a newer quote an intraday recommendation is actionable only while its own price is quote-fresh (20 min), not 60 min; 3.1.0: severe consensus-provider conflict excludes EPS estimates and blocks buying, plan re-checked against a fresh quote at any age; 3.0.0: model-coverage veto, missing data neutral for REDUCE/SELL; 2.0.0: stale-core veto, portfolio gate, ADD R/R, prior-stop, sector-unknown
 config_version = "config-2.1.0"           # 2.1.0: calibration auto_promote=false; 2.0.0: per-type freshness rules, paper account limits
 
 [scoring.weights]            # points; normalised to 0-100

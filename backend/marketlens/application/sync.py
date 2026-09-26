@@ -195,8 +195,13 @@ class MarketSync:
                 rep.fundamentals_pending += 1
                 break
             except NotSupported as e:
-                self.store.record_ingestion(FUNDAMENTALS, t, now, "NOT_SUPPORTED", str(e))
-                continue  # not an error of the sync: e.g. a 20-F filer (annual IFRS only)
+                # a filer without us-gaap facts (20-F / IFRS) vs a 10-Q filer whose tags the parser does not read:
+                # the second is a gap of MarketLens, counted as missing coverage, never excluded from it
+                status = _failure_status(f"not supported: {e}")
+                self.store.record_ingestion(FUNDAMENTALS, t, now, status, str(e))
+                if status == "PARSE_GAP":
+                    rep.fundamentals_failed += 1
+                continue
             except ProviderError as e:
                 self.store.record_ingestion(FUNDAMENTALS, t, now, _failure_status(f"{type(e).__name__}: {e}"), str(e))
                 rep.fundamentals_failed += 1

@@ -83,6 +83,12 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
         app.state.ready = False
         if sched:
             sched.stop()
+        try:  # leave a complete .db file behind (no pending -wal content)
+            from marketlens.infrastructure.db.session import checkpoint_sqlite
+
+            checkpoint_sqlite(settings.database_url)
+        except Exception as e:  # noqa: BLE001 - shutdown must not fail on a busy database
+            log.warning("shutdown wal checkpoint skipped: %s", type(e).__name__)
 
     app = FastAPI(title="MarketLens", version=__version__, lifespan=lifespan)
     app.state.service = service
