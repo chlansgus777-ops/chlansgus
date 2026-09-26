@@ -105,7 +105,7 @@ def verify(svc: Any, tickers: tuple[str, ...] = TICKERS, record: bool = True) ->
             ok = not problems
             report["categories"][cat] = {"status": "VERIFIED" if ok else "FAILED", "samples": samples[:7], "note": "; ".join(problems[:3])}
         except ProviderError as e:
-            report["categories"][cat] = {"status": _classify(e), "samples": [], "note": str(e)[:200]}
+            report["categories"][cat] = {"status": _classify(e), "samples": [], "note": str(e)[:600]}
         except Exception as e:  # noqa: BLE001 - a smoke test must report every failure, not crash
             report["categories"][cat] = {"status": "FAILED", "samples": [], "note": f"{type(e).__name__}: {str(e)[:180]}"}
 

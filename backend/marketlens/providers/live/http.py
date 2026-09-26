@@ -54,7 +54,7 @@ class HttpClient:
 
     @staticmethod
     def _detail(r: httpx.Response) -> str:
-        """The provider's own error message (first 160 chars), with anything that looks like a credential removed —
+        """The provider's own error message (first 400 chars), with anything that looks like a credential removed —
         so a 400/403 says WHY (e.g. SEC "undeclared automated tool", a malformed filter) instead of only a code."""
         try:
             text = r.text
@@ -64,7 +64,7 @@ class HttpClient:
         text = re.sub(r"(?i)(api[_-]?key|apikey|token|secret|password|authorization)\s*[=:]\s*\S+", r"\1=<redacted>", text)
         text = re.sub(r"\b[A-Za-z0-9_\-]{32,}\b", "<redacted>", text)
         text = " ".join(text.split())
-        return f": {text[:160]}" if text else ""
+        return f": {text[:400]}" if text else ""
 
     @staticmethod
     def _check(r: httpx.Response) -> None:

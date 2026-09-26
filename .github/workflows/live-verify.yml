@@ -44,7 +44,7 @@ jobs:
           rep = json.load(open("live-verify-report.json"))
           print("as_of:", rep.get("as_of"))
           for cat, v in rep["categories"].items():
-              print(f"{cat:16} {v['status']:22} {v.get('note', '')[:160]}")
+              print(f"{cat:16} {v['status']:22} {v.get('note', '')[:600]}")
           EOF
           exit 0
       - uses: actions/upload-artifact@v4
