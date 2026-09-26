@@ -182,7 +182,8 @@ Calc = tuple[float | None, float, list[Reason], list[str]]  # (sub, coverage, re
 def _fundamental(inp: ScoringInputs) -> Calc:
     rs = inp.fundamental
     if rs is None or rs.subscore is None:
-        return None, rs.coverage if rs else 0.0, [Reason("업종 모델에 필요한 재무 데이터 부족", -1)], list(rs.missing) if rs else ["fundamentals"]
+        why = f"업종 모델 핵심 지표 없음({', '.join(rs.critical_missing)}) — 판단 불가" if rs and rs.critical_missing else "업종 모델에 필요한 재무 데이터 부족"
+        return None, rs.coverage if rs else 0.0, [Reason(why, -1)], list(rs.missing) if rs else ["fundamentals"]
     reasons: list[Reason] = []
     ranked = sorted((i for i in rs.items if i.subscore is not None), key=lambda i: -(i.subscore or 0) * i.weight)
     for i in ranked[:3]:

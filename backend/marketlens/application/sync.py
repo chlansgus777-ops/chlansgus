@@ -32,6 +32,7 @@ class SyncReport:
     shares_updated: int = 0
     market_caps: int = 0
     profiles_updated: int = 0
+    estimate_snapshots: int = 0
     splits_new: int = 0
     bars_split_adjusted: int = 0
     errors: list[str] = field(default_factory=list)
@@ -102,6 +103,19 @@ class MarketSync:
             except ProviderError as e:
                 rep.errors.append(f"splits: {e}")
         rep.bars_split_adjusted = self.store.adjust_bars_for_splits()
+        # 2c) consensus snapshot for every upcoming report (Finnhub earnings calendar, a few requests),
+        #     once per day — the append-only history MarketLens accumulates its own revisions from
+        cal = _find(self.reg, "analyst", "get_calendar_estimates")
+        if cal is not None and self.store.get_setting("estimates_snapshot_day") != today.isoformat():
+            try:
+                obs = []
+                for k in range(4):  # ~100 days ahead in 25-day windows
+                    start = today + timedelta(days=25 * k)
+                    obs += cal.get_calendar_estimates(start, start + timedelta(days=24), today)
+                rep.estimate_snapshots = self.store.save_estimates(obs)
+                self.store.set_setting("estimates_snapshot_day", today.isoformat())
+            except ProviderError as e:
+                rep.errors.append(f"estimates: {e}")
         # 3) shares outstanding → market caps
         sec = _find(self.reg, "universe", "shares_outstanding_all")
         if sec is not None:

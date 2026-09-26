@@ -74,6 +74,8 @@ class ScanContext:
     benchmark_bars: tuple[Bar, ...]
     securities: dict[str, Security]
     company_news_missing: dict[str, str] = field(default_factory=dict)
+    estimate_fetch: dict[str, str] = field(default_factory=dict)  # Alpha Vantage prefetch outcome per ticker
+    guidance_fetch: dict[str, str] = field(default_factory=dict)  # SEC 8-K guidance extraction outcome per ticker
 
 
 @dataclass
@@ -196,9 +198,18 @@ class Scanner:
             missing["price"] = "3단계(펀더멘털 선별)는 실시간 시세를 조회하지 않음"
         bars = take("bars", self.data.bars(t, d - timedelta(days=HISTORY_CALENDAR_DAYS), d)) or []
         quarters = take("fundamentals", self.data.quarters(t)) or []
+        annuals = []
+        if not quarters and full:  # foreign private issuer (20-F, IFRS): annual statements only
+            af = self.data.annuals(t)
+            annuals = af.value or []
         extras_obj = take("extras", self.data.extras(t))
         analyst = take("analyst", self.data.estimates(t, d))
         earnings = (take("earnings", self.data.earnings(t)) or []) if full else []
+        if full and earnings and self.data.store is not None:  # LIVE: SEC 8-K guidance vs the pre-release consensus
+            from marketlens.application.estimate_book import attach_guidance
+
+            day = ctx.as_of.date()
+            earnings = attach_guidance(earnings, self.data.store.guidance(t, ctx.as_of), self.data.store.estimate_history(t, day), day)
         model, _ = select_sector_model(sec, self.cfg.sector_models)
         vh = take("valuation_history", self.data.valuation_history(t, model.primary_multiple))
         options = take("options", self.data.options(t)) if full else None
@@ -270,6 +281,7 @@ class Scanner:
             missing_reasons=missing,
             insider=insider,
             splits=tuple(self.data.splits(t)),
+            annuals=tuple(annuals),
         )
 
     # ------------------------------------------------------------------ stages
@@ -386,6 +398,9 @@ class Scanner:
         self.add_company_news(ctx, s4)
         stages.append(StageStats("4-event-issue", len(s3), len(s4), f"이슈 {len(ctx.issues.issues) if ctx.issues else 0}건, 그래프 ≤{self.cfg.impact.max_hops}단계, 기업 뉴스 {len(s4)}종목"))
 
+        # free consensus with provider revision history, only for the best-ranked names (daily-limited)
+        ctx.estimate_fetch = self.data.prefetch_estimates(s4[: sc.estimate_top_n], last_completed_session(ctx.as_of), sc.estimate_daily_budget, sc.estimate_ttl_days)
+        ctx.guidance_fetch = self.data.prefetch_guidance(s4[: sc.estimate_top_n], last_completed_session(ctx.as_of))
         full: dict[str, AnalysisResult] = {}
         inputs: dict[str, AnalysisInputs] = {}
         for t in s4:
@@ -408,5 +423,8 @@ class Scanner:
         if sec is None:
             raise KeyError(f"{ticker}: 분석 시점의 유니버스에 없음")
         self.add_company_news(ctx, [ticker])
+        sc = self.cfg.scanner
+        self.data.prefetch_estimates([ticker], last_completed_session(ctx.as_of), sc.estimate_daily_budget + 3, sc.estimate_ttl_days)  # user-requested page may use the reserve
+        self.data.prefetch_guidance([ticker], last_completed_session(ctx.as_of))
         inp = self.gather_inputs(ctx, sec, portfolio, (), full=True)
         return run_analysis(inp, self.cfg), inp

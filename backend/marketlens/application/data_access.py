@@ -19,7 +19,7 @@ from marketlens.domain.fundamentals import QuarterlyFinancials
 from marketlens.domain.macro import ALL_SERIES, MacroSnapshot
 from marketlens.domain.market import Bar, Quote, Security
 from marketlens.domain.options import OptionsSnapshot, OwnershipSnapshot
-from marketlens.providers.contracts import NewsItem, ProviderError
+from marketlens.providers.contracts import NewsItem, ProviderError, RateLimited
 from marketlens.providers.router import relative_conflicts
 
 log = logging.getLogger("marketlens.data")
@@ -128,11 +128,80 @@ class DataAccess:
             self.store.save_quarters(t, f.value)
         return f
 
+    def annuals(self, t: str) -> Fetched:
+        """IFRS annual statements of 20-F filers (ANNUAL_ONLY; no quarterly XBRL exists for them)."""
+        return self._get("fundamentals", "fundamental", "get_annual_ifrs", t, t)
+
     def extras(self, t: str) -> Fetched:
         return self._get("fundamentals", "fundamental", "get_extras", t, t)
 
     def estimates(self, t: str, as_of: date) -> Fetched:
+        """LIVE: consensus + revisions from the stored free-provider snapshots (never a provider call per
+        ticker here). MOCK: the mock analyst provider."""
+        if self.store is not None:
+            from marketlens.application.estimate_book import build
+
+            rep = build(t, self.store.estimate_history(t, as_of), as_of)
+            if rep.snapshot is None:
+                return Fetched(None, None, "; ".join(rep.notes) or "추정치 없음")
+            conflicts = [f"analyst:{rep.cross.detail}"] if rep.cross.status in ("DATA_CONFLICT", "SEVERE_DATA_CONFLICT") else []
+            return Fetched(rep.snapshot, rep.snapshot.source, None, conflicts)
         return self._get("analyst", "analyst", "get_estimates", f"{t}:{as_of}", t, as_of)
+
+    def prefetch_guidance(self, tickers: Sequence[str], day: date) -> dict[str, str]:
+        """SEC 8-K (Item 2.02) press releases of the final candidates → deterministic guidance extraction.
+        Each ticker is checked at most once per day; each filing is extracted once (append-only)."""
+        from marketlens.domain.guidance import extract, html_to_text
+
+        out: dict[str, str] = {}
+        if self.store is None:
+            return out
+        sec = next((p for p in self.reg.chain("fundamental").providers if hasattr(p, "earnings_releases") and getattr(p, "configured", True)), None)
+        if sec is None:
+            return {t: "SEC 공급자 없음" for t in tickers}
+        for t in tickers:
+            key = f"guidance_checked:{t}"
+            if self.store.get_setting(key) == day.isoformat():
+                out[t] = "오늘 확인함"
+                continue
+            try:
+                rel = sec.earnings_releases(t, date.fromordinal(day.toordinal() - 200))
+                n = sum(self.store.save_guidance(t, r["accession"], r["filed_at"], r["url"], extract(html_to_text(r["text"]))) for r in rel)
+                out[t] = f"보도자료 {len(rel)}건, 새 항목 {n}"
+                self.store.set_setting(key, day.isoformat())
+            except ProviderError as e:
+                out[t] = f"실패: {e}"
+        return out
+
+    def prefetch_estimates(self, tickers: Sequence[str], day: date, budget: int, ttl_days: int) -> dict[str, str]:
+        """Alpha Vantage consensus for the final candidates only, within the daily free budget; a snapshot
+        younger than ``ttl_days`` is reused. Returns {ticker: outcome} for the scan report."""
+        out: dict[str, str] = {}
+        if self.store is None:
+            return out
+        av = next((p for p in self.reg.chain("analyst").providers if hasattr(p, "get_estimate_observations") and getattr(p, "configured", False)), None)
+        if av is None:
+            return {t: "ALPHAVANTAGE_API_KEY 없음(BLOCKED_BY_CREDENTIAL)" for t in tickers}
+        key = f"av_calls:{day.isoformat()}"
+        used = int(self.store.get_setting(key) or 0)
+        for t in tickers:
+            last = self.store.last_estimate_day(t, "alphavantage")
+            if last is not None and (day - last).days < ttl_days:
+                out[t] = f"캐시 사용({last.isoformat()})"
+                continue
+            if used >= budget:
+                out[t] = "일일 무료 한도 도달 → 다음 날"
+                continue
+            used += 1
+            self.store.set_setting(key, str(used))
+            try:
+                self.store.save_estimates(av.get_estimate_observations(t, day))
+                out[t] = "OK"
+            except ProviderError as e:
+                out[t] = f"실패: {e}"
+                if isinstance(e, RateLimited):
+                    break
+        return out
 
     def earnings(self, t: str) -> Fetched:
         return self._get("analyst", "analyst", "get_earnings_history", t, t)

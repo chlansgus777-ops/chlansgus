@@ -20,7 +20,9 @@ from marketlens.domain.fundamentals import QuarterlyFinancials
 from marketlens.domain.market import Bar, Security
 from marketlens.domain.market_calendar import UTC
 from marketlens.domain.corporate_actions import SplitEvent, split_factor
-from marketlens.infrastructure.db.models import AppSettingRow, CorporateActionRow, FundamentalVintageRow, PriceBarRow, SecurityRow
+from marketlens.domain.estimates import EstimateObservation
+from marketlens.domain.guidance import GuidanceItem
+from marketlens.infrastructure.db.models import AppSettingRow, CorporateActionRow, EstimateSnapshotRow, GuidanceRow, FundamentalVintageRow, PriceBarRow, SecurityRow
 
 
 def _now() -> datetime:
@@ -223,6 +225,61 @@ class MarketStore:
                 ev.bars_adjusted_at = _now()
             s.commit()
         return n
+
+    # ------------------------------------------------------------------ consensus estimate snapshots (append-only)
+    def save_estimates(self, obs: Iterable[EstimateObservation]) -> int:
+        """One snapshot per (ticker, provider, period, day); the first one of a day is kept, nothing is
+        ever updated or deleted — revisions are computed from this history."""
+        n = 0
+        with self.sf() as s:
+            for o in obs:
+                exists = s.scalars(select(EstimateSnapshotRow.id).where(EstimateSnapshotRow.ticker == o.ticker, EstimateSnapshotRow.provider == o.provider,
+                                                                      EstimateSnapshotRow.period == o.period, EstimateSnapshotRow.observed_on == o.observed_on).limit(1)).first()
+                if exists is not None:
+                    continue
+                s.add(EstimateSnapshotRow(ticker=o.ticker, provider=o.provider, period=o.period, period_type=o.period_type, period_end=o.period_end,
+                                          eps_estimate=o.eps, revenue_estimate=o.revenue, analyst_count=o.analyst_count, eps_high=o.eps_high, eps_low=o.eps_low,
+                                          provider_revisions={**dict(o.provider_revisions), "_horizon": o.horizon, "_report_date": o.report_date.isoformat() if o.report_date else None},
+                                          provider_timestamp=o.provider_timestamp, observed_on=o.observed_on, observed_at=_now()))
+                n += 1
+            s.commit()
+        return n
+
+    def estimate_history(self, ticker: str, until: date) -> list[EstimateObservation]:
+        with self.sf() as s:
+            rows = list(s.scalars(select(EstimateSnapshotRow).where(EstimateSnapshotRow.ticker == ticker, EstimateSnapshotRow.observed_on <= until).order_by(EstimateSnapshotRow.observed_on)))
+        out = []
+        for r in rows:
+            extra = dict(r.provider_revisions or {})
+            horizon = str(extra.pop("_horizon", "") or "")
+            rd = extra.pop("_report_date", None)
+            out.append(EstimateObservation(r.ticker, r.provider, r.period, r.period_type, r.period_end, r.observed_on, r.eps_estimate, r.revenue_estimate,
+                                           r.analyst_count, r.eps_high, r.eps_low, horizon, date.fromisoformat(rd) if rd else None, extra, r.provider_timestamp))
+        return out
+
+    def last_estimate_day(self, ticker: str, provider: str) -> date | None:
+        with self.sf() as s:
+            return s.scalars(select(func.max(EstimateSnapshotRow.observed_on)).where(EstimateSnapshotRow.ticker == ticker, EstimateSnapshotRow.provider == provider)).first()
+
+    # ------------------------------------------------------------------ SEC guidance (append-only)
+    def save_guidance(self, ticker: str, accession: str, filed_at: datetime, url: str, items: Iterable[GuidanceItem]) -> int:
+        n = 0
+        with self.sf() as s:
+            if s.scalars(select(GuidanceRow.id).where(GuidanceRow.ticker == ticker, GuidanceRow.accession == accession).limit(1)).first() is not None:
+                return 0  # a filing is extracted once; the extraction is never rewritten
+            for it in items:
+                s.add(GuidanceRow(ticker=ticker, accession=accession, filed_at=filed_at, source_url=url[:300], metric=it.metric, period_label=it.period_label,
+                                  low=it.low, high=it.high, unit=it.unit or "-", sentence=it.sentence, status=it.status, confidence=it.confidence, observed_at=_now()))
+                n += 1
+            if n == 0:  # remember that the filing was read and had no guidance sentences
+                s.add(GuidanceRow(ticker=ticker, accession=accession, filed_at=filed_at, source_url=url[:300], metric="none", period_label=None,
+                                  low=None, high=None, unit="-", sentence="(보도자료에서 가이던스 문장을 찾지 못함)", status="GUIDANCE_UNCLEAR", confidence="LOW", observed_at=_now()))
+            s.commit()
+        return n
+
+    def guidance(self, ticker: str, until: datetime) -> list[GuidanceRow]:
+        with self.sf() as s:
+            return list(s.scalars(select(GuidanceRow).where(GuidanceRow.ticker == ticker, GuidanceRow.filed_at <= until).order_by(GuidanceRow.filed_at, GuidanceRow.id)))
 
     # ------------------------------------------------------------------ fundamentals (vintages)
     def save_quarters(self, ticker: str, quarters: Iterable[QuarterlyFinancials]) -> None:

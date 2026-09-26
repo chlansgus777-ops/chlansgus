@@ -24,7 +24,7 @@ from tests.live_fixtures import NOW, live_transport
 def live():
     seen: list[str] = []
     st = Settings(mode=DataMode.LIVE, database_url="sqlite:///:memory:", sec_user_agent="MarketLens test test@example.com",
-                  finnhub_api_key="fixture-key", fred_api_key="fixture-key", polygon_api_key="fixture-key", llm_provider="none")
+                  finnhub_api_key="fixture-key", fred_api_key="fixture-key", polygon_api_key="fixture-key", alphavantage_api_key="fixture-key", llm_provider="none")
     reg = build_live_registry(st, transport=live_transport(seen), sleep=lambda _s: None)
     eng = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(eng)
@@ -70,15 +70,45 @@ def test_live_recommendation_uses_real_data_states(live):
     assert nvda.mode == "LIVE" and nvda.price_source == "finnhub"
     assert checks["price"] == DataQuality.DELAYED.value  # free Finnhub quotes are not guaranteed real-time
     assert checks["fundamentals"] == "FRESH" and checks["price_history"] == "FRESH" and checks["macro"] == "FRESH"
-    assert checks["analyst"] == "MISSING" and checks["options"] == "MISSING"  # paid data → honestly missing
+    assert checks["options"] == "MISSING"  # no free options source → honestly missing
     assert checks["short_interest"] == "FRESH" and res["short_interest_pct"] == pytest.approx(0.012, rel=1e-3)  # FINRA ÷ SEC shares
-    # without forward estimates the semiconductor valuation model (forward P/E, PEG = 6 of 8 weight) cannot judge
-    # the price → "unknown", never "bad": no BUY and no SELL (audit P0: missing sector data became REDUCE)
-    assert nvda.deterministic_action == Action.DATA_INSUFFICIENT.value
-    assert "INSUFFICIENT_MODEL_COVERAGE" in res["decision"]["vetoes"] and "STALE_PRICE" not in res["decision"]["vetoes"]
+    # free consensus: Alpha Vantage FY1/FY2 (final candidate) + Finnhub calendar snapshot
+    an = res["analyst"]
+    assert checks["analyst"] == "FRESH" and an["source"] == "alphavantage+finnhub"
+    assert an["forward_eps"] == pytest.approx(1.82 * (128 / 365) + 2.21 * (1 - 128 / 365), rel=1e-3) and an["forward_eps_basis"].startswith("NTM")
+    assert an["eps_revision_30d"] == pytest.approx(1.82 / 1.76 - 1, rel=1e-6) and an["revision_basis"]["90d"] == "PROVIDER"
+    assert an["analyst_count"] == 42 and an["estimate_dispersion"] is None  # no stdev published → not invented
+    assert an["cross_check"].startswith("CONSISTENT")  # AV current quarter 0.47 vs Finnhub calendar 0.47
+    assert svc.last_scan_context.estimate_fetch["NVDA"] == "OK"
+    # with a forward consensus the valuation model can judge the price → a real decision, not DATA INSUFFICIENT
+    assert nvda.deterministic_action != Action.DATA_INSUFFICIENT.value
+    assert "INSUFFICIENT_MODEL_COVERAGE" not in res["decision"]["vetoes"]
+    # SEC 8-K Exhibit 99.1 guidance, attached to the report released with it; no pre-release consensus snapshot
+    # exists in the store (history starts at the first sync) → the comparison is not made, nothing is invented
+    rep = next(e for e in nvda.inputs["earnings"] if e["report_date"] == "2026-07-28")
+    g = rep["guidance"]
+    assert g["next_q_revenue_low"] == pytest.approx(32.34e9) and g["next_q_revenue_high"] == pytest.approx(33.66e9)
+    assert g["gross_margin_guide"] == pytest.approx(0.744) and g["next_q_revenue_consensus"] is None
+    assert "plus or minus 2%" in g["evidence"] and g["source"].endswith("nvda-ex991.htm") and g["confidence"] == "MEDIUM"
+    # JPM: Alpha Vantage has no rows → only the calendar snapshot; revisions are ACCUMULATING, never invented
+    jpm = next(r for r in [repo.latest_recommendation(svc.sf(), "JPM", mode="LIVE")] if r is not None)
+    ja = jpm.result["analyst"]
+    assert ja["forward_eps"] is None and ja["source"] == "finnhub"
+    assert ja["revision_status"]["30d"].startswith("ACCUMULATING") and ja["eps_revision_30d"] is None
+    # bank KPIs from SEC XBRL (loans, deposits, provisions, charge-offs, tangible equity); CET1 is not tagged
+    # in this filing and NIM needs data SEC XBRL does not standardise → both stay missing, never estimated
+    jf = jpm.result["features"]
+    assert jf["rotce"] is not None and jf["loan_growth"] is not None and jf["charge_off_rate"] is not None
+    assert jf.get("cet1") is None and jf.get("nim") is None
+    assert jpm.result["fundamental_rules"]["critical_missing"] == [] and jpm.result["multiples"]["p_tbv"] is not None
     assert res["sector_model_id"] == "semiconductor" and res["multiples"]["market_cap"] is not None
-    # TSM files IFRS 20-F reports: no us-gaap quarterly facts → fundamentals missing → no recommendation
+    # TSM files IFRS 20-F reports: annual IFRS facts only → ANNUAL_ONLY, no quarterly data, no ADR ratio →
+    # currency-free ratios are shown, per-share valuation is not computed, and no recommendation is made
     assert tsm.deterministic_action == Action.DATA_INSUFFICIENT.value
+    tchecks = {c["data_type"]: c for c in tsm.result["data_quality"]["checks"]}
+    assert "ANNUAL_ONLY" in tchecks["fundamentals"]["reason_ko"] and "QUARTERLY_DATA_UNAVAILABLE" in tchecks["fundamentals"]["reason_ko"]
+    assert tsm.result["features"]["revenue_growth_yoy"] == pytest.approx(3.81 / 2.894 - 1, rel=1e-6)
+    assert tsm.result["multiples"] is None or tsm.result["multiples"].get("trailing_pe") is None
     assert tsm.result["sector_model_id"] == "semiconductor"
 
 

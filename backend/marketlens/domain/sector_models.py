@@ -20,6 +20,7 @@ class MetricRule:
     weight: float
     bad: float
     good: float
+    critical: bool = False  # without this input the model cannot judge the business at all
 
     def subscore(self, value: float) -> float:
         """Linear map bad→0, good→1 (works for both directions), clipped to [0, 1]."""
@@ -54,9 +55,14 @@ class RuleItem:
 
 @dataclass(frozen=True, slots=True)
 class RuleScore:
-    subscore: float | None  # 0..1 (None when coverage below the model minimum)
+    subscore: float | None  # 0..1 (None when coverage below the model minimum or a critical input is missing)
     coverage: float  # share of rule weight with available data
     items: tuple[RuleItem, ...]
+    critical_missing: tuple[str, ...] = ()
+
+    @property
+    def usable(self) -> bool:
+        return self.subscore is not None
 
     @property
     def missing(self) -> tuple[str, ...]:
@@ -78,8 +84,9 @@ def score_rules(rules: Sequence[MetricRule], metrics: Mapping[str, float | None]
         acc += s * r.weight
         w_avail += r.weight
     coverage = w_avail / total_w if total_w else 0.0
-    sub = acc / w_avail if w_avail > 0 and coverage >= min_coverage else None
-    return RuleScore(subscore=round(sub, 4) if sub is not None else None, coverage=round(coverage, 4), items=tuple(items))
+    critical_missing = tuple(r.metric for r in rules if r.critical and metrics.get(r.metric) is None)
+    sub = acc / w_avail if w_avail > 0 and coverage >= min_coverage and not critical_missing else None
+    return RuleScore(subscore=round(sub, 4) if sub is not None else None, coverage=round(coverage, 4), items=tuple(items), critical_missing=critical_missing)
 
 
 def select_sector_model(sec: Security, models: Sequence[SectorModel], fallback_id: str = "generic") -> tuple[SectorModel, str]:

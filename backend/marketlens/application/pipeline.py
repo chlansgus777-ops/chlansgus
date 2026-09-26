@@ -32,6 +32,8 @@ from marketlens.domain.enums import BULLISH_ACTIONS, Action, DataMode, DataQuali
 from marketlens.domain.exposure_graph import Edge, ExposureGraph, Node
 from marketlens.domain.facts import DataQualityReport, Fact, build_quality_report
 from marketlens.domain.freshness import FreshnessCheck, check_age, missing as fresh_missing, rules_from_config
+from marketlens.domain.annual import AnnualFinancials, annual_features
+from marketlens.domain.banks import bank_features
 from marketlens.domain.corporate_actions import SplitEvent, normalize_quarters
 from marketlens.domain.fundamentals import FundamentalMetrics, QuarterlyFinancials, as_of, compute_metrics
 from marketlens.domain.indicators import TechnicalSnapshot, aligned_closes, compute_technicals
@@ -89,16 +91,31 @@ class AnalysisInputs:
     missing_reasons: Mapping[str, str] = field(default_factory=dict)
     insider: OwnershipSnapshot | None = None  # SEC Form 4 aggregate (separate from short interest)
     splits: tuple[SplitEvent, ...] = ()  # stock splits known at analysis time (per-share basis normalisation)
+    annuals: tuple[AnnualFinancials, ...] = ()  # 20-F IFRS annual statements (foreign issuers without quarterly XBRL)
 
     def fingerprint(self) -> str:
         enc = encode(self)
-        for k in _ADDED_LATER:  # fields added after schema-2 hash only when present, so stored snapshots still replay
+        # fields added after schema-2 hash only when set, so stored snapshots still replay to the same hash
+        for k in _ADDED_LATER:
             if not enc.get(k):
                 enc.pop(k, None)
+        for parent, keys in _ADDED_LATER_NESTED.items():
+            sub = enc.get(parent)
+            if isinstance(sub, dict):
+                for k in keys:
+                    if sub.get(k) in (None, {}, [], ""):
+                        sub.pop(k, None)
+        for er in enc.get("earnings") or []:
+            g = er.get("guidance") if isinstance(er, dict) else None
+            if isinstance(g, dict):
+                for k in ("source", "evidence", "confidence"):
+                    if g.get(k) is None:
+                        g.pop(k, None)
         return hashlib.sha256(json.dumps(_canonical(enc), sort_keys=True).encode()).hexdigest()
 
 
-_ADDED_LATER = ("splits",)
+_ADDED_LATER = ("splits", "annuals")
+_ADDED_LATER_NESTED = {"analyst": ("eps_revision_60d", "forward_eps_basis", "revision_status", "revision_basis", "estimate_range_pct", "cross_check")}
 
 
 def _canonical(x: object) -> object:
@@ -349,9 +366,22 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         fund_check = replace(fund_check, quality=DataQuality.MISSING, reason_ko=f"재무제표(분기): 분석 시점에 공개된 분기 {len(pit_quarters)}개로 최소 {MIN_QUARTERS}개 미만 — TTM 계산 불가")
     metrics = compute_metrics(pit_quarters) if pit_quarters else None
     features: dict[str, float | None] = fundamental_features(metrics, dict(inp.extras)) if metrics else dict(inp.extras)
+    bank = bank_features(pit_quarters) if pit_quarters else {}
+    for k, v in bank.items():  # SEC XBRL bank KPIs; provider extras (if any) keep precedence
+        if v is not None and features.get(k) is None:
+            features[k] = v
+    annual_note = None
+    if not pit_quarters and inp.annuals:
+        vis = [y for y in inp.annuals if y.filed_date <= filing_visibility_day(inp.as_of)]
+        if vis:
+            last_fy = max(vis, key=lambda y: y.period_end)
+            features.update({k: v for k, v in annual_features(vis, filing_visibility_day(inp.as_of)).items() if v is not None})
+            annual_note = (f"ANNUAL_ONLY: 20-F(IFRS, {last_fy.currency}) 연간 자료만 있음(최근 회계연도 {last_fy.period_end.isoformat()}), "
+                           f"QUARTERLY_DATA_UNAVAILABLE — 분기 재무·ADR 비율이 없어 주당 밸류에이션은 계산하지 않음")
+            fund_check = replace(fund_check, reason_ko=annual_note)
     for k, v in features.items():
         if v is not None:
-            eb.add(f"fund.{k}", "fundamental", k, v, src.get("fundamentals", "calc"), quality=fund_check.quality.value, period="TTM" if k.endswith("_ttm") else (latest_q.fiscal_label if latest_q else None))
+            eb.add(f"fund.{k}", "fundamental", k, v, src.get("fundamentals", "calc"), quality=fund_check.quality.value, period="TTM" if k.endswith("_ttm") else (latest_q.fiscal_label if latest_q else ("FY(연간, ANNUAL_ONLY)" if annual_note else None)))
 
     # ---------------------------------------------------------------- earnings & revisions (only if fresh enough)
     er_hist = [r for r in inp.earnings if earnings_visible(r, inp.as_of)]
@@ -369,6 +399,8 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         eb.add("earnings.revenue_surprise", "earnings", "매출 서프라이즈", earnings.revenue_surprise, last_er.source, period=last_er.fiscal_label)
         eb.add("earnings.guide_rev_vs_cons", "earnings", "다음 분기 매출 가이던스 vs 컨센서스", earnings.guide_rev_vs_cons, last_er.source, period=last_er.fiscal_label)
         eb.add("earnings.expectation_bar", "earnings", "시장 기대 수준", earnings.expectation_bar.value, "calc")
+        if last_er.guidance.evidence:  # the exact SEC sentence(s) behind the guidance numbers
+            eb.add("earnings.guidance_source", "earnings", f"가이던스 원문(SEC 8-K, 추출 신뢰도 {last_er.guidance.confidence})", last_er.guidance.evidence, last_er.guidance.source or "sec", period=last_er.fiscal_label)
 
     # ---------------------------------------------------------------- sector model & valuation
     sector_known = inp.security.sector not in UNKNOWN_SECTORS
@@ -383,7 +415,10 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         val_price, val_basis = bars[-1].close, f"직전 종가({bars[-1].day.isoformat()})"
     else:
         val_price, val_basis = None, "가격 없음"
-    multiples = compute_multiples(val_price, metrics, analyst, inp.extras) if metrics is not None else None
+    val_extras = dict(inp.extras)
+    if bank.get("tangible_book_value") is not None and val_extras.get("tangible_book_value") is None:
+        val_extras["tangible_book_value"] = bank["tangible_book_value"]
+    multiples = compute_multiples(val_price, metrics, analyst, val_extras) if metrics is not None else None
     val_inputs: dict[str, float | None] = multiples.as_dict() if multiples else {}
     val_rules = score_rules(model.valuation_rules, val_inputs, model.min_coverage) if multiples else None
     us10y_pct = inp.macro.value(US10Y) if inp.macro else None

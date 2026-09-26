@@ -86,7 +86,16 @@ def filed_for(end: date, form: str) -> date:
 def companyfacts(t: str) -> dict[str, Any]:
     c = COMPANIES[t]
     if c.get("foreign"):
-        return {"cik": c["cik"], "entityName": c["name"], "facts": {"ifrs-full": {"Revenue": {"units": {"TWD": []}}}}}
+        # 20-F (IFRS, TWD): annual facts only — the shape SEC companyfacts uses for foreign private issuers
+        def fy(concept_vals: dict[int, float], flow: bool = True) -> dict[str, Any]:
+            return {"units": {"TWD": [{"val": v, "end": f"{y}-12-31", **({"start": f"{y}-01-01"} if flow else {}), "filed": f"{y + 1}-04-15", "form": "20-F", "fy": y, "fp": "FY"}
+                                      for y, v in concept_vals.items()]}}
+        return {"cik": c["cik"], "entityName": c["name"], "facts": {"ifrs-full": {
+            "Revenue": fy({2024: 2.894e12, 2025: 3.81e12}), "GrossProfit": fy({2024: 1.624e12, 2025: 2.29e12}),
+            "ProfitLossFromOperatingActivities": fy({2024: 1.322e12, 2025: 1.86e12}), "ProfitLossAttributableToOwnersOfParent": fy({2024: 1.173e12, 2025: 1.65e12}),
+            "CashFlowsFromUsedInOperatingActivities": fy({2024: 1.826e12, 2025: 2.4e12}), "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities": fy({2024: 0.956e12, 2025: 1.2e12}),
+            "CashAndCashEquivalents": fy({2024: 2.13e12, 2025: 2.5e12}, flow=False), "EquityAttributableToOwnersOfParent": fy({2024: 3.9e12, 2025: 4.9e12}, flow=False),
+        }}}
     rev: list[dict[str, Any]] = []
     ni: list[dict[str, Any]] = []
     eps: list[dict[str, Any]] = []
@@ -99,6 +108,8 @@ def companyfacts(t: str) -> dict[str, Any]:
     eq: list[dict[str, Any]] = []
     wds: list[dict[str, Any]] = []
     dei: list[dict[str, Any]] = []
+    bank = {k: [] for k in ("loans", "deposits", "goodwill", "intangibles", "provision", "nco")}  # type: ignore[var-annotated]
+    fy_prov = fy_nco = 0.0
     ytd_ocf = ytd_capex = 0.0
     fy_rev = fy_ni = fy_op = fy_gp = 0.0
     for k, (start, end, form) in enumerate(quarters_back()):
@@ -132,6 +143,21 @@ def companyfacts(t: str) -> dict[str, Any]:
         debt.append(_fact(r * 0.5, end, filed, form))
         eq.append(_fact(r * 3, end, filed, form))
         dei.append(_fact(c["shares"], filed - timedelta(days=5), filed, form))
+        if c.get("sic") == 6021:  # bank concepts (us-gaap) as a bank's 10-Q/10-K tag them
+            if end.month == 3:
+                fy_prov = fy_nco = 0.0
+            prov, nco = r * 0.04, r * 0.03
+            fy_prov, fy_nco = fy_prov + prov, fy_nco + nco
+            bank["loans"].append(_fact(r * 30 * (1 + 0.01 * k), end, filed, form))
+            bank["deposits"].append(_fact(r * 50, end, filed, form))
+            bank["goodwill"].append(_fact(52e9, end, filed, form))
+            bank["intangibles"].append(_fact(3e9, end, filed, form))
+            if form == "10-K":
+                bank["provision"].append(_fact(fy_prov, end, filed, form, fy_start, "FY"))
+                bank["nco"].append(_fact(fy_nco, end, filed, form, fy_start, "FY"))
+            else:
+                bank["provision"].append(_fact(prov, end, filed, form, start))
+                bank["nco"].append(_fact(nco, end, filed, form, start))
     usd = lambda items: {"units": {"USD": items}}  # noqa: E731
     return {"cik": c["cik"], "entityName": c["name"], "facts": {
         "us-gaap": {
@@ -140,6 +166,9 @@ def companyfacts(t: str) -> dict[str, Any]:
             "NetCashProvidedByUsedInOperatingActivities": usd(ocf), "PaymentsToAcquirePropertyPlantAndEquipment": usd(capex),
             "CashAndCashEquivalentsAtCarryingValue": usd(cash), "LongTermDebt": usd(debt), "StockholdersEquity": usd(eq),
             "WeightedAverageNumberOfDilutedSharesOutstanding": {"units": {"shares": wds}},
+            **({"LoansAndLeasesReceivableNetReportedAmount": usd(bank["loans"]), "Deposits": usd(bank["deposits"]), "Goodwill": usd(bank["goodwill"]),
+                "IntangibleAssetsNetExcludingGoodwill": usd(bank["intangibles"]), "ProvisionForLoanLeaseAndOtherLosses": usd(bank["provision"]),
+                "AllowanceForLoanAndLeaseLossesWriteOffsNet": usd(bank["nco"])} if bank["loans"] else {}),
         },
         "dei": {"EntityCommonStockSharesOutstanding": {"units": {"shares": dei}}},
     }}
@@ -147,14 +176,23 @@ def companyfacts(t: str) -> dict[str, Any]:
 
 def submissions(t: str) -> dict[str, Any]:
     c = COMPANIES[t]
-    forms = ["20-F", "6-K", "6-K"] if c.get("foreign") else ["10-Q", "4", "10-K", "4"]
-    dates = ["2026-08-10", "2026-09-10", "2026-08-01", "2026-07-15"][: len(forms)]
+    forms = ["20-F", "6-K", "6-K"] if c.get("foreign") else ["10-Q", "4", "10-K", "4", "8-K"]
+    dates = ["2026-08-10", "2026-09-10", "2026-08-01", "2026-07-15", "2026-07-28"][: len(forms)]
+    items = ["", "", "", "", "2.02,9.01"][: len(forms)]  # the 8-K with Item 2.02 carries the earnings release (Exhibit 99.1)
     return {
         "cik": str(c["cik"]), "name": c["name"], "sic": str(c["sic"]), "sicDescription": "fixture", "entityType": "operating",
         "addresses": {"business": {"stateOrCountryDescription": "Taiwan" if c.get("foreign") else "CA"}},
-        "filings": {"recent": {"form": forms, "filingDate": dates, "accessionNumber": [f"0000000000-26-00000{i}" for i in range(len(forms))],
+        "filings": {"recent": {"form": forms, "filingDate": dates, "accessionNumber": [f"0000000000-26-00000{i}" for i in range(len(forms))], "items": items,
+                               "acceptanceDateTime": [f"{d}T20:05:00.000Z" for d in dates],
                                "primaryDocument": ["xslF345X05/form4.xml" if f == "4" else "doc.htm" for f in forms]}},
     }
+
+
+RELEASE_991 = """<html><body><p>NVIDIA Announces Financial Results for Second Quarter Fiscal 2026</p>
+<p>Revenue for the second quarter was $30.2 billion.</p><p>Outlook</p>
+<p>NVIDIA's outlook for the third quarter of fiscal 2026 is as follows:</p>
+<ul><li>Revenue is expected to be $33.0 billion, plus or minus 2%.</li>
+<li>GAAP gross margins are expected to be 74.4%, plus or minus 50 basis points.</li></ul></body></html>"""
 
 
 FORM4 = """<?xml version="1.0"?><ownershipDocument><reportingOwner><reportingOwnerRelationship><isOfficer>1</isOfficer>
@@ -229,8 +267,35 @@ def finnhub(path: str, q: dict[str, list[str]]) -> Any:
                 rows.append({"symbol": t, "date": (end + timedelta(days=28)).isoformat(), "quarter": (end.month - 1) // 3 + 1, "year": end.year,
                              "epsActual": eps, "epsEstimate": round(eps * 0.97, 4), "revenueActual": r, "revenueEstimate": r * 0.99})
             return {"earningsCalendar": rows}
-        return {"earningsCalendar": [{"symbol": "NVDA", "date": add_trading_days(NOW.date(), 25).isoformat()}, {"symbol": "JPM", "date": add_trading_days(NOW.date(), 12).isoformat()}]}
+        # upcoming reports with consensus (the fields Finnhub's calendar carries for future dates)
+        rows = [{"symbol": "NVDA", "date": "2026-11-19", "quarter": 3, "year": 2026, "epsEstimate": 0.47, "revenueEstimate": 34.1e9, "epsActual": None, "revenueActual": None, "hour": "amc"},
+                {"symbol": "JPM", "date": add_trading_days(NOW.date(), 12).isoformat(), "quarter": 3, "year": 2026, "epsEstimate": 4.95, "revenueEstimate": 45.8e9, "epsActual": None, "revenueActual": None, "hour": "bmo"}]
+        lo, hi = date.fromisoformat(q["from"][0]), date.fromisoformat(q["to"][0])
+        return {"earningsCalendar": [r for r in rows if lo <= date.fromisoformat(r["date"]) <= hi]}
     return None
+
+
+def alphavantage(q: dict[str, list[str]]) -> Any:
+    """Shape of Alpha Vantage EARNINGS_ESTIMATES (string values, as the provider returns them)."""
+    assert q["function"] == ["EARNINGS_ESTIMATES"]
+    sym = q["symbol"][0]
+    if sym != "NVDA":
+        return {"symbol": sym, "estimates": []}
+
+    def row(d: str, horizon: str, avg: float, ago: tuple[float, float, float, float], rev: float) -> dict[str, str]:
+        return {"date": d, "horizon": horizon, "eps_estimate_average": str(avg), "eps_estimate_high": str(round(avg * 1.08, 4)), "eps_estimate_low": str(round(avg * 0.93, 4)),
+                "eps_estimate_analyst_count": "42", "eps_estimate_average_7_days_ago": str(ago[0]), "eps_estimate_average_30_days_ago": str(ago[1]),
+                "eps_estimate_average_60_days_ago": str(ago[2]), "eps_estimate_average_90_days_ago": str(ago[3]),
+                "eps_estimate_revision_up_trailing_7_days": "3", "eps_estimate_revision_down_trailing_7_days": "0",
+                "eps_estimate_revision_up_trailing_30_days": "11", "eps_estimate_revision_down_trailing_30_days": "2",
+                "revenue_estimate_average": str(rev), "revenue_estimate_high": str(rev * 1.05), "revenue_estimate_low": str(rev * 0.96), "revenue_estimate_analyst_count": "40"}
+
+    return {"symbol": "NVDA", "estimates": [
+        row("2026-10-31", "current fiscal quarter", 0.47, (0.465, 0.45, 0.44, 0.43), 34.0e9),
+        row("2027-01-31", "next fiscal quarter", 0.51, (0.505, 0.49, 0.48, 0.47), 36.5e9),
+        row("2027-01-31", "current fiscal year", 1.82, (1.81, 1.76, 1.72, 1.69), 131e9),
+        row("2028-01-31", "next fiscal year", 2.21, (2.2, 2.12, 2.05, 2.0), 158e9),
+    ]}
 
 
 def finra(body: dict[str, Any]) -> Any:
@@ -265,6 +330,10 @@ def live_transport(seen: list[str] | None = None) -> httpx.MockTransport:
                 return httpx.Response(200, json=submissions(by_cik[path.split("CIK")[1][:10]]))
             if "/companyfacts/CIK" in path:
                 return httpx.Response(200, json=companyfacts(by_cik[path.split("CIK")[1][:10]]))
+            if "/Archives/edgar/data/" in path and path.endswith("/index.json"):
+                return httpx.Response(200, json={"directory": {"item": [{"name": "0000000000-26-000004-index.htm"}, {"name": "d8k.htm"}, {"name": "nvda-ex991.htm"}]}})
+            if "/Archives/edgar/data/" in path and path.endswith("ex991.htm"):
+                return httpx.Response(200, text=RELEASE_991)
             if "/Archives/edgar/data/" in path:
                 return httpx.Response(200, text=FORM4)
         if "polygon.io" in u.netloc and path == "/v3/reference/splits":
@@ -273,6 +342,8 @@ def live_transport(seen: list[str] | None = None) -> httpx.MockTransport:
         if "polygon.io" in u.netloc and "/grouped/" in path:
             day = date.fromisoformat(path.rsplit("/", 1)[-1])
             return httpx.Response(200, json={"status": "OK", "resultsCount": 1, "results": grouped(day)})
+        if u.netloc == "www.alphavantage.co" and path == "/query":
+            return httpx.Response(200, json=alphavantage(q))
         if "finnhub.io" in u.netloc:
             body = finnhub(path, q)
             return httpx.Response(200, json=body) if body is not None else httpx.Response(404)

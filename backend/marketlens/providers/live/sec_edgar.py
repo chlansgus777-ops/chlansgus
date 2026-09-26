@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from xml.etree import ElementTree
 
@@ -50,6 +50,19 @@ CONCEPTS: dict[str, tuple[str, ...]] = {
 DEBT_LONG = ("LongTermDebt", "LongTermDebtAndCapitalLeaseObligations")
 DEBT_LONG_PARTS = ("LongTermDebtNoncurrent", "LongTermDebtCurrent")
 DEBT_SHORT = ("ShortTermBorrowings", "CommercialPaper")
+# bank balance-sheet / credit concepts (us-gaap). Values enter ``extras`` only when first filed together
+# with the quarter itself (no later-filed value can leak into an earlier analysis).
+BANK_INSTANT: dict[str, tuple[str, ...]] = {
+    "loans": ("LoansAndLeasesReceivableNetReportedAmount", "LoansAndLeasesReceivableNetOfDeferredIncome", "FinancingReceivableExcludingAccruedInterestAfterAllowanceForCreditLoss"),
+    "deposits": ("Deposits",),
+    "goodwill": ("Goodwill",),
+    "intangibles": ("IntangibleAssetsNetExcludingGoodwill", "FiniteLivedIntangibleAssetsNet"),
+    "cet1_ratio": ("CommonEquityTierOneCapitalRatio", "CommonEquityTierOneCapitalToRiskWeightedAssets"),
+}
+BANK_FLOW: dict[str, tuple[str, ...]] = {
+    "provision": ("ProvisionForLoanLeaseAndOtherLosses", "ProvisionForLoanAndLeaseLosses", "ProvisionForCreditLosses"),
+    "net_charge_offs": ("AllowanceForLoanAndLeaseLossesWriteOffsNet", "FinancingReceivableAllowanceForCreditLossesWriteOffsNet"),
+}
 FLOW_FIELDS = {"revenue", "gross_profit", "operating_income", "net_income", "eps_diluted", "operating_cash_flow", "capex", "sbc", "depreciation_amortization", "shares_diluted"}
 YTD_FIELDS = {"operating_cash_flow", "capex", "sbc", "depreciation_amortization"}  # cash-flow items are reported year-to-date
 QUARTER_MAX_DAYS = 100
@@ -110,6 +123,33 @@ class SecEdgarProvider:
         sub = self._data.get_json(f"/submissions/CIK{cik:010d}.json")
         return parse_submissions_profile(sub)
 
+    def earnings_releases(self, ticker: str, since: date, max_n: int = 2) -> list[dict[str, Any]]:
+        """Recent 8-K filings with Item 2.02 (results of operations) and their Exhibit 99 press release.
+        Returns [{accession, filed_at (acceptance time, UTC), url, text}] newest first."""
+        self._require()
+        cik = self.cik_for(ticker)
+        recent = self._data.get_json(f"/submissions/CIK{cik:010d}.json").get("filings", {}).get("recent", {})
+        out: list[dict[str, Any]] = []
+        for i, form in enumerate(recent.get("form", [])):
+            if form != "8-K" or "2.02" not in str((recent.get("items") or [""] * (i + 1))[i]):
+                continue
+            fdate = date.fromisoformat(recent["filingDate"][i])
+            if fdate < since:
+                break  # the list is newest first
+            accn = recent["accessionNumber"][i]
+            path = f"/Archives/edgar/data/{cik}/{accn.replace('-', '')}"
+            acc = (recent.get("acceptanceDateTime") or [None] * (i + 1))[i]
+            try:
+                filed_at = datetime.fromisoformat(str(acc).replace("Z", "+00:00")) if acc else datetime.combine(fdate, datetime.min.time(), tzinfo=timezone.utc)
+                doc = pick_press_release(self._www.get_json(f"{path}/index.json"))
+                text = self._www.get_text(f"{path}/{doc}") if doc else ""
+            except (ProviderDataError, ValueError):
+                continue
+            out.append({"accession": accn, "filed_at": filed_at, "url": f"https://www.sec.gov{path}/{doc}" if doc else f"https://www.sec.gov{path}/", "text": text, "document": doc})
+            if len(out) >= max_n:
+                break
+        return out
+
     def shares_outstanding_all(self, as_of: date) -> dict[int, tuple[float, date]]:
         """CIK → (shares outstanding, as-of date) from the most recent quarterly frames (one call each)."""
         self._require()
@@ -138,6 +178,11 @@ class SecEdgarProvider:
         cik = self.cik_for(ticker)
         facts = self._data.get_json(f"/api/xbrl/companyfacts/CIK{cik:010d}.json")
         return parse_company_facts(facts, ticker)
+
+    def get_annual_ifrs(self, ticker: str) -> list[Any]:
+        self._require()
+        cik = self.cik_for(ticker)
+        return parse_ifrs_annual(self._data.get_json(f"/api/xbrl/companyfacts/CIK{cik:010d}.json"), ticker)
 
     def get_extras(self, ticker: str) -> CompanyProfileExtras:
         raise NotSupported("SEC XBRL은 업종 KPI(CET1, 점유율 등)를 표준 형태로 제공하지 않음")
@@ -173,6 +218,76 @@ class SecEdgarProvider:
                 txs.append(t)
                 net += t[2] if t[3] == "BUY" else -t[2]
         return OwnershipSnapshot(source="sec-form4", insider_net_buy_value_90d=round(net, 2), insider_transactions=tuple(txs[:50]))
+
+
+IFRS_CONCEPTS: dict[str, tuple[str, ...]] = {
+    "revenue": ("Revenue", "RevenueFromContractsWithCustomers"),
+    "gross_profit": ("GrossProfit",),
+    "operating_income": ("ProfitLossFromOperatingActivities",),
+    "net_income": ("ProfitLossAttributableToOwnersOfParent", "ProfitLoss"),
+    "operating_cash_flow": ("CashFlowsFromUsedInOperatingActivities",),
+    "capex": ("PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities", "PurchaseOfPropertyPlantAndEquipment"),
+    "cash": ("CashAndCashEquivalents",),
+    "total_equity": ("EquityAttributableToOwnersOfParent", "Equity"),
+}
+IFRS_DEBT = ("CurrentBorrowings", "NoncurrentBorrowings", "Borrowings")
+
+
+def parse_ifrs_annual(facts: dict[str, Any], ticker: str) -> list["AnnualFinancials"]:
+    """Annual IFRS figures of a 20-F filer (first-filed value per fiscal year, reporting currency)."""
+    from marketlens.domain.annual import AnnualFinancials
+
+    ifrs = facts.get("facts", {}).get("ifrs-full")
+    if not ifrs:
+        raise NotSupported(f"{ticker}: IFRS(20-F) 재무 없음")
+
+    def series(names: tuple[str, ...], flow: bool) -> tuple[dict[date, tuple[float, date]], str | None]:
+        for n in names:
+            units = (ifrs.get(n) or {}).get("units") or {}
+            cur = next((u for u in units if len(u) == 3 and u.isupper()), None)
+            if cur is None:
+                continue
+            out: dict[date, tuple[float, date]] = {}
+            for it in sorted(units[cur], key=lambda x: x.get("filed", "")):
+                if it.get("form") not in ("20-F", "20-F/A", "40-F"):
+                    continue
+                end = date.fromisoformat(it["end"])
+                if flow and it.get("start") and (end - date.fromisoformat(it["start"])).days < ANNUAL_MIN_DAYS:
+                    continue
+                out.setdefault(end, (float(it["val"]), date.fromisoformat(it["filed"])))
+            if out:
+                return out, cur
+        return {}, None
+
+    cols: dict[str, dict[date, tuple[float, date]]] = {}
+    currency = None
+    for k, names in IFRS_CONCEPTS.items():
+        cols[k], c = series(names, k not in ("cash", "total_equity"))
+        currency = currency or c
+    debt_parts = [series((n,), False)[0] for n in IFRS_DEBT[:2]]
+    years = sorted(set(cols["revenue"]) | set(cols["net_income"]))
+    out = []
+    for end in years:
+        vals = {k: v[end][0] for k, v in cols.items() if end in v}
+        ff = {k: v[end][1] for k, v in cols.items() if end in v}
+        debt = [p[end][0] for p in debt_parts if end in p]
+        out.append(AnnualFinancials(period_end=end, filed_date=min(ff.values()), currency=currency or "?", source="sec-edgar-ifrs",
+                                    total_debt=sum(debt) if debt else None, field_filed=ff, **vals))
+    if not out:
+        raise NotSupported(f"{ticker}: IFRS 연간 매출/순이익 없음")
+    return out[-6:]
+
+
+def pick_press_release(index: Any) -> str | None:
+    """The earnings press release inside an 8-K filing index: Exhibit 99.x (by file name)."""
+    items = ((index or {}).get("directory") or {}).get("item") or []
+    names = [str(i.get("name", "")) for i in items if isinstance(i, dict)]
+    htm = [n for n in names if n.lower().endswith((".htm", ".html", ".txt")) and not n.lower().endswith("-index.htm")]
+    for pat in (r"ex[-_]?99[-_.]?0?1", r"ex[-_]?99", r"exhibit[-_]?99", r"99[-_.]?1"):
+        hit = next((n for n in htm if re.search(pat, n.lower())), None)
+        if hit:
+            return hit
+    return None
 
 
 def parse_submissions_profile(sub: dict[str, Any]) -> dict[str, Any]:
@@ -340,6 +455,31 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
         if parts:
             put(end, "total_debt", sum(v for v, _ in parts), max(fd for _, fd in parts))
 
+    # bank concepts → extras (quarterly durations only for flows; instants at the period end)
+    bank: dict[date, dict[str, float]] = defaultdict(dict)
+    for key, names in list(BANK_INSTANT.items()) + list(BANK_FLOW.items()):
+        unit = ("pure",) if key == "cet1_ratio" else ("USD",)
+        annual_b: dict[date, tuple[date, float]] = {}
+        for item in earliest(_pick_concept(gaap, names, unit)):
+            end = date.fromisoformat(item["end"])
+            first_filed = min(field_filed.get(end, {}).values(), default=None)
+            if first_filed is None or date.fromisoformat(item["filed"]) > first_filed:
+                continue  # only values published with the quarter itself
+            if key in BANK_FLOW:
+                if not item.get("start"):
+                    continue
+                days = (end - date.fromisoformat(item["start"])).days
+                if days >= ANNUAL_MIN_DAYS:
+                    annual_b.setdefault(end, (date.fromisoformat(item["start"]), float(item["val"])))
+                    continue
+                if days > QUARTER_MAX_DAYS:
+                    continue
+            bank[end].setdefault(key, float(item["val"]))
+        for end, (st, fy_val) in annual_b.items():  # Q4 flow = FY − (Q1 + Q2 + Q3), as for the main fields
+            qs = [e for e in bank if st < e < end and key in bank[e]]
+            if key not in bank.get(end, {}) and len(qs) == 3:
+                bank[end][key] = fy_val - sum(bank[e][key] for e in qs)
+
     # cover-page shares outstanding (dei), attached to the quarter filed on the same date
     dei = facts.get("facts", {}).get("dei", {})
     shares_items = earliest(_pick_concept(dei, ("EntityCommonStockSharesOutstanding",), ("shares",))) if dei else []
@@ -365,7 +505,8 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
         filed = min(ff.values())
         fields = {k: vals.get(k) for k in list(CONCEPTS) + ["total_debt", "shares_outstanding"]}
         rev = {k: tuple(v) for k, v in revisions.get(end, {}).items() if v}
-        out.append(QuarterlyFinancials(period_end=end, filed_date=filed, fiscal_label=end.isoformat(), source="sec-edgar", field_filed=ff, revisions=rev, **fields))
+        out.append(QuarterlyFinancials(period_end=end, filed_date=filed, fiscal_label=end.isoformat(), source="sec-edgar", field_filed=ff, revisions=rev,
+                                       extras=dict(bank.get(end, {})), **fields))
     if not out:
         raise NotSupported(f"{ticker}: 분기 10-Q/10-K 데이터 없음")
     return out[-16:]

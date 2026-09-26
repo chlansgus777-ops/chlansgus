@@ -1,6 +1,6 @@
 # MarketLens sector models — version controlled. Values are fractions (0.20 = 20%).
 # bad → subscore 0, good → subscore 1 (linear). If good < bad, lower is better.
-version = "sector-models-1.2.0"  # 1.2.0: Korean metric labels (no scoring change); 1.1.0: energy keywords  # 1.1.0: energy keywords no longer capture "Utilities—Regulated Gas"
+version = "sector-models-1.3.0"  # 1.3.0: critical inputs (semiconductor revenue growth, financial ROTCE); 1.2.0: Korean metric labels (no scoring change); 1.1.0: energy keywords  # 1.1.0: energy keywords no longer capture "Utilities—Regulated Gas"
 
 [[model]]
 id = "semiconductor"
@@ -10,7 +10,7 @@ industry_keywords = ["semiconductor"]
 primary_multiple = "forward_pe"
 rationale = "cyclical, capex/inventory driven; margins and end-market demand dominate"
 fundamental = [
-  { metric = "revenue_growth_yoy", label = "매출 성장률(전년비)", weight = 3, bad = -0.10, good = 0.40 },
+  { metric = "revenue_growth_yoy", label = "매출 성장률(전년비)", weight = 3, bad = -0.10, good = 0.40, critical = true },
   { metric = "eps_growth_yoy", label = "EPS 성장률(전년비)", weight = 2, bad = -0.20, good = 0.50 },
   { metric = "gross_margin", label = "매출총이익률", weight = 2, bad = 0.35, good = 0.65 },
   { metric = "gross_margin_change_yoy", label = "매출총이익률 변화(전년비)", weight = 1, bad = -0.05, good = 0.05 },
@@ -103,7 +103,7 @@ industry_keywords = ["bank", "credit services", "capital markets", "insurance"]
 primary_multiple = "p_tbv"
 rationale = "balance-sheet businesses: capital (CET1), returns on tangible equity, NIM and credit quality — revenue growth/FCF are not meaningful"
 fundamental = [
-  { metric = "rotce", label = "ROTCE(유형자기자본이익률)", weight = 3, bad = 0.06, good = 0.18 },
+  { metric = "rotce", label = "ROTCE(유형자기자본이익률)", weight = 3, bad = 0.06, good = 0.18, critical = true },
   { metric = "cet1", label = "CET1 자본비율", weight = 2, bad = 0.095, good = 0.14 },
   { metric = "nim", label = "순이자마진(NIM)", weight = 1.5, bad = 0.020, good = 0.035 },
   { metric = "loan_growth", label = "대출 성장률", weight = 1, bad = -0.03, good = 0.08 },

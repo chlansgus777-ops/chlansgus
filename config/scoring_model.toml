@@ -75,6 +75,9 @@ stage3_keep = 150
 stage4_keep = 60
 final_candidates = 40
 ai_committee_top_n = 20
+estimate_top_n = 20          # Alpha Vantage free tier ≈ 25 requests/day: only final candidates, cached for days
+estimate_daily_budget = 22
+estimate_ttl_days = 3
 
 [scanner.stage2_weights]     # cheap quant filter (fundamental-first; technicals are minor)
 revenue_growth = 0.18

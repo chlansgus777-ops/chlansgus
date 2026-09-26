@@ -85,6 +85,9 @@ class Guidance:
     fy_eps_mid: float | None = None
     fy_eps_consensus: float | None = None
     gross_margin_guide: float | None = None
+    source: str | None = None  # e.g. SEC 8-K Exhibit 99 URL
+    evidence: str | None = None  # the exact sentence(s) the numbers were read from
+    confidence: str | None = None  # MEDIUM | LOW (rule-extracted)
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +223,12 @@ class AnalystSnapshot:
     target_price_consensus: float | None = None
     rating_distribution: Mapping[str, int] = field(default_factory=dict)
     forward_eps_growth: float | None = None  # FY2/FY1 - 1
+    eps_revision_60d: float | None = None
+    forward_eps_basis: str | None = None  # "NTM(FY1 40% + FY2 60%)" | "FY1"
+    revision_status: Mapping[str, str] = field(default_factory=dict)  # {"7d": "READY", "90d": "ACCUMULATING 42/90일", ...}
+    revision_basis: Mapping[str, str] = field(default_factory=dict)  # {"7d": "PROVIDER", "30d": "SELF", ...}
+    estimate_range_pct: float | None = None  # (high − low) / |mean| of FY1 EPS estimates (not a standard deviation)
+    cross_check: str | None = None  # CONSISTENT | DATA_CONFLICT | SEVERE_DATA_CONFLICT | SINGLE_SOURCE (+ detail)
 
 
 @dataclass(frozen=True, slots=True)

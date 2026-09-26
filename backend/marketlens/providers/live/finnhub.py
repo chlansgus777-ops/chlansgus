@@ -14,6 +14,7 @@ from typing import Any, Sequence
 from marketlens.domain.catalysts import CatalystEvent, CatalystType
 from marketlens.domain.earnings import EarningsReport
 from marketlens.domain.enums import DataMode
+from marketlens.domain.estimates import EstimateObservation
 from marketlens.domain.market import Bar, Quote
 from marketlens.domain.market_calendar import classify_session
 from marketlens.infrastructure.resilience import TokenBucket
@@ -97,6 +98,30 @@ class FinnhubProvider:
             for r in rows if r.get("symbol") and r.get("date")
         ]
 
+    def get_calendar_estimates(self, start: date, end: date, observed_on: date) -> list[EstimateObservation]:
+        """Consensus EPS/revenue for upcoming reports of every company in one request. Stored daily, these
+        snapshots become MarketLens's own revision history (the calendar itself has no history)."""
+        d = self._get("/calendar/earnings", **{"from": start.isoformat(), "to": end.isoformat()})
+        rows = d.get("earningsCalendar")
+        if not isinstance(rows, list):
+            raise ProviderDataError("earnings calendar: malformed payload")
+        out: list[EstimateObservation] = []
+        for r in rows:
+            sym, rd = r.get("symbol"), r.get("date")
+            if not sym or not rd or (r.get("epsEstimate") is None and r.get("revenueEstimate") is None):
+                continue
+            if r.get("epsActual") is not None:
+                continue  # already reported — an actual, not a consensus
+            try:
+                report = date.fromisoformat(rd)
+                y, q = int(r["year"]), int(r["quarter"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            out.append(EstimateObservation(ticker=str(sym).upper(), provider=self.name, period=f"FQ{y}Q{q}", period_type="quarter", period_end=None,
+                                           observed_on=observed_on, eps=_num(r.get("epsEstimate")), revenue=_num(r.get("revenueEstimate")),
+                                           horizon="upcoming report", report_date=report))
+        return out
+
     # --- AnalystProvider (partial)
     def get_earnings_history(self, ticker: str) -> list[EarningsReport]:
         """Uses the earnings calendar so ``report_date`` is the real announcement date (the /stock/earnings
@@ -120,3 +145,10 @@ class FinnhubProvider:
 
     def get_valuation_history(self, ticker: str, multiple: str) -> ValuationHistory:
         raise NotSupported("과거 밸류에이션 시계열 미제공(MISSING)")
+
+
+def _num(v: Any) -> float | None:
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None

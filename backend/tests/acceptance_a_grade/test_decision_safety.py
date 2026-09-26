@@ -96,3 +96,13 @@ def test_missing_holding_price_is_never_valued_at_cost_and_caps_new_buys():
     assert r.valuation_status == "PARTIAL" and r.missing_prices == ("BBB",)
     assert r.size_cap in (SizeClass.SMALL, SizeClass.WATCH) and any("PRICE MISSING" in w for w in r.warnings)
     assert "Energy" not in r.sector_weights  # unknown value is not invented from the cost basis
+
+
+def test_sector_model_reports_coverage_critical_missing_and_usable():
+    from marketlens.domain.sector_models import MetricRule, score_rules
+
+    rules = (MetricRule("rotce", "ROTCE", 3, 0.06, 0.18, critical=True), MetricRule("loan_growth", "대출", 1, -0.03, 0.08), MetricRule("roe", "ROE", 1, 0.06, 0.16))
+    ok = score_rules(rules, {"rotce": 0.15, "loan_growth": 0.05}, 0.4)
+    assert ok.usable and ok.coverage == 0.8 and ok.critical_missing == ()
+    no_core = score_rules(rules, {"loan_growth": 0.05, "roe": 0.12}, 0.1)  # 40% coverage but the core metric is missing
+    assert not no_core.usable and no_core.critical_missing == ("rotce",)

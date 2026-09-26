@@ -56,6 +56,7 @@ def build_mock_registry(health: HealthRegistry | None = None, now: datetime | No
 
 def build_live_registry(settings: Settings, health: HealthRegistry | None = None, transport: object | None = None, sleep: object | None = None) -> ProviderRegistry:
     """LIVE providers. ``transport`` (an httpx transport) is only injected by fixture/contract tests."""
+    from marketlens.providers.live.alphavantage import AlphaVantageEstimatesProvider
     from marketlens.providers.live.finnhub import FinnhubProvider
     from marketlens.providers.live.finra import FinraShortInterestProvider
     from marketlens.providers.live.fred import FredMacroProvider
@@ -73,7 +74,9 @@ def build_live_registry(settings: Settings, health: HealthRegistry | None = None
         "universe": [sec],
         "price": [fin, poly],  # quotes: Finnhub; bars: Polygon (Finnhub raises NotSupported → failover)
         "fundamental": [sec],
-        "analyst": [fin],  # earnings history only; estimates/revisions need a licensed feed
+        # earnings history + calendar consensus snapshots (Finnhub, whole market, one request) and FY
+        # consensus with provider-reported 7/30/60/90-day history (Alpha Vantage, final candidates only)
+        "analyst": [fin, AlphaVantageEstimatesProvider(settings.alphavantage_api_key, transport=transport, **fast)],
         "news": [fin],
         "macro": [fred],
         "options": [U("options", "무료 옵션 데이터 공급원 없음 (MISSING)")],
