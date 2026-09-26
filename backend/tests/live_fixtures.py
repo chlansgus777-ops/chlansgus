@@ -298,13 +298,22 @@ def alphavantage(q: dict[str, list[str]]) -> Any:
     ]}
 
 
+FINRA_SORT_ERROR = ("Sorting is allowed only if all partitions keys are specified in EQUAL CompareFilter."
+                    "Partition keys missing or not using EQUAL CompareFilter: settlementDate")
+
+
 def finra(body: dict[str, Any]) -> Any:
-    sym = body["compareFilters"][0]["fieldValue"]
+    """Shape and rules of the real FINRA Query API as observed on 2026-09-26 (GitHub runner, public access): a
+    sort needs every partition key (settlementDate) in an EQUAL filter, otherwise 400; rows come unordered."""
+    equal = {f["fieldName"] for f in body.get("compareFilters", []) if str(f.get("compareType", "")).upper() == "EQUAL"}
+    if body.get("sortFields") and "settlementDate" not in equal:
+        return (400, {"statusCode": 400, "statusDescription": "Bad Request", "message": FINRA_SORT_ERROR})
+    sym = next(f["fieldValue"] for f in body["compareFilters"] if f["fieldName"] == "symbolCode")
     c = COMPANIES.get(sym)
     if c is None:
         return []
-    return [{"symbolCode": sym, "settlementDate": "2026-08-29", "currentShortPositionQuantity": c["shares"] * 0.012, "previousShortPositionQuantity": c["shares"] * 0.011, "daysToCoverQuantity": 1.4},
-            {"symbolCode": sym, "settlementDate": "2026-08-15", "currentShortPositionQuantity": c["shares"] * 0.011, "daysToCoverQuantity": 1.3}]
+    return [{"symbolCode": sym, "settlementDate": "2026-08-15", "currentShortPositionQuantity": c["shares"] * 0.011, "daysToCoverQuantity": 1.3},
+            {"symbolCode": sym, "settlementDate": "2026-08-29", "currentShortPositionQuantity": c["shares"] * 0.012, "previousShortPositionQuantity": c["shares"] * 0.011, "daysToCoverQuantity": 1.4}]
 
 
 def live_transport(seen: list[str] | None = None) -> httpx.MockTransport:
@@ -356,7 +365,10 @@ def live_transport(seen: list[str] | None = None) -> httpx.MockTransport:
         if "finra.org" in u.netloc and req.method == "POST":
             if req.headers.get("authorization", "").startswith("Basic "):
                 return httpx.Response(401)  # client credentials are never valid on the data endpoint
-            return httpx.Response(200, json=finra(json.loads(req.content)))
+            out = finra(json.loads(req.content))
+            if isinstance(out, tuple):
+                return httpx.Response(out[0], json=out[1])
+            return httpx.Response(200, json=out)
         return httpx.Response(404)
 
     return httpx.MockTransport(handler)

@@ -85,3 +85,17 @@ def test_provider_refusal_is_a_credential_block_and_the_reason_is_kept():
     except ProviderDataError as e:
         assert "Invalid compareType" in str(e) and "SECRETSECRET" not in str(e)
     assert _classify(ProviderUnavailable("http error: ProxyError")) == "BLOCKED_BY_NETWORK"
+
+
+def test_finra_request_follows_the_real_partition_key_rule():
+    """First live contact with FINRA (2026-09-26) answered 400: sorting needs settlementDate in an EQUAL filter.
+    The provider now filters a settlement-date range, sorts locally and still gets the latest two settlements."""
+    from datetime import date
+
+    from marketlens.providers.live.finra import FinraShortInterestProvider
+    from tests.live_fixtures import live_transport
+
+    seen: list[str] = []
+    snap = FinraShortInterestProvider(transport=live_transport(seen)).get_short_interest("NVDA", date(2026, 9, 25))
+    assert snap.short_interest_settlement == date(2026, 8, 29)  # newest first although the rows came unordered
+    assert snap.short_interest_change is not None and snap.short_interest_change > 0

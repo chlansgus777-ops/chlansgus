@@ -60,6 +60,7 @@ class HttpClient:
             text = r.text
         except Exception:  # noqa: BLE001 - an undecodable body just gives no detail
             return ""
+        text = re.sub(r"(?is)<(style|script)[^>]*>.*?</\1>", " ", text)
         text = re.sub(r"<[^>]+>", " ", text)
         text = re.sub(r"(?i)(api[_-]?key|apikey|token|secret|password|authorization)\s*[=:]\s*\S+", r"\1=<redacted>", text)
         text = re.sub(r"\b[A-Za-z0-9_\-]{32,}\b", "<redacted>", text)

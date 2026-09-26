@@ -56,15 +56,20 @@ class FinraShortInterestProvider:
             self._token = (str(tok), now + max(60.0, ttl - 60.0))
         return {"Authorization": f"Bearer {self._token[0]}"}
 
-    def get_short_interest(self, ticker: str) -> OwnershipSnapshot:
+    def get_short_interest(self, ticker: str, today: date | None = None) -> OwnershipSnapshot:
+        # Real FINRA contract (first live run, 2026-09-26): "Sorting is allowed only if all partition keys are specified
+        # in EQUAL CompareFilter … missing: settlementDate". So no server-side sort: the last ~100 days of settlement
+        # dates are requested with a date-range filter and ordered here.
+        end = today or date.today()
         body = {
-            "limit": 2,
-            "compareFilters": [{"compareType": "equal", "fieldName": "symbolCode", "fieldValue": ticker.upper()}],
-            "sortFields": ["-settlementDate"],
+            "limit": 12,
+            "compareFilters": [{"compareType": "EQUAL", "fieldName": "symbolCode", "fieldValue": ticker.upper()}],
+            "dateRangeFilters": [{"fieldName": "settlementDate", "startDate": date.fromordinal(end.toordinal() - 100).isoformat(), "endDate": end.isoformat()}],
         }
         rows = self._http.post_json(DATASET, body, headers=self._bearer())
         if not isinstance(rows, list):
             raise ProviderDataError("FINRA: malformed payload")
+        rows = sorted((r for r in rows if isinstance(r, dict) and r.get("settlementDate")), key=lambda r: str(r["settlementDate"]), reverse=True)
         if not rows:
             raise NotSupported(f"{ticker}: FINRA 공매도 데이터 없음")
         cur = rows[0]
