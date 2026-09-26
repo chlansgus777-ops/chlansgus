@@ -135,12 +135,24 @@ fun reserveTrain(client: KorailClient, train: Train, c: Conditions): Reservation
     return client.reserve(train, c.count, special)
 }
 
+/** 부작용이 없는 조회 중 오류 중 잠시 뒤 다시 시도해도 되는 것 (통신 오류, 서버 일시 오류). */
+private fun isTransient(e: Throwable) = e is IOException || e is ServerException
+
+/** 예약 응답이 불확실할 때 예약내역에서 해당 열차 예약을 찾습니다. 조회 자체가 실패하면 예외를 던집니다. */
+fun findReservation(client: KorailClient, train: Train): Reservation? =
+    client.reservations().firstOrNull { r ->
+        r.trainNo?.trimStart('0') == train.trainNo.trimStart('0') &&
+            r.runDate == train.runDate && r.depTime == train.depTime
+    }
+
 /**
  * 조건에 맞는 열차를 출발시간순으로 확인해 좌석이 있는 첫 열차를 예약합니다.
  * - 페이지를 받는 즉시 좌석을 확인하고 바로 예약합니다(전체 조회를 기다리지 않음).
  * - [targets]가 있으면 그 열차만 노리고, 조회 범위도 그 열차들의 출발시각으로 좁혀 재확인 주기를 줄입니다.
- * 매진이면 1~3초 뒤 재조회하고, 예약 성공 즉시 끝납니다. 결과가 불확실한 오류는 재시도하지 않습니다.
- * 요청 간격 1초 제한은 [KorailClient]가 그대로 지킵니다.
+ * - 로그인이 만료되면 [relogin]으로 다시 로그인해 이어갑니다(없으면 중지).
+ * - 조회 중 통신 오류는 간격을 늘려 재시도하고, 연속 [maxFailures]회를 넘으면 중지합니다.
+ * - 예약 응답이 불확실하면 예약내역을 조회해 실제 성공 여부를 확인합니다. 확인할 수 없을 때만 중지합니다.
+ * 매진이면 1~3초 뒤 재조회하고, 예약 성공 즉시 끝납니다. 요청 간격 1초 제한은 [KorailClient]가 지킵니다.
  */
 fun autoReserve(
     client: KorailClient,
@@ -148,43 +160,79 @@ fun autoReserve(
     stop: StopSignal,
     emit: (BookingEvent) -> Unit,
     targets: Set<String> = emptySet(),
+    relogin: (() -> Boolean)? = null,
     now: () -> LocalDateTime = { LocalDateTime.now(KST) },
     retryDelayMs: () -> Long = { Random.nextLong(1000, 3001) },
     pageDelayMs: Long = 1000,
+    backoffMs: (Int) -> Long = { n -> minOf(60_000L, 5_000L shl (n - 1)) },
+    verifyDelayMs: Long = 3000,
+    maxFailures: Int = 6,
 ) {
     val search = if (targets.isEmpty()) c else {
         val times = targets.map { it.substringAfterLast('/') }
         c.copy(start = maxOf(c.start, times.min()), end = minOf(c.end, times.max()))
     }
     var attempt = 0
+    var failures = 0
+    var relogins = 0
     val stamp = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
     while (!stop.isSet) {
         if (search.date + search.end < now().format(stamp)) throw IllegalStateException("설정한 출발시간 범위가 지났습니다.")
         attempt++
         var reservation: Reservation? = null
-        val trains = searchTrains(client, search, stop, pageDelayMs) { page ->
-            for (train in page) {
-                if (stop.isSet) return@searchTrains true
-                if (targets.isNotEmpty() && train.key !in targets) continue
-                if (!c.grade.available(train)) continue
-                try {
-                    reservation = reserveTrain(client, train, c)
-                    return@searchTrains true
-                } catch (e: SoldOutException) {
-                    emit(BookingEvent.Status("${train.trainNo}열차 예약 시도 중 매진되었습니다. 계속 확인합니다."))
-                } catch (e: Exception) {
-                    throw IllegalStateException(
-                        "예약 실패: ${errorText(e)}\n결과가 불확실하므로 코레일 예약내역을 먼저 확인하세요. 자동 재시도하지 않습니다.",
-                    )
+        val trains = try {
+            searchTrains(client, search, stop, pageDelayMs) { page ->
+                for (train in page) {
+                    if (stop.isSet) return@searchTrains true
+                    if (targets.isNotEmpty() && train.key !in targets) continue
+                    if (!c.grade.available(train)) continue
+                    try {
+                        reservation = reserveTrain(client, train, c)
+                        return@searchTrains true
+                    } catch (e: SoldOutException) {
+                        emit(BookingEvent.Status("${train.trainNo}열차 예약 시도 중 매진되었습니다. 계속 확인합니다."))
+                    } catch (e: NeedToLoginException) {
+                        throw e // 서버가 처리 전에 거절한 것이므로 재로그인 후 다시 시도해도 안전합니다.
+                    } catch (e: Exception) {
+                        emit(BookingEvent.Status("예약 응답 확인 중… 예약내역에서 실제 결과를 조회합니다."))
+                        stop.await(verifyDelayMs)
+                        val found = try {
+                            findReservation(client, train)
+                        } catch (v: Exception) {
+                            throw IllegalStateException(
+                                "예약 실패: ${errorText(e)}\n예약내역도 확인하지 못해 결과가 불확실합니다. 코레일 예약내역을 먼저 확인하세요.",
+                            )
+                        }
+                        if (found != null) {
+                            reservation = found
+                            return@searchTrains true
+                        }
+                        emit(BookingEvent.Status("예약되지 않은 것을 확인했습니다(${errorText(e)}). 계속 확인합니다."))
+                    }
                 }
+                false
             }
-            false
+        } catch (e: NeedToLoginException) {
+            if (relogin == null) throw IllegalStateException("로그인이 만료되었습니다. 다시 로그인하세요. (자동 로그인을 켜면 자동으로 이어갑니다)")
+            if (++relogins > 3) throw IllegalStateException("재로그인이 반복되어 중지했습니다. 다시 로그인하세요.")
+            emit(BookingEvent.Status("로그인이 만료되어 자동으로 다시 로그인합니다."))
+            if (!relogin()) throw IllegalStateException("자동 재로그인에 실패했습니다. 다시 로그인하세요.")
+            continue
+        } catch (e: Exception) {
+            if (!isTransient(e)) throw e
+            if (++failures > maxFailures) throw IllegalStateException("통신 오류가 계속되어 중지했습니다.\n${errorText(e)}")
+            val wait = backoffMs(failures)
+            emit(BookingEvent.Status("일시적인 오류 · ${wait / 1000}초 후 다시 시도합니다 ($failures/$maxFailures)\n${errorText(e)}"))
+            if (stop.await(wait)) return
+            continue
         }
         reservation?.let {
             stop.set()
             emit(BookingEvent.Reserved(it))
             return
         }
+        failures = 0
+        relogins = 0
         if (stop.isSet) return
         emit(BookingEvent.Trains(c, trains))
         val delay = retryDelayMs()

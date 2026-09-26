@@ -63,15 +63,88 @@ class BookingTest {
         assertTrue(events.any { it is BookingEvent.Status && it.text.contains("매진") })
     }
 
+    private fun run(stop: StopSignal = StopSignal(), relogin: (() -> Boolean)? = null, events: MutableList<BookingEvent> = mutableListOf()) =
+        autoReserve(client, cond, stop, { events += it }, relogin = relogin, now = { LocalDateTime.of(2030, 1, 1, 0, 0) },
+            retryDelayMs = { 0 }, pageDelayMs = 0, backoffMs = { 0 }, verifyDelayMs = 0)
+
     @Test
-    fun autoReserveDoesNotRetryUncertainErrors() {
-        server.enqueue(ok(searchJson(trainJson("1", "060000"), trainJson("9", "235000"))))
+    fun uncertainReserveErrorIsVerifiedAgainstReservations() {
+        server.enqueue(ok(searchJson(trainJson("101", "060000"), trainJson("9", "235000"))))
         server.enqueue(ok("{}").setResponseCode(500))
-        val e = assertFailsWith<IllegalStateException> {
-            autoReserve(client, cond, StopSignal(), {}, now = { LocalDateTime.of(2030, 1, 1, 0, 0) }, retryDelayMs = { 0 }, pageDelayMs = 0)
-        }
+        server.enqueue(ok(RESERVATIONS))
+        val events = mutableListOf<BookingEvent>()
+        run(events = events)
+        val r = events.last()
+        assertIs<BookingEvent.Reserved>(r)
+        assertEquals("PNR123", r.reservation.rsvId)
+    }
+
+    @Test
+    fun uncertainReserveErrorContinuesWhenNotReserved() {
+        server.enqueue(ok(searchJson(trainJson("101", "060000"), trainJson("9", "235000"))))
+        server.enqueue(ok("{}").setResponseCode(500))
+        server.enqueue(ok(NO_RESULTS)) // 예약내역 없음 = 예약 안 됨
+        server.enqueue(ok(searchJson(trainJson("101", "060000"), trainJson("9", "235000"))))
+        server.enqueue(ok(RESERVE_OK))
+        server.enqueue(ok(RESERVATIONS))
+        val events = mutableListOf<BookingEvent>()
+        run(events = events)
+        assertIs<BookingEvent.Reserved>(events.last())
+        assertEquals(6, server.requestCount)
+    }
+
+    @Test
+    fun stopsWhenReservationCannotBeVerified() {
+        server.enqueue(ok(searchJson(trainJson("101", "060000"), trainJson("9", "235000"))))
+        server.enqueue(ok("{}").setResponseCode(500))
+        server.enqueue(ok("{}").setResponseCode(500))
+        val e = assertFailsWith<IllegalStateException> { run() }
         assertTrue(e.message!!.startsWith("예약 실패"))
-        assertEquals(2, server.requestCount)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun expiredSessionReloginsAndContinues() {
+        server.enqueue(ok("""{"strResult":"FAIL","h_msg_cd":"P058","h_msg_txt":"로그인 필요"}"""))
+        server.enqueue(ok(searchJson(trainJson("101", "060000"), trainJson("9", "235000"))))
+        server.enqueue(ok(RESERVE_OK))
+        server.enqueue(ok(RESERVATIONS))
+        var relogins = 0
+        val events = mutableListOf<BookingEvent>()
+        run(relogin = { relogins++; true }, events = events)
+        assertEquals(1, relogins)
+        assertIs<BookingEvent.Reserved>(events.last())
+    }
+
+    @Test
+    fun expiredSessionWithoutAutoLoginStops() {
+        server.enqueue(ok("""{"strResult":"FAIL","h_msg_cd":"P058","h_msg_txt":"로그인 필요"}"""))
+        val e = assertFailsWith<IllegalStateException> { run() }
+        assertTrue(e.message!!.contains("로그인이 만료"))
+    }
+
+    @Test
+    fun transientSearchErrorsBackOffThenGiveUp() {
+        server.enqueue(ok("{}").setResponseCode(503))
+        server.enqueue(ok("<html>점검</html>"))
+        server.enqueue(ok(searchJson(trainJson("101", "060000"), trainJson("9", "235000"))))
+        server.enqueue(ok(RESERVE_OK))
+        server.enqueue(ok(RESERVATIONS))
+        val events = mutableListOf<BookingEvent>()
+        run(events = events)
+        assertIs<BookingEvent.Reserved>(events.last())
+        assertEquals(2, events.count { it is BookingEvent.Status && it.text.startsWith("일시적인 오류") })
+
+        repeat(7) { server.enqueue(ok("{}").setResponseCode(503)) }
+        val e = assertFailsWith<IllegalStateException> { run() }
+        assertTrue(e.message!!.startsWith("통신 오류가 계속"))
+    }
+
+    @Test
+    fun appUpdateRejectionIsNotRetried() {
+        server.enqueue(ok("""{"strResult":"FAIL","h_msg_cd":"WRR800029","h_msg_txt":"앱을 최신 버전으로 업데이트"}"""))
+        assertFailsWith<KorailException> { run() }
+        assertEquals(1, server.requestCount)
     }
 
     @Test
