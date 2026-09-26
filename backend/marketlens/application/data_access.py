@@ -131,6 +131,10 @@ class DataAccess:
                     out[t] = list(v)
         return out
 
+    def identity_on(self, t: str, d: date, session: Any = None) -> str:
+        """Storage key of the company that used ticker ``t`` on day ``d`` (a later reuse archives it)."""
+        return self.store.resolve(t, d, session) if self.store is not None else t
+
     def splits(self, t: str) -> list[Any]:
         """Stock splits recorded by the market sync (LIVE store); MOCK data is generated split-free."""
         return self.store.splits(t) if self.store is not None else []

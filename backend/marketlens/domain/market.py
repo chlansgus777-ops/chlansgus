@@ -28,6 +28,7 @@ class Security:
     active: bool = True
     listed_at: date | None = None
     delisted_at: date | None = None
+    cik: int | None = None  # SEC company identity (a ticker is only a label that can change or be reused)
 
     def was_listed_on(self, d: date) -> bool:
         if self.listed_at is not None and d < self.listed_at:

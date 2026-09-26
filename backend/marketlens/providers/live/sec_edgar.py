@@ -105,7 +105,8 @@ class SecEdgarProvider:
                 continue  # OTC / CBOE / unlisted — not in scope
             ticker = str(row[idx["ticker"]]).upper()
             self._cik[ticker] = int(row[idx["cik"]])
-            out.append(Security(ticker=ticker, company_name=str(row[idx["name"]]), exchange=exch, sector="Unknown", industry="Unknown", market_cap=None))
+            out.append(Security(ticker=ticker, company_name=str(row[idx["name"]]), exchange=exch, sector="Unknown", industry="Unknown", market_cap=None,
+                                cik=int(row[idx["cik"]])))
         return out
 
     def cik_for(self, ticker: str) -> int:

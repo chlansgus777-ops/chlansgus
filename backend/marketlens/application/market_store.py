@@ -37,36 +37,133 @@ class MarketStore:
 
     # ------------------------------------------------------------------ universe
     def sync_universe(self, current: Iterable[Security], today: date) -> dict[str, int]:
-        """Upsert today's listings; names that disappeared are marked delisted (kept in history)."""
+        """Upsert today's listings; names that disappeared are marked delisted (kept in history).
+
+        Security master (the SEC CIK is the identity, the ticker only a label):
+        - RENAME: a new ticker whose CIK belonged to a ticker that left the listing → the new row links its
+          ``predecessor`` (price history is read across the rename) and the old row gets ``successor`` /
+          ``renamed_on`` — a rename is not a delisting.
+        - REUSE: a known ticker now carries a different CIK → the old company's stored rows (bars,
+          fundamentals, splits, estimates, guidance) are archived under ``TICKER~CIK`` and the ticker starts
+          over as a new security; nothing of the old company is ever read as the new one's history.
+        - An unknown CIK (rows stored before the security master existed) is adopted, not judged."""
+        cur = list(current)
+        listed_now = {c.ticker for c in cur}
         seen: set[str] = set()
-        added = updated = delisted = 0
+        added = updated = delisted = renamed = reused = 0
         with self.sf() as s:
             existing = {r.ticker: r for r in s.scalars(select(SecurityRow).where(SecurityRow.mode == self.mode))}
-            for sec in current:
+            by_cik: dict[int, list[SecurityRow]] = {}
+            for r in existing.values():
+                if r.cik is not None and "~" not in r.ticker:
+                    by_cik.setdefault(r.cik, []).append(r)
+            for sec in cur:
                 seen.add(sec.ticker)
                 row = existing.get(sec.ticker)
+                if row is not None and row.cik is not None and sec.cik is not None and row.cik != sec.cik:
+                    self._archive_reused(s, row, sec, today)
+                    reused += 1
+                    row = existing[sec.ticker]  # the same row object, reset for the new company
                 if row is None:
-                    s.add(SecurityRow(ticker=sec.ticker, company_name=sec.company_name, exchange=sec.exchange.value, sector=sec.sector,
+                    olds = [r for r in by_cik.get(sec.cik, []) if sec.cik is not None and r.ticker not in listed_now and r.successor is None]
+                    old = max(olds, key=lambda r: r.updated_at) if olds else None
+                    new = SecurityRow(ticker=sec.ticker, company_name=sec.company_name, exchange=sec.exchange.value, sector=sec.sector,
                                       industry=sec.industry, market_cap=sec.market_cap, is_etf=sec.is_etf, is_adr=sec.is_adr,
                                       country_of_incorporation=sec.country_of_incorporation, currency=sec.currency, active=True,
-                                      listed_at=sec.listed_at, delisted_at=None, mode=self.mode, updated_at=_now(), first_seen=today))
-                    added += 1
+                                      listed_at=sec.listed_at, delisted_at=None, mode=self.mode, updated_at=_now(), first_seen=today, cik=sec.cik)
+                    if old is not None:  # RENAME: same company, new ticker
+                        new.predecessor = old.ticker
+                        new.listed_at = old.listed_at or old.first_seen
+                        # first_seen stays today: before the rename the universe lists the OLD ticker (one company, one row per day)
+                        new.sector, new.industry, new.sic, new.profile_updated_at = old.sector, old.industry, old.sic, old.profile_updated_at
+                        new.is_adr, new.country_of_incorporation = old.is_adr, old.country_of_incorporation
+                        new.shares_outstanding, new.shares_as_of, new.market_cap = old.shares_outstanding, old.shares_as_of, old.market_cap
+                        old.successor, old.renamed_on, old.active, old.delisted_at = sec.ticker, today, False, None
+                        s.add(TickerHistoryRow(mode=self.mode, event="RENAME", ticker=sec.ticker, cik=sec.cik, other_ticker=old.ticker, effective=today, observed_at=_now()))
+                        renamed += 1
+                    else:
+                        s.add(TickerHistoryRow(mode=self.mode, event="NEW", ticker=sec.ticker, cik=sec.cik, effective=today, observed_at=_now()))
+                        added += 1
+                    s.add(new)
+                    existing[sec.ticker] = new
                 else:
                     row.company_name, row.exchange = sec.company_name, sec.exchange.value
+                    if row.cik is None:
+                        row.cik = sec.cik
                     if sec.sector != "Unknown":
                         row.sector, row.industry = sec.sector, sec.industry
                     if sec.market_cap is not None:
                         row.market_cap = sec.market_cap
                     if not row.active:
-                        row.active, row.delisted_at = True, None  # relisted
+                        row.active, row.delisted_at = True, None  # relisted (same company)
                     row.updated_at = _now()
                     updated += 1
             for t, row in existing.items():
-                if t not in seen and row.active:
+                if t not in seen and row.active and "~" not in t:
                     row.active, row.delisted_at = False, today
                     delisted += 1
             s.commit()
-        return {"added": added, "updated": updated, "delisted": delisted}
+        return {"added": added, "updated": updated, "delisted": delisted, "renamed": renamed, "reused": reused}
+
+    def _archive_reused(self, s: Session, row: SecurityRow, sec: Security, today: date) -> None:
+        """The ticker now names another company: move the old company's rows to ``TICKER~OLDCIK``."""
+        from sqlalchemy import delete, update
+
+        arch = f"{row.ticker}~{row.cik}"[:16]
+        for model in (PriceBarRow, FundamentalVintageRow, CorporateActionRow, EstimateSnapshotRow, GuidanceRow):
+            s.execute(update(model).where(model.ticker == row.ticker).values(ticker=arch).execution_options(synchronize_session=False))
+        s.execute(delete(IngestionManifestRow).where(IngestionManifestRow.ticker == row.ticker, IngestionManifestRow.mode == self.mode))
+        s.add(SecurityRow(ticker=arch, company_name=row.company_name, exchange=row.exchange, sector=row.sector, industry=row.industry, market_cap=None,
+                          is_etf=row.is_etf, is_adr=row.is_adr, country_of_incorporation=row.country_of_incorporation, currency=row.currency, active=False,
+                          listed_at=row.listed_at, delisted_at=row.delisted_at or today, mode=self.mode, updated_at=_now(), first_seen=row.first_seen,
+                          sic=row.sic, cik=row.cik, shares_outstanding=row.shares_outstanding, shares_as_of=row.shares_as_of))
+        s.add(TickerHistoryRow(mode=self.mode, event="REUSE", ticker=row.ticker, cik=sec.cik, other_cik=row.cik, archived_as=arch, effective=today, observed_at=_now()))
+        row.company_name, row.cik, row.first_seen, row.listed_at, row.delisted_at, row.active = sec.company_name, sec.cik, today, sec.listed_at, None, True
+        row.sector, row.industry, row.sic, row.profile_updated_at = "Unknown", "Unknown", None, None
+        row.shares_outstanding = row.shares_as_of = row.market_cap = None
+        row.predecessor = row.successor = row.renamed_on = None
+        s.flush()
+
+    def resolve(self, ticker: str, on: date, session: Session | None = None) -> str:
+        """The storage key that held ``ticker``'s data on day ``on``: a ticker reused later by another company
+        resolves to the archive of the company that used it then. Pass the caller's open ``session`` (a nested
+        session would reset a shared in-memory SQLite connection)."""
+        if session is not None:
+            return self._resolve(session, ticker, on)
+        with self.sf() as s:
+            return self._resolve(s, ticker, on)
+
+    def _resolve(self, s: Session, ticker: str, on: date) -> str:
+        ev = s.scalars(select(TickerHistoryRow).where(TickerHistoryRow.mode == self.mode, TickerHistoryRow.ticker == ticker, TickerHistoryRow.event == "REUSE",
+                                                     TickerHistoryRow.effective > on).order_by(TickerHistoryRow.effective).limit(1)).first()
+        return ev.archived_as if ev is not None and ev.archived_as else ticker
+
+    def aliases(self, ticker: str) -> list[tuple[str, date | None, date | None]]:
+        """(storage ticker, from, until) covering one company across renames: its own rows, a predecessor's
+        rows before the rename and a successor's rows from the rename on."""
+        out: list[tuple[str, date | None, date | None]] = [(ticker, None, None)]
+        with self.sf() as s:
+            rows = {r.ticker: r for r in s.scalars(select(SecurityRow).where(SecurityRow.mode == self.mode, (SecurityRow.predecessor.is_not(None)) | (SecurityRow.successor.is_not(None))))}
+        seen = {ticker}
+        cur = rows.get(ticker)
+        while cur is not None and cur.predecessor and cur.predecessor not in seen:  # backwards
+            prev = rows.get(cur.predecessor)
+            until = prev.renamed_on if prev is not None else None
+            out.append((cur.predecessor, None, until))
+            seen.add(cur.predecessor)
+            cur = prev
+        cur = rows.get(ticker)
+        while cur is not None and cur.successor and cur.successor not in seen:  # forwards
+            out.append((cur.successor, cur.renamed_on, None))
+            seen.add(cur.successor)
+            cur = rows.get(cur.successor)
+        if len(out) > 1:  # own rows only within the own ticker's lifetime
+            own = rows.get(ticker)
+            first = next((a for a in out[1:] if a[2] is not None), None)
+            own_from = first[2] if first else None
+            own_until = own.renamed_on if own is not None and own.successor else None
+            out[0] = (ticker, own_from, own_until)
+        return out
 
     def securities(self, as_of: date | None = None) -> list[Security]:
         """Universe as of a date: listed (first seen) on or before it and not yet delisted."""
@@ -79,12 +176,14 @@ class MarketStore:
                     continue
                 if r.delisted_at is not None and r.delisted_at <= as_of:
                     continue
+                if r.renamed_on is not None and r.renamed_on <= as_of:
+                    continue  # listed under its successor ticker from then on
             elif not r.active:
                 continue
             out.append(Security(ticker=r.ticker, company_name=r.company_name, exchange=Exchange(r.exchange), sector=r.sector,
                                 industry=r.industry, market_cap=r.market_cap, is_etf=r.is_etf, is_adr=r.is_adr,
                                 country_of_incorporation=r.country_of_incorporation, currency=r.currency, active=r.active,
-                                listed_at=r.listed_at or r.first_seen, delisted_at=r.delisted_at))
+                                listed_at=r.listed_at or r.first_seen, delisted_at=r.delisted_at, cik=r.cik))
         return out
 
     def set_profile(self, ticker: str, profile: Mapping[str, Any]) -> None:
@@ -162,11 +261,16 @@ class MarketStore:
             return {d for (d,) in s.execute(select(PriceBarRow.day).where(PriceBarRow.source == source).distinct())}
 
     def bars(self, ticker: str, start: date, end: date) -> list[Bar]:
+        """Daily bars of one company, across ticker renames (security master)."""
+        by_day: dict[date, Bar] = {}
+        aliases = self.aliases(ticker)  # own session first: never nest sessions (shared SQLite connection)
         with self.sf() as s:
-            rows = s.scalars(select(PriceBarRow).where(PriceBarRow.ticker == ticker, PriceBarRow.day >= start, PriceBarRow.day <= end).order_by(PriceBarRow.day))
-            by_day: dict[date, Bar] = {}
-            for r in rows:
-                by_day.setdefault(r.day, Bar(r.day, r.open, r.high, r.low, r.close, r.volume))
+            for alias, frm, until in aliases:
+                q = select(PriceBarRow).where(PriceBarRow.ticker == alias, PriceBarRow.day >= max(start, frm or start), PriceBarRow.day <= end)
+                if until is not None:
+                    q = q.where(PriceBarRow.day < until)
+                for r in s.scalars(q.order_by(PriceBarRow.day)):
+                    by_day.setdefault(r.day, Bar(r.day, r.open, r.high, r.low, r.close, r.volume))
         return [by_day[d] for d in sorted(by_day)]
 
     def last_bars_all(self, start: date, end: date) -> dict[str, list[Bar]]:
@@ -175,6 +279,15 @@ class MarketStore:
         with self.sf() as s:
             for r in s.scalars(select(PriceBarRow).where(PriceBarRow.day >= start, PriceBarRow.day <= end)):
                 out.setdefault(r.ticker, {}).setdefault(r.day, Bar(r.day, r.open, r.high, r.low, r.close, r.volume))
+            renamed = [t for (t,) in s.execute(select(SecurityRow.ticker).where(SecurityRow.mode == self.mode, SecurityRow.predecessor.is_not(None)))]
+        for t in renamed:  # a renamed company keeps its price history (security master)
+            merged = dict(out.get(t, {}))
+            for alias, frm, until in self.aliases(t)[1:]:
+                for d, b in out.get(alias, {}).items():
+                    if (frm is None or d >= frm) and (until is None or d < until):
+                        merged.setdefault(d, b)
+            if merged:
+                out[t] = merged
         return {t: [d[k] for k in sorted(d)] for t, d in out.items()}
 
     # ------------------------------------------------------------------ coverage (readiness)
@@ -282,9 +395,14 @@ class MarketStore:
         return new
 
     def splits(self, ticker: str) -> list[SplitEvent]:
+        out: list[SplitEvent] = []
+        aliases = self.aliases(ticker)
         with self.sf() as s:
-            rows = list(s.scalars(select(CorporateActionRow).where(CorporateActionRow.ticker == ticker).order_by(CorporateActionRow.execution_date)))
-        return [SplitEvent(r.ticker, r.execution_date, r.split_from, r.split_to, r.source) for r in rows]
+            for alias, frm, until in aliases:
+                for r in s.scalars(select(CorporateActionRow).where(CorporateActionRow.ticker == alias)):
+                    if (frm is None or r.execution_date >= frm) and (until is None or r.execution_date < until):
+                        out.append(SplitEvent(ticker, r.execution_date, r.split_from, r.split_to, r.source))
+        return sorted(out, key=lambda e: (e.execution_date, e.source))
 
     def adjust_bars_for_splits(self, as_of: date) -> int:
         """Rescale stored bars that were retrieved *before* a split became effective (vendor-adjusted bars

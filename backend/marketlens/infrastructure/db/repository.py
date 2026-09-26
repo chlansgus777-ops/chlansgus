@@ -91,8 +91,11 @@ def recommendation_history(s: Session, ticker: str, limit: int = 20, mode: str |
 
 
 def delisted_on(s: Session, ticker: str, mode: str) -> date | None:
+    """Delisting date; a rename (the company continues under its successor ticker) is not a delisting."""
     row = s.get(SecurityRow, ticker)
-    return row.delisted_at if row is not None and row.mode == mode else None
+    if row is None or row.mode != mode or row.successor:
+        return None
+    return row.delisted_at
 
 
 def get_recommendation(s: Session, rec_id: int) -> RecommendationRow | None:

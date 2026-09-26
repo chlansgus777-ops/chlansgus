@@ -95,9 +95,10 @@ class EvaluationService:
                 todo = [h for h in HORIZONS if h not in have and is_mature(base_day, h, today)]
                 if not todo:
                     continue
-                bars = self._bars(rec.ticker, base_day - timedelta(days=10), today)
+                key = self.svc.data.identity_on(rec.ticker, base_day, s)  # the company recommended, even if the ticker was reused later
+                bars = self._bars(key, base_day - timedelta(days=10), today)
                 bench = self._bars(BENCH, base_day - timedelta(days=10), today)
-                delisted = self._delisted_on(s, rec.ticker)
+                delisted = self._delisted_on(s, key)
                 for h in todo:
                     o = forward_outcome(bars, base_day, h, today, delisted)
                     if o.value is None:
@@ -112,14 +113,14 @@ class EvaluationService:
         return written
 
     # ------------------------------------------------------------------ paper trading (one account)
-    def _signal(self, pos: PaperPositionRow, spread_bps: float | None, basis_date: date | None = None) -> PaperSignal:
+    def _signal(self, pos: PaperPositionRow, spread_bps: float | None, basis_date: date | None = None, key: str | None = None) -> PaperSignal:
         """The plan's price levels expressed on the share basis of the stored bars. Levels were set on the
         basis of the recommendation day; every split executed after it (and already applied to the bars,
         i.e. on/before ``basis_date``) divides them, so a 10:1 split does not turn a normal entry into a
         'gap below the stop' or a stop into an impossible level."""
         f = 1.0
         if basis_date is not None:
-            f = split_factor(self.svc.data.splits(pos.ticker), to_ny(pos.recommended_at).date(), basis_date)
+            f = split_factor(self.svc.data.splits(key or pos.ticker), to_ny(pos.recommended_at).date(), basis_date)
         return PaperSignal(pos.ticker, pos.recommended_at, pos.action, pos.score, pos.confidence, pos.stop / f, pos.target1 / f, pos.target2 / f,
                            pos.thesis, pos.model_version, pos.regime, pos.sector, spread_bps, pos.max_buy / f if pos.max_buy is not None else None)
 
@@ -146,10 +147,11 @@ class EvaluationService:
                     q = (rec.inputs or {}).get("quote") or {}
                     if q.get("bid") and q.get("ask") and q["ask"] >= q["bid"] > 0:
                         spread_bps = (q["ask"] - q["bid"]) / ((q["ask"] + q["bid"]) / 2) * 1e4
-                items.append(AccountItem(str(pos.id), self._signal(pos, spread_bps, to_ny(as_of).date()), tuple(exit_events_for(later, pos.recommended_at))))
+                key = self.svc.data.identity_on(pos.ticker, to_ny(pos.recommended_at).date(), s)
+                items.append(AccountItem(str(pos.id), self._signal(pos, spread_bps, to_ny(as_of).date(), key), tuple(exit_events_for(later, pos.recommended_at))))
                 if pos.ticker not in bars_by:
-                    start = min(to_ny(p.recommended_at).date() for p in positions if p.ticker == pos.ticker) - timedelta(days=5)
-                    bars_by[pos.ticker] = self._bars(pos.ticker, start, today)
+                    first = min(to_ny(p.recommended_at).date() for p in positions if p.ticker == pos.ticker)
+                    bars_by[pos.ticker] = self._bars(self.svc.data.identity_on(pos.ticker, first, s), first - timedelta(days=5), today)
             acct = simulate_account(items, bars_by, cfg, today)
             by_id = {str(p.id): p for p in positions}
             counts = {"opened": 0, "closed": 0, "open": 0, "skipped": 0, "pending": 0}
