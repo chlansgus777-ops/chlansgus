@@ -73,6 +73,7 @@ manual). Results so far (no API keys configured in the repository):
 |---|---|---|
 | 2026-09-26 | 36248705111 | FINRA 400 (sort without partition key — contract error found); SEC 403 (User-Agent without contact e-mail); others: no key |
 | 2026-09-26 | 36249539188 | **FINRA short interest VERIFIED** after the fix; SEC 403 (needs `SEC_USER_AGENT` = "name e-mail"); Finnhub, Polygon, FRED, Alpha Vantage: BLOCKED_BY_CREDENTIAL (no key) |
+| 2026-09-26 | 36249699094 | FINRA VERIFIED again, with the evidence printed: NVDA 294,225,803 and AAPL 128,753,092 shares short, settlement 2026-09-15. Other categories unchanged |
 
 To verify the rest: add the repository secrets `SEC_USER_AGENT` ("Your Name your@email"), `FINNHUB_API_KEY`,
 `POLYGON_API_KEY`, `FRED_API_KEY`, `ALPHAVANTAGE_API_KEY` (all free tiers) and run the workflow.
