@@ -147,6 +147,27 @@ class FinnhubProvider:
                                       revenue_actual=r.get("revenueActual"), revenue_consensus=r.get("revenueEstimate")))
         return sorted(out, key=lambda x: x.report_date)
 
+    def get_earnings_surprises(self, ticker: str) -> list[dict[str, Any]]:
+        """``/stock/earnings`` (free: the last four quarters): fiscal period end, actual and consensus EPS. It has
+        NO announcement date — the caller pairs each period with the SEC 8-K release time; the period end is
+        never used as a report date. (The free earnings calendar returned nothing for a symbol, even for the
+        last 35 days — live-verify run 36252886492.)"""
+        d = self._get("/stock/earnings", symbol=ticker)
+        if not isinstance(d, list):
+            raise ProviderDataError("earnings surprises: malformed payload")
+        out = []
+        for r in d:
+            try:
+                period = date.fromisoformat(str(r["period"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if r.get("actual") is None:
+                continue
+            out.append({"period": period, "actual": _num(r.get("actual")), "estimate": _num(r.get("estimate")), "quarter": r.get("quarter"), "year": r.get("year")})
+        if not out:
+            raise ProviderDataError(f"earnings surprises: {ticker} 응답 0건")
+        return sorted(out, key=lambda x: x["period"])
+
     def get_estimates(self, ticker: str, as_of: date) -> Any:
         raise NotSupported("추정치 리비전은 유료 데이터 → 미제공(MISSING)")
 

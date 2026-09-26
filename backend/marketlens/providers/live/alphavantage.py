@@ -56,6 +56,7 @@ def parse_estimates(payload: Any, ticker: str, observed_on: date) -> tuple[list[
     if not rows:
         raise NotSupported(f"{ticker}: Alpha Vantage 추정치 없음")
     issues: list[str] = []
+    skipped: list[str] = []
     out: list[EstimateObservation] = []
     for r in rows:
         if not isinstance(r, dict):
@@ -63,8 +64,9 @@ def parse_estimates(payload: Any, ticker: str, observed_on: date) -> tuple[list[
         missing = [f for f in EXPECTED_FIELDS if f not in r]
         if missing:
             issues.append(f"{r.get('horizon', '?')}: 필드 없음 {missing}")
-        horizon = str(r.get("horizon", "")).strip().lower()
+        horizon = " ".join(str(r.get("horizon", "")).replace("_", " ").lower().split())
         if horizon not in HORIZONS:
+            skipped.append(horizon or "?")
             continue
         ptype, _slot = HORIZONS[horizon]
         try:
@@ -83,6 +85,8 @@ def parse_estimates(payload: Any, ticker: str, observed_on: date) -> tuple[list[
             analyst_count=int(cnt) if cnt is not None else None, eps_high=_f(r.get("eps_estimate_high")), eps_low=_f(r.get("eps_estimate_low")),
             horizon=horizon, provider_revisions=revs, provider_timestamp=datetime.now(tz=timezone.utc),
         ))
+    if skipped:
+        issues.append(f"알 수 없는 horizon {len(skipped)}행 건너뜀: {sorted(set(skipped))[:4]}")
     return out, issues
 
 
@@ -101,6 +105,12 @@ class AlphaVantageEstimatesProvider:
             raise ProviderUnavailable("ALPHAVANTAGE_API_KEY 미설정")
         d = self._http.get_json("/query", {"function": "EARNINGS_ESTIMATES", "symbol": ticker, "apikey": self._key})
         obs, self.last_contract_issues = parse_estimates(d, ticker, observed_on)
+        if not obs:
+            # every row skipped (horizon words other than the documented ones): an empty success would store
+            # nothing and read back as "no estimates" — found by live-verify run 36252886492 ("OK", then MISSING)
+            rows = d.get("estimates") or []
+            keys = sorted(rows[0])[:12] if rows and isinstance(rows[0], dict) else []
+            raise ProviderDataError(f"alphavantage: {ticker} {len(rows)}행 모두 해석 불가 — {'; '.join(self.last_contract_issues[:3])}; 기대 horizon {sorted(HORIZONS)}; 첫 행 키 {keys}")
         return obs
 
     # the rest of the analyst contract is not offered here → the chain falls over / reports MISSING

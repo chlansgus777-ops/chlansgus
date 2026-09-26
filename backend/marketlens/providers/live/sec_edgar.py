@@ -124,6 +124,26 @@ class SecEdgarProvider:
         sub = self._data.get_json(f"/submissions/CIK{cik:010d}.json")
         return parse_submissions_profile(sub)
 
+    def earnings_release_times(self, ticker: str, since: date) -> list[datetime]:
+        """Acceptance times (UTC) of the 8-K filings with Item 2.02 (results of operations) since ``since``,
+        oldest first — the real announcement times of the earnings releases (one submissions request)."""
+        self._require()
+        cik = self.cik_for(ticker)
+        recent = self._data.get_json(f"/submissions/CIK{cik:010d}.json").get("filings", {}).get("recent", {})
+        out: list[datetime] = []
+        for i, form in enumerate(recent.get("form", [])):
+            if form != "8-K" or "2.02" not in str((recent.get("items") or [""] * (i + 1))[i]):
+                continue
+            try:
+                fdate = date.fromisoformat(recent["filingDate"][i])
+                if fdate < since:
+                    break  # newest first
+                acc = (recent.get("acceptanceDateTime") or [None] * (i + 1))[i]
+                out.append(datetime.fromisoformat(str(acc).replace("Z", "+00:00")) if acc else datetime.combine(fdate, datetime.min.time(), tzinfo=timezone.utc))
+            except (KeyError, IndexError, ValueError):
+                continue
+        return sorted(out)
+
     def earnings_releases(self, ticker: str, since: date, max_n: int = 2) -> list[dict[str, Any]]:
         """Recent 8-K filings with Item 2.02 (results of operations) and their Exhibit 99 press release.
         Returns [{accession, filed_at (acceptance time, UTC), url, text}] newest first."""
