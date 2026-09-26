@@ -39,90 +39,135 @@ class MarketStore:
     def sync_universe(self, current: Iterable[Security], today: date) -> dict[str, int]:
         """Upsert today's listings; names that disappeared are marked delisted (kept in history).
 
-        Security master (the SEC CIK is the identity, the ticker only a label):
-        - RENAME: a new ticker whose CIK belonged to a ticker that left the listing → the new row links its
-          ``predecessor`` (price history is read across the rename) and the old row gets ``successor`` /
-          ``renamed_on`` — a rename is not a delisting.
-        - REUSE: a known ticker now carries a different CIK → the old company's stored rows (bars,
-          fundamentals, splits, estimates, guidance) are archived under ``TICKER~CIK`` and the ticker starts
-          over as a new security; nothing of the old company is ever read as the new one's history.
-        - An unknown CIK (rows stored before the security master existed) is adopted, not judged."""
+        Security master (the SEC CIK is the identity, the ticker only a label). Two passes, so the result does
+        not depend on the order of the listing file:
+        1. REUSE: a known ticker now carries a different CIK → the old company's stored rows (bars,
+           fundamentals, splits, estimates, guidance) move to an archive key ``TICKER~CIK`` together with its
+           security row and its rename links; the ticker row starts over for the new company.
+        2. For every listed name without its own row (or whose row was just reset): if its CIK belonged to a
+           row that is no longer listed (an old ticker, or an archive created in pass 1), the two are linked —
+           RENAME when the old name was still listed until now (a rename is not a delisting), RELIST when the
+           old name had been delisted earlier (its delisting stays in history). Otherwise NEW.
+        An unknown CIK (rows stored before the security master existed) is adopted, not judged."""
         cur = list(current)
         listed_now = {c.ticker for c in cur}
         seen: set[str] = set()
-        added = updated = delisted = renamed = reused = 0
+        n = {"added": 0, "updated": 0, "delisted": 0, "renamed": 0, "relisted": 0, "reused": 0}
         with self.sf() as s:
             existing = {r.ticker: r for r in s.scalars(select(SecurityRow).where(SecurityRow.mode == self.mode))}
-            by_cik: dict[int, list[SecurityRow]] = {}
-            for r in existing.values():
-                if r.cik is not None and "~" not in r.ticker:
-                    by_cik.setdefault(r.cik, []).append(r)
+            reset: set[str] = set()
+            # pass 1 — a ticker that changed hands
+            for sec in cur:
+                row = existing.get(sec.ticker)
+                if row is not None and row.cik is not None and sec.cik is not None and row.cik != sec.cik:
+                    arch = self._archive_reused(s, row, sec, today, existing)
+                    existing[arch.ticker] = arch
+                    reset.add(sec.ticker)
+                    n["reused"] += 1
+            # pass 2 — links, new names, updates
             for sec in cur:
                 seen.add(sec.ticker)
                 row = existing.get(sec.ticker)
-                if row is not None and row.cik is not None and sec.cik is not None and row.cik != sec.cik:
-                    self._archive_reused(s, row, sec, today)
-                    reused += 1
-                    row = existing[sec.ticker]  # the same row object, reset for the new company
-                if row is None:
-                    olds = [r for r in by_cik.get(sec.cik, []) if sec.cik is not None and r.ticker not in listed_now and r.successor is None]
-                    old = max(olds, key=lambda r: r.updated_at) if olds else None
-                    new = SecurityRow(ticker=sec.ticker, company_name=sec.company_name, exchange=sec.exchange.value, sector=sec.sector,
-                                      industry=sec.industry, market_cap=sec.market_cap, is_etf=sec.is_etf, is_adr=sec.is_adr,
-                                      country_of_incorporation=sec.country_of_incorporation, currency=sec.currency, active=True,
-                                      listed_at=sec.listed_at, delisted_at=None, mode=self.mode, updated_at=_now(), first_seen=today, cik=sec.cik)
-                    if old is not None:  # RENAME: same company, new ticker
-                        new.predecessor = old.ticker
-                        new.listed_at = old.listed_at or old.first_seen
-                        # first_seen stays today: before the rename the universe lists the OLD ticker (one company, one row per day)
-                        new.sector, new.industry, new.sic, new.profile_updated_at = old.sector, old.industry, old.sic, old.profile_updated_at
-                        new.is_adr, new.country_of_incorporation = old.is_adr, old.country_of_incorporation
-                        new.shares_outstanding, new.shares_as_of, new.market_cap = old.shares_outstanding, old.shares_as_of, old.market_cap
-                        old.successor, old.renamed_on, old.active, old.delisted_at = sec.ticker, today, False, None
-                        s.add(TickerHistoryRow(mode=self.mode, event="RENAME", ticker=sec.ticker, cik=sec.cik, other_ticker=old.ticker, effective=today, observed_at=_now()))
-                        renamed += 1
-                    else:
+                if row is None or sec.ticker in reset:
+                    src = self._link_source(existing, sec, listed_now)
+                    if row is None:
+                        row = SecurityRow(ticker=sec.ticker, company_name=sec.company_name, exchange=sec.exchange.value, sector=sec.sector,
+                                          industry=sec.industry, market_cap=sec.market_cap, is_etf=sec.is_etf, is_adr=sec.is_adr,
+                                          country_of_incorporation=sec.country_of_incorporation, currency=sec.currency, active=True,
+                                          listed_at=sec.listed_at, delisted_at=None, mode=self.mode, updated_at=_now(), first_seen=today, cik=sec.cik)
+                        s.add(row)
+                        existing[sec.ticker] = row
+                    if src is not None:
+                        relist = src.delisted_at is not None and src.delisted_at < today
+                        row.predecessor = src.ticker
+                        # first_seen stays today: before this day the universe lists the OLD name (one row per company per day)
+                        row.listed_at = today if relist else (src.listed_at or src.first_seen)
+                        row.sector, row.industry, row.sic, row.profile_updated_at = src.sector, src.industry, src.sic, src.profile_updated_at
+                        row.is_adr, row.country_of_incorporation = src.is_adr, src.country_of_incorporation
+                        row.shares_outstanding, row.shares_as_of = src.shares_outstanding, src.shares_as_of
+                        if not relist:
+                            row.market_cap = src.market_cap
+                        src.successor, src.renamed_on, src.active = sec.ticker, today, False
+                        if not relist:
+                            src.delisted_at = None  # a rename is not a delisting
+                        ev = "RELIST" if relist else "RENAME"
+                        s.add(TickerHistoryRow(mode=self.mode, event=ev, ticker=sec.ticker, cik=sec.cik, other_ticker=src.ticker, effective=today, observed_at=_now()))
+                        n["relisted" if relist else "renamed"] += 1
+                    elif sec.ticker not in reset:
                         s.add(TickerHistoryRow(mode=self.mode, event="NEW", ticker=sec.ticker, cik=sec.cik, effective=today, observed_at=_now()))
-                        added += 1
-                    s.add(new)
-                    existing[sec.ticker] = new
-                else:
-                    row.company_name, row.exchange = sec.company_name, sec.exchange.value
-                    if row.cik is None:
-                        row.cik = sec.cik
-                    if sec.sector != "Unknown":
-                        row.sector, row.industry = sec.sector, sec.industry
-                    if sec.market_cap is not None:
-                        row.market_cap = sec.market_cap
-                    if not row.active:
-                        row.active, row.delisted_at = True, None  # relisted (same company)
-                    row.updated_at = _now()
-                    updated += 1
+                        n["added"] += 1
+                    continue
+                row.company_name, row.exchange = sec.company_name, sec.exchange.value
+                if row.cik is None:
+                    row.cik = sec.cik
+                if sec.sector != "Unknown":
+                    row.sector, row.industry = sec.sector, sec.industry
+                if sec.market_cap is not None:
+                    row.market_cap = sec.market_cap
+                if not row.active:
+                    row.active, row.delisted_at = True, None  # relisted under the same ticker (same company)
+                    row.successor = row.renamed_on = None
+                row.updated_at = _now()
+                n["updated"] += 1
             for t, row in existing.items():
                 if t not in seen and row.active and "~" not in t:
                     row.active, row.delisted_at = False, today
-                    delisted += 1
+                    n["delisted"] += 1
             s.commit()
-        return {"added": added, "updated": updated, "delisted": delisted, "renamed": renamed, "reused": reused}
+        return n
 
-    def _archive_reused(self, s: Session, row: SecurityRow, sec: Security, today: date) -> None:
-        """The ticker now names another company: move the old company's rows to ``TICKER~OLDCIK``."""
+    @staticmethod
+    def _link_source(existing: Mapping[str, SecurityRow], sec: Security, listed_now: set[str]) -> SecurityRow | None:
+        """The unlisted row of the same CIK this listing continues (most recently active first)."""
+        if sec.cik is None:
+            return None
+        cands = [r for r in existing.values() if r.cik == sec.cik and r.ticker != sec.ticker and r.ticker not in listed_now and r.successor is None]
+        if not cands:
+            return None
+        return max(cands, key=lambda r: (r.active, r.delisted_at or date.max, r.updated_at))
+
+    def _archive_reused(self, s: Session, row: SecurityRow, sec: Security, today: date, existing: Mapping[str, SecurityRow]) -> SecurityRow:
+        """The ticker now names another company: move the old company's rows to an archive key (``TICKER~CIK``,
+        ``TICKER~CIK.2`` … when the ticker changed hands before) and keep its rename links pointing at it."""
         from sqlalchemy import delete, update
 
-        arch = f"{row.ticker}~{row.cik}"[:16]
+        base = f"{row.ticker}~{row.cik}"
+        arch, k = base, 1
+        while arch in existing or s.get(SecurityRow, arch) is not None:
+            k += 1
+            arch = f"{base}.{k}"
         for model in (PriceBarRow, FundamentalVintageRow, CorporateActionRow, EstimateSnapshotRow, GuidanceRow):
             s.execute(update(model).where(model.ticker == row.ticker).values(ticker=arch).execution_options(synchronize_session=False))
         s.execute(delete(IngestionManifestRow).where(IngestionManifestRow.ticker == row.ticker, IngestionManifestRow.mode == self.mode))
-        s.add(SecurityRow(ticker=arch, company_name=row.company_name, exchange=row.exchange, sector=row.sector, industry=row.industry, market_cap=None,
-                          is_etf=row.is_etf, is_adr=row.is_adr, country_of_incorporation=row.country_of_incorporation, currency=row.currency, active=False,
-                          listed_at=row.listed_at, delisted_at=row.delisted_at or today, mode=self.mode, updated_at=_now(), first_seen=row.first_seen,
-                          sic=row.sic, cik=row.cik, shares_outstanding=row.shares_outstanding, shares_as_of=row.shares_as_of))
+        # the old company: delisted when its name was still in use until now; a renamed-away or earlier delisted
+        # company keeps its own record
+        delisted = row.delisted_at if row.delisted_at is not None else (None if row.successor else today)
+        a = SecurityRow(ticker=arch, company_name=row.company_name, exchange=row.exchange, sector=row.sector, industry=row.industry, market_cap=None,
+                        is_etf=row.is_etf, is_adr=row.is_adr, country_of_incorporation=row.country_of_incorporation, currency=row.currency, active=False,
+                        listed_at=row.listed_at, delisted_at=delisted, mode=self.mode, updated_at=_now(), first_seen=row.first_seen,
+                        sic=row.sic, cik=row.cik, shares_outstanding=row.shares_outstanding, shares_as_of=row.shares_as_of,
+                        predecessor=row.predecessor, successor=row.successor, renamed_on=row.renamed_on, profile_updated_at=row.profile_updated_at)
+        s.add(a)
+        for other in existing.values():  # rename links now point at the archive
+            if other is row:
+                continue
+            if other.predecessor == row.ticker:
+                other.predecessor = arch
+            if other.successor == row.ticker:
+                other.successor = arch
         s.add(TickerHistoryRow(mode=self.mode, event="REUSE", ticker=row.ticker, cik=sec.cik, other_cik=row.cik, archived_as=arch, effective=today, observed_at=_now()))
         row.company_name, row.cik, row.first_seen, row.listed_at, row.delisted_at, row.active = sec.company_name, sec.cik, today, sec.listed_at, None, True
         row.sector, row.industry, row.sic, row.profile_updated_at = "Unknown", "Unknown", None, None
         row.shares_outstanding = row.shares_as_of = row.market_cap = None
         row.predecessor = row.successor = row.renamed_on = None
         s.flush()
+        return a
+
+    def is_active(self, ticker: str) -> bool | None:
+        """True / False for a known security, None when the ticker is not in the security master."""
+        with self.sf() as s:
+            row = s.get(SecurityRow, ticker)
+            return None if row is None or row.mode != self.mode else bool(row.active)
 
     def resolve(self, ticker: str, on: date, session: Session | None = None) -> str:
         """The storage key that held ``ticker``'s data on day ``on``: a ticker reused later by another company
@@ -148,12 +193,14 @@ class MarketStore:
         cur = rows.get(ticker)
         while cur is not None and cur.predecessor and cur.predecessor not in seen:  # backwards
             prev = rows.get(cur.predecessor)
+            if prev is not None and prev.delisted_at is not None:
+                break  # RELIST after a delisting: the price history does not run through the gap
             until = prev.renamed_on if prev is not None else None
             out.append((cur.predecessor, None, until))
             seen.add(cur.predecessor)
             cur = prev
         cur = rows.get(ticker)
-        while cur is not None and cur.successor and cur.successor not in seen:  # forwards
+        while cur is not None and cur.successor and cur.successor not in seen and cur.delisted_at is None:  # forwards
             out.append((cur.successor, cur.renamed_on, None))
             seen.add(cur.successor)
             cur = rows.get(cur.successor)
@@ -294,7 +341,7 @@ class MarketStore:
     def coverage_stats(self, today: date, min_market_cap: float) -> dict[str, Any]:
         """Aggregate counts for the scanner-readiness gate (SQL aggregates, no row loading)."""
         with self.sf() as s:
-            active = list(s.execute(select(SecurityRow.ticker, SecurityRow.market_cap, SecurityRow.sector, SecurityRow.exchange)
+            active = list(s.execute(select(SecurityRow.ticker, SecurityRow.market_cap, SecurityRow.sector, SecurityRow.exchange, SecurityRow.is_adr, SecurityRow.country_of_incorporation)
                                     .where(SecurityRow.mode == self.mode, SecurityRow.active.is_(True))).all())
             counts = dict(s.execute(select(PriceBarRow.ticker, func.count(func.distinct(PriceBarRow.day)))
                                     .where(PriceBarRow.day >= today - timedelta(days=400), PriceBarRow.day <= today).group_by(PriceBarRow.ticker)).all())
@@ -314,9 +361,11 @@ class MarketStore:
             "bars_240": sum(1 for a in listed if counts.get(a[0], 0) >= 240),
             "large_with_sector": sum(1 for a in big if a[2] not in (None, "", "Unknown")),
             "large_with_fundamentals": sum(1 for a in big if a[0] in fund),
-            # large names with no quarterly us-gaap facts at all (20-F / IFRS filers) — not "missing"
-            "large_fund_not_supported": sum(1 for a in big if a[0] not in fund and man.get(a[0]) == "NOT_SUPPORTED"),
+            # only CONFIRMED foreign issuers (SEC profile: 20-F/40-F filer) without quarterly us-gaap facts are left out
+            # of the coverage denominator; a domestic filer the parser cannot read is missing coverage
+            "large_fund_not_supported": sum(1 for a in big if a[0] not in fund and man.get(a[0]) == "NOT_SUPPORTED" and (a[4] or (a[5] or "US") != "US")),
             "large_fund_failed": sum(1 for a in big if a[0] not in fund and man.get(a[0]) in ("FAILED", "RATE_LIMITED")),
+            "large_fund_parse_gap": sum(1 for a in big if a[0] not in fund and (man.get(a[0]) == "PARSE_GAP" or (man.get(a[0]) == "NOT_SUPPORTED" and not (a[4] or (a[5] or "US") != "US")))),
             "market_days": int(days),
             "estimate_history_days": (today - est_first).days if est_first else 0,
         }
@@ -327,6 +376,7 @@ class MarketStore:
 
     # ------------------------------------------------------------------ ingestion manifest
     RETRY_NOT_SUPPORTED = timedelta(days=30)  # e.g. a 20-F filer has no quarterly us-gaap facts
+    RETRY_PARSE_GAP = timedelta(days=7)  # tags the parser does not read: retried after a parser update / new filing
     RETRY_MAX = timedelta(hours=24)
 
     def ingestion(self, dataset: str, ticker: str) -> IngestionManifestRow | None:
@@ -357,7 +407,8 @@ class MarketStore:
             else:
                 row.attempts = (row.attempts or 0) + 1
                 row.error = (error or status)[:300]
-                wait = self.RETRY_NOT_SUPPORTED if status == "NOT_SUPPORTED" else min(self.RETRY_MAX, timedelta(hours=2 ** (row.attempts - 1)))
+                wait = (self.RETRY_NOT_SUPPORTED if status == "NOT_SUPPORTED" else self.RETRY_PARSE_GAP if status == "PARSE_GAP"
+                        else min(self.RETRY_MAX, timedelta(hours=2 ** min(row.attempts - 1, 5))))
                 row.next_attempt_at = now + wait
             s.commit()
 
@@ -409,23 +460,35 @@ class MarketStore:
         fetched after the split are already on the new basis). Each split is applied exactly once and only
         once it has actually executed (``execution_date <= as_of``, the New York calendar date): an
         announced future split must not change today's prices. A split reported by two sources for the
-        same ticker and day is applied once."""
+        same ticker and day is applied once. The split applies to the whole company: bars stored under an
+        earlier ticker (before a rename) are rescaled too, so the rename day shows no fake price jump."""
+        with self.sf() as s:
+            pending = [(r.ticker, r.execution_date, r.source) for r in s.scalars(
+                select(CorporateActionRow).where(CorporateActionRow.bars_adjusted_at.is_(None), CorporateActionRow.execution_date <= as_of)
+                .order_by(CorporateActionRow.execution_date))]
+        spans = {t: self.aliases(t) for t in {p[0] for p in pending}}  # read first: never nest sessions
         n = 0
         with self.sf() as s:
-            pending = list(s.scalars(select(CorporateActionRow).where(CorporateActionRow.bars_adjusted_at.is_(None), CorporateActionRow.execution_date <= as_of)
-                                     .order_by(CorporateActionRow.execution_date)))
-            for ev in pending:
-                if ev.split_from <= 0 or ev.split_to <= 0:
+            for key in pending:
+                ev = s.get(CorporateActionRow, key)
+                if ev is None or ev.bars_adjusted_at is not None:
                     continue
-                twin = s.scalars(select(CorporateActionRow.source).where(CorporateActionRow.ticker == ev.ticker, CorporateActionRow.execution_date == ev.execution_date,
-                                                                        CorporateActionRow.bars_adjusted_at.is_not(None)).limit(1)).first()
-                if twin is None:
-                    ratio = ev.split_to / ev.split_from
-                    # the split takes effect at the New York start of its execution day
-                    effective = datetime.combine(ev.execution_date, datetime.min.time(), tzinfo=NY).astimezone(UTC)
-                    for b in s.scalars(select(PriceBarRow).where(PriceBarRow.ticker == ev.ticker, PriceBarRow.day < ev.execution_date, PriceBarRow.retrieved_at < effective)):
-                        b.open, b.high, b.low, b.close, b.volume = b.open / ratio, b.high / ratio, b.low / ratio, b.close / ratio, b.volume * ratio
-                        n += 1
+                if ev.split_from > 0 and ev.split_to > 0:
+                    twin = s.scalars(select(CorporateActionRow.source).where(CorporateActionRow.ticker == ev.ticker, CorporateActionRow.execution_date == ev.execution_date,
+                                                                            CorporateActionRow.bars_adjusted_at.is_not(None)).limit(1)).first()
+                    if twin is None:
+                        ratio = ev.split_to / ev.split_from
+                        # the split takes effect at the New York start of its execution day
+                        effective = datetime.combine(ev.execution_date, datetime.min.time(), tzinfo=NY).astimezone(UTC)
+                        for alias, frm, until in spans.get(ev.ticker, [(ev.ticker, None, None)]):
+                            q = select(PriceBarRow).where(PriceBarRow.ticker == alias, PriceBarRow.day < ev.execution_date, PriceBarRow.retrieved_at < effective)
+                            if frm is not None:
+                                q = q.where(PriceBarRow.day >= frm)
+                            if until is not None:
+                                q = q.where(PriceBarRow.day < until)
+                            for b in s.scalars(q):
+                                b.open, b.high, b.low, b.close, b.volume = b.open / ratio, b.high / ratio, b.low / ratio, b.close / ratio, b.volume * ratio
+                                n += 1
                 ev.bars_adjusted_at = _now()
                 s.flush()
             s.commit()

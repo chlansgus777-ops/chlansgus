@@ -79,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
     rp = sub.add_parser("replay", help="replay a stored recommendation from its snapshot")
     rp.add_argument("rec_id", type=int)
     sub.add_parser("migrate", help="apply database migrations")
+    bk = sub.add_parser("backup", help="consistent copy of the SQLite database (safe while the app runs)")
+    bk.add_argument("dest")
     sub.add_parser("sync", help="LIVE only: refresh the local point-in-time store from free sources")
     sub.add_parser("live-verify", help="LIVE only: smoke-test every free provider (NVDA AAPL MSFT JPM XOM AMZN TSM)")
     sim = sub.add_parser("simulate", help="MOCK only: run weekly scans over past weeks to populate evaluation data")
@@ -88,6 +90,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "serve":
         return _serve(settings, args.host, args.port)
+    if args.cmd == "backup":
+        from pathlib import Path
+
+        from marketlens.infrastructure.db.session import backup_sqlite
+
+        try:
+            print("backup", backup_sqlite(settings.database_url, Path(args.dest)))
+        except (ValueError, FileExistsError, RuntimeError) as e:
+            print(str(e), file=sys.stderr)
+            return 2
+        return 0
     if args.cmd == "migrate":
         from marketlens.infrastructure.db.session import migrate
 

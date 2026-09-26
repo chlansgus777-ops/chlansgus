@@ -143,3 +143,37 @@ def test_readiness_requires_fundamentals_coverage_excluding_20f_filers():
     # 10 of the 50 are 20-F filers without quarterly XBRL: 40/40 is complete coverage, not 80%
     full = evaluate("LIVE", reg, {**base, "large_with_fundamentals": 40, "large_fund_not_supported": 10, "large_fund_failed": 0}, sync)
     assert full.progress["fundamentals"] == 1.0 and not any("분기 재무" in r for r in full.scanner_reasons)
+
+
+def test_backup_is_consistent_while_the_database_is_being_written(tmp_path):
+    """Evaluation 3 R4: copying only marketlens.db (without -wal) during a sync corrupted 3 of 194 copies.
+    The backup command uses SQLite's online backup API and checks the copy."""
+    import sqlite3
+    import threading
+
+    from marketlens.infrastructure.db.session import backup_sqlite, checkpoint_sqlite
+
+    st = _store(tmp_path)
+    url = f"sqlite:///{(tmp_path / 's.db').as_posix()}"
+    stop = threading.Event()
+
+    def writer() -> None:
+        i = 0
+        while not stop.is_set():
+            st.save_bars(f"T{i % 50}", [Bar(date(2026, 1, 1) + timedelta(days=i % 300), 1, 1, 1, 1, 1)], "polygon")
+            i += 1
+
+    th = threading.Thread(target=writer)
+    th.start()
+    try:
+        outs = [backup_sqlite(url, tmp_path / f"b{k}.db") for k in range(15)]
+    finally:
+        stop.set()
+        th.join()
+    for o in outs:
+        with sqlite3.connect(o) as c:
+            assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    with pytest.raises(FileExistsError):
+        backup_sqlite(url, outs[0])  # never overwrites
+    checkpoint_sqlite(url)
+    assert not (tmp_path / "s.db-wal").exists() or (tmp_path / "s.db-wal").stat().st_size == 0

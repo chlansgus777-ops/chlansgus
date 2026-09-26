@@ -121,7 +121,8 @@ class EvaluationService:
         f = 1.0
         if basis_date is not None:
             f = split_factor(self.svc.data.splits(key or pos.ticker), to_ny(pos.recommended_at).date(), basis_date)
-        return PaperSignal(pos.ticker, pos.recommended_at, pos.action, pos.score, pos.confidence, pos.stop / f, pos.target1 / f, pos.target2 / f,
+        # the signal is keyed by the COMPANY (identity key), not the ticker label: a reused ticker is another company
+        return PaperSignal(key or pos.ticker, pos.recommended_at, pos.action, pos.score, pos.confidence, pos.stop / f, pos.target1 / f, pos.target2 / f,
                            pos.thesis, pos.model_version, pos.regime, pos.sector, spread_bps, pos.max_buy / f if pos.max_buy is not None else None)
 
     def update_paper(self, as_of: datetime | None = None) -> dict[str, Any]:
@@ -131,6 +132,7 @@ class EvaluationService:
         cfg: PaperConfig = self.svc.base_cfg.paper
         with self.svc.sf() as s:
             positions = [p for p in repo.all_paper_positions(s) if p.recommended_at <= as_of]
+            keys = {p.id: self.svc.data.identity_on(p.ticker, to_ny(p.recommended_at).date(), s) for p in positions}
             items: list[AccountItem] = []
             bars_by: dict[str, list[Bar]] = {}
             committee_skips: list[PaperPositionRow] = []
@@ -147,11 +149,13 @@ class EvaluationService:
                     q = (rec.inputs or {}).get("quote") or {}
                     if q.get("bid") and q.get("ask") and q["ask"] >= q["bid"] > 0:
                         spread_bps = (q["ask"] - q["bid"]) / ((q["ask"] + q["bid"]) / 2) * 1e4
-                key = self.svc.data.identity_on(pos.ticker, to_ny(pos.recommended_at).date(), s)
+                key = keys[pos.id]
+                # later recommendations under the same ticker count only if they are about the same company
+                later = [r for r in later if self.svc.data.identity_on(r.ticker, rec_session_day(r.as_of), s) == key]
                 items.append(AccountItem(str(pos.id), self._signal(pos, spread_bps, to_ny(as_of).date(), key), tuple(exit_events_for(later, pos.recommended_at))))
-                if pos.ticker not in bars_by:
-                    first = min(to_ny(p.recommended_at).date() for p in positions if p.ticker == pos.ticker)
-                    bars_by[pos.ticker] = self._bars(self.svc.data.identity_on(pos.ticker, first, s), first - timedelta(days=5), today)
+                if key not in bars_by:
+                    first = min(to_ny(p.recommended_at).date() for p in positions if keys[p.id] == key)
+                    bars_by[key] = self._bars(key, first - timedelta(days=5), today)
             acct = simulate_account(items, bars_by, cfg, today)
             by_id = {str(p.id): p for p in positions}
             counts = {"opened": 0, "closed": 0, "open": 0, "skipped": 0, "pending": 0}

@@ -57,7 +57,7 @@ export function committeeFor(data: SD | null, ticker: string): CommitteeResult |
   return data.committee;
 }
 
-export interface LiveStatus { id: number; status: string | null; reason: string | null }
+export interface LiveStatus { id: number; status: string | null; reason: string | null; newer?: number }
 
 /** "현재 유효" is a statement about NOW: while the page stays open the stored recommendation is re-judged
  * every minute (the server re-checks age, session and the cached quote against the plan). A plain read
@@ -70,7 +70,11 @@ export function useLiveStatus(ticker: string, recId: number | undefined, everyMs
     const timer = window.setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       api.get<SD>(`/stocks/${ticker}`).then((x) => {
-        if (alive && x.recommendation.id === recId) setLive({ id: recId, status: x.recommendation.current_status ?? null, reason: x.recommendation.current_status_reason ?? null });
+        if (!alive) return;
+        if (x.recommendation.id === recId) setLive({ id: recId, status: x.recommendation.current_status ?? null, reason: x.recommendation.current_status_reason ?? null });
+        // a newer analysis of this stock exists: the plan on screen is no longer the current one, and nobody
+        // re-judges it any more — never leave it showing "현재 유효"
+        else setLive({ id: recId, status: "SUPERSEDED", reason: `더 최근 분석(#${x.recommendation.id})이 있습니다 — 새로고침하면 최신 분석을 봅니다`, newer: x.recommendation.id });
       }).catch(() => undefined);
     }, everyMs);
     return () => { alive = false; window.clearInterval(timer); };
@@ -158,7 +162,7 @@ function StockDetail({ ticker }: { ticker: string }) {
         {note && <div className="explain">{note}</div>}
         <Err error={actionErr} />
       </section>
-      {rec.current_status && rec.current_status !== "CURRENT" && <Notice tone="warn">{STATUS_INFO[rec.current_status]?.label}: {rec.current_status_reason}</Notice>}
+      {rec.current_status && rec.current_status !== "CURRENT" && <Notice tone="warn">{STATUS_INFO[rec.current_status]?.label}: {rec.current_status_reason}{live?.newer !== undefined && <> <button onClick={d.reload}>최신 분석 보기</button></>}</Notice>}
       {a.mode === "MOCK" && <Notice tone="neg">모의 데이터(MOCK)로 만든 분석입니다. 실제 투자 판단에 사용하지 마세요.</Notice>}
       {finalAction === "DATA INSUFFICIENT" && (
         <Card title="지금은 판단하지 않습니다" icon="◌" tone="warn" testId="data-insufficient">

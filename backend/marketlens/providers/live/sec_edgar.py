@@ -352,6 +352,9 @@ def _pick_concept(gaap: dict[str, Any], names: tuple[str, ...], unit_pref: tuple
     return []
 
 
+QUARTERLY_FORMS = ("10-Q", "10-K", "10-Q/A", "10-K/A")
+
+
 def _ytd_to_quarters(items: list[dict[str, Any]]) -> dict[date, list[tuple[float, date]]]:
     """Cash-flow items are reported year-to-date; quarter = YTD(n) − YTD(n−1) within one fiscal year.
 
@@ -364,7 +367,7 @@ def _ytd_to_quarters(items: list[dict[str, Any]]) -> dict[date, list[tuple[float
     caller records as a revision (point in time: invisible before F)."""
     groups: dict[str, list[tuple[date, float, date]]] = defaultdict(list)
     for it in items:
-        if it.get("form") not in ("10-Q", "10-K") or not it.get("start"):
+        if it.get("form") not in QUARTERLY_FORMS or not it.get("start"):
             continue
         groups[it["start"]].append((date.fromisoformat(it["end"]), float(it["val"]), date.fromisoformat(it["filed"])))
     out: dict[date, list[tuple[float, date]]] = defaultdict(list)
@@ -423,7 +426,8 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
         return max(vs, key=lambda o: o[0])[1] if vs else per_period[end][field_name]
 
     def earliest(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return sorted((it for it in items if it.get("form") in ("10-Q", "10-K")), key=lambda it: it.get("filed", ""))
+        # amendments (10-Q/A, 10-K/A) are later vintages of the same period: recorded as revisions, never overwriting
+        return sorted((it for it in items if it.get("form") in QUARTERLY_FORMS), key=lambda it: it.get("filed", ""))
 
     for field_name, concepts in CONCEPTS.items():
         unit_pref = ("USD/shares",) if field_name == "eps_diluted" else ("shares",) if field_name == "shares_diluted" else ("USD",)
@@ -455,7 +459,8 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
                     continue
                 qs = [e for e in per_period if st < e < end and field_name in per_period[e]]
                 if len(qs) == 3:
-                    put(end, field_name, fy_val - sum(per_period[e][field_name] for e in qs), fdate)
+                    # Q1–Q3 as known on the 10-K date (a comparative restated before the 10-K counts)
+                    put(end, field_name, fy_val - sum(known_at(e, field_name, fdate) for e in qs), fdate)
                     # later vintages: a restated annual total or a restated Q1–Q3 changes the derived Q4
                     later = sorted({fd for fd, _ in annual_vintages[end]} | {fd for e in qs for fd, _ in revisions[e].get(field_name, [])})
                     for F in (x for x in later if x > fdate):

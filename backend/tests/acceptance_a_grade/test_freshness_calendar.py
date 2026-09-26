@@ -44,7 +44,9 @@ def test_old_quote_cannot_revalidate():
 
 
 def test_young_or_market_closed_recommendation_stays_current():
-    assert recommendation_freshness(ny(D, 9, 35), "FRESH", ny(D, 10, 20), plan=PLAN).status == "CURRENT"
+    assert recommendation_freshness(ny(D, 9, 35), "FRESH", ny(D, 9, 50), plan=PLAN).status == "CURRENT"
+    # stricter since evaluation 3 (N11): 45 minutes of trading without a newer quote is no longer "young enough"
+    assert recommendation_freshness(ny(D, 9, 35), "FRESH", ny(D, 10, 20), plan=PLAN).status == "NEEDS_REVALIDATION"
     fri, sat = date(2026, 9, 25), date(2026, 9, 26)
     assert recommendation_freshness(ny(fri, 21, 0), "FRESH", ny(sat, 12, 0), plan=PLAN).status == "CURRENT"  # nothing traded
 

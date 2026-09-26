@@ -110,8 +110,16 @@ def test_live_verify_rejects_empty_values_and_error_strings():
 def test_live_verify_guidance_failure_is_not_verified(monkeypatch):
     from marketlens.application import live_verify
 
+    from marketlens.providers.contracts import ProviderUnavailable
+
+    class SEC403:  # the SEC answers 403 (live-verify now calls the provider itself, never "checked today")
+        name, configured = "sec-edgar", True
+
+        def earnings_releases(self, *a):  # noqa: ANN002
+            raise ProviderUnavailable("http error: 403 Forbidden")
+
     class Data:
-        reg = None
+        reg = SimpleNamespace(chain=lambda kind: SimpleNamespace(providers=[SEC403()]))
 
         def prefetch_guidance(self, tickers, day):  # noqa: ANN001
             return {"NVDA": "실패: SEC 403"}

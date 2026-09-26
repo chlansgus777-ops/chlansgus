@@ -34,6 +34,7 @@ def _classify(err: Exception) -> str:
     return "FAILED"
 
 
+STORED_SOURCES = ("store", "cache", "fixture", "mock")
 FAILURE_WORDS = ("실패", "없음", "error", "fail", "blocked", "403", "401", "429", "timeout", "unavailable", "미설정", "한도")
 
 
@@ -42,6 +43,8 @@ def sample_problem(s: dict[str, Any], now: datetime) -> str | None:
     for k in ("provider", "timestamp", "source"):
         if not s.get(k):
             return f"{k} 누락"
+    if str(s.get("provider")).lower() in STORED_SOURCES or str(s.get("source")).lower() in STORED_SOURCES:
+        return "로컬 저장소 값 — 공급자가 지금 응답했다는 증거가 아님"
     v = s.get("value")
     if v is None:
         return "값 없음(None)"
@@ -72,7 +75,12 @@ def verify(svc: Any, tickers: tuple[str, ...] = TICKERS, record: bool = True) ->
     now = svc.now()
     day = last_completed_session(now)
     obs_day = to_ny(now).date()  # snapshots are labelled with the New York day they are observed on
-    data = svc.data
+    store_data = svc.data
+    # every provider check calls the provider itself: no local store, no TTL cache in front of it. A value the
+    # store already held proves nothing about whether the provider works today.
+    from marketlens.application.data_access import DataAccess
+
+    data = DataAccess(store_data.reg, {}, store=None, now_fn=svc.now)
     report: dict[str, Any] = {"as_of": now.isoformat(), "tickers": list(tickers), "categories": {}}
 
     def check(cat: str, fn: Callable[[], list[dict[str, Any]]]) -> None:
@@ -92,9 +100,37 @@ def verify(svc: Any, tickers: tuple[str, ...] = TICKERS, record: bool = True) ->
         return {"ticker": t, "value": value(f.value), "provider": f.provider, "timestamp": str(ts(f.value)), "source": f.provider, "positive": positive}
 
     check("price", lambda: [fetched(data.quote(t), t, lambda q: q.price, lambda q: q.timestamp.isoformat(), positive=True) for t in tickers])
-    check("bars", lambda: [fetched(data.bars(t, day.replace(day=1) if day.day > 1 else day, day), t, lambda b: len(b), lambda b: b[-1].day, positive=True) for t in tickers[:3]])
+    def bars() -> list[dict[str, Any]]:
+        # the production path: ONE grouped-daily request for the last completed session (what the sync stores)
+        grouped = next((p for p in store_data.reg.chain("price").providers if hasattr(p, "get_grouped_daily") and getattr(p, "configured", True)), None)
+        if grouped is None:
+            raise ProviderUnavailable("price: POLYGON_API_KEY 미설정 (일괄 일봉 공급자 없음)")
+        got = grouped.get_grouped_daily(day)
+        out = []
+        for t in tickers[:3]:
+            b = got.get(t)
+            out.append({"ticker": t, "value": b.close if b else None, "provider": grouped.name, "timestamp": day.isoformat(), "source": f"{grouped.name}:grouped-daily", "positive": True})
+        return out
+
+    check("bars", bars)
     us = [t for t in tickers if t != "TSM"]
     check("fundamentals", lambda: [fetched(data.quarters(t), t, lambda q: q[-1].revenue, lambda q: q[-1].filed_date, positive=True) for t in us[:3]])
+
+    def eps_ttm() -> list[dict[str, Any]]:
+        # evaluation 3 R1: if real 10-Ks tag only annual diluted shares, Q4 EPS (and TTM EPS / P/E) would be
+        # missing for most names — the fixtures cannot show this, only the real SEC data can
+        from marketlens.domain.fundamentals import as_of as pit, compute_metrics
+
+        out = []
+        for t in [x for x in ("NVDA", "AAPL", "MSFT") if x in us] or us[:2]:
+            f = data.quarters(t)
+            if f.value is None:
+                raise ProviderError(f"{t}: {f.error or '값 없음'}")
+            m = compute_metrics(pit(f.value, obs_day))
+            out.append({"ticker": t, "value": m.eps_ttm if m else None, "provider": f.provider, "timestamp": str(f.value[-1].filed_date), "source": f.provider})
+        return out
+
+    check("eps_ttm", eps_ttm)
     if "TSM" in tickers:  # a 20-F filer: annual IFRS only
         check("ifrs", lambda: [fetched(data.annuals("TSM"), "TSM", lambda a: a[-1].revenue, lambda a: a[-1].filed_date, positive=True)])
     if "JPM" in tickers:  # a bank: us-gaap bank concepts
@@ -113,27 +149,34 @@ def verify(svc: Any, tickers: tuple[str, ...] = TICKERS, record: bool = True) ->
 
     def estimates() -> list[dict[str, Any]]:
         # one request from the daily reserve (the scanner keeps a few of the ~25 free calls for manual use)
-        out = data.prefetch_estimates(("NVDA",), obs_day, budget=svc.base_cfg.scanner.estimate_daily_budget + 3, ttl_days=0)
+        out = store_data.prefetch_estimates(("NVDA",), obs_day, budget=svc.base_cfg.scanner.estimate_daily_budget + 3, ttl_days=0)
         if out.get("NVDA") != "OK":
             raise ProviderError(f"alphavantage: {out.get('NVDA')}")
         av = next((p for p in data.reg.chain("analyst").providers if p.name == "alphavantage"), None)
         issues = getattr(av, "last_contract_issues", []) if av else []
         if issues:
             raise ProviderError("응답 필드 계약 불일치: " + "; ".join(issues[:3]))
-        f = data.estimates("NVDA", obs_day)
-        return [fetched(f, "NVDA", lambda a: a.forward_eps, lambda a: a.as_of)]
+        f = store_data.estimates("NVDA", obs_day)
+        smp = fetched(f, "NVDA", lambda a: a.forward_eps, lambda a: a.as_of)
+        smp["provider"] = smp["source"] = "alphavantage"  # the snapshot just requested (ttl 0), read back from the store
+        return [smp]
 
     check("estimates", estimates)
 
     def guidance() -> list[dict[str, Any]]:
-        status = data.prefetch_guidance(("NVDA",), obs_day).get("NVDA") or "결과 없음"
-        if not (status.startswith("보도자료") or status == "오늘 확인함"):
-            raise ProviderError(f"sec-8k: {status}")  # e.g. "실패: SEC 403" → BLOCKED_BY_NETWORK / FAILED, never VERIFIED
-        rows = svc.store.guidance("NVDA", now) if svc.store is not None else []
-        if not rows:
-            raise ProviderError(f"sec-8k: 보도자료에서 가이던스 항목을 하나도 찾지 못함 ({status})")
-        last = max(rows, key=lambda r: r.filed_at)
-        return [{"ticker": "NVDA", "value": len(rows), "provider": "sec-8k", "timestamp": last.filed_at.isoformat(), "source": getattr(last, "source_url", "") or "sec.gov", "positive": True}]
+        from marketlens.domain.guidance import extract, html_to_text
+
+        sec = next((p for p in store_data.reg.chain("fundamental").providers if hasattr(p, "earnings_releases") and getattr(p, "configured", True)), None)
+        if sec is None:
+            raise ProviderUnavailable("sec-8k: SEC 공급자 미설정")
+        rel = sec.earnings_releases("NVDA", date.fromordinal(obs_day.toordinal() - 200))  # a real request, never "checked today"
+        items = [i for r in rel for i in extract(html_to_text(r["text"])) if i.status == "EXTRACTED"]
+        if not rel:
+            raise ProviderError("sec-8k: 최근 200일 실적 보도자료(8-K Item 2.02) 없음")
+        if not items:
+            raise ProviderError(f"sec-8k: 보도자료 {len(rel)}건에서 가이던스 수치를 하나도 추출하지 못함")
+        last = max(rel, key=lambda r: r["filed_at"])
+        return [{"ticker": "NVDA", "value": len(items), "provider": "sec-8k", "timestamp": last["filed_at"].isoformat(), "source": last["url"], "positive": True}]
 
     check("guidance", guidance)
     check("short_interest", lambda: [fetched(data.short_interest(t), t, lambda o: o.short_interest_shares, lambda o: o.short_interest_settlement, positive=True) for t in us[:2]])
