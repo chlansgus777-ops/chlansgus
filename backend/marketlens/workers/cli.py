@@ -74,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("rec_id", type=int)
     sub.add_parser("migrate", help="apply database migrations")
     sub.add_parser("sync", help="LIVE only: refresh the local point-in-time store from free sources")
+    sub.add_parser("live-verify", help="LIVE only: smoke-test every free provider (NVDA AAPL MSFT JPM XOM AMZN TSM)")
     sim = sub.add_parser("simulate", help="MOCK only: run weekly scans over past weeks to populate evaluation data")
     sim.add_argument("--weeks", type=int, default=12)
     args = p.parse_args(argv)
@@ -90,6 +91,15 @@ def main(argv: list[str] | None = None) -> int:
     s = _service(settings)
     if args.cmd == "sync":
         print(json.dumps(s.sync_market(), default=str)[:4000])
+    elif args.cmd == "live-verify":
+        if s.mode.value != "LIVE":
+            print("live-verify는 MARKETLENS_MODE=LIVE 에서만 의미가 있습니다", file=sys.stderr)
+            return 2
+        from marketlens.application.live_verify import verify
+
+        rep = verify(s)
+        print(json.dumps(rep, default=str, ensure_ascii=False, indent=1)[:20000])
+        return 0 if all(v == "VERIFIED" for v in rep["summary"].values()) else 1
     elif args.cmd == "scan":
         print(json.dumps(s.run_scan(run_committee=not args.no_committee).__dict__, default=str))
     elif args.cmd == "analyze":
