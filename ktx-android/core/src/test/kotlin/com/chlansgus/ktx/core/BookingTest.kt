@@ -82,6 +82,42 @@ class BookingTest {
     }
 
     @Test
+    fun autoReserveBooksFromFirstPageWithoutWaitingForTheRest() {
+        server.enqueue(ok(searchJson(trainJson("1", "060000", gen = "13"), trainJson("2", "061000"), trainJson("3", "070000"))))
+        server.enqueue(ok(RESERVE_OK))
+        server.enqueue(ok(RESERVATIONS))
+        val events = mutableListOf<BookingEvent>()
+        autoReserve(client, cond, StopSignal(), { events += it }, now = { LocalDateTime.of(2030, 1, 1, 0, 0) }, retryDelayMs = { 0 }, pageDelayMs = 0)
+        assertIs<BookingEvent.Reserved>(events.last())
+        server.takeRequest()
+        assertEquals("2", server.takeRequest().requestUrl!!.queryParameter("txtTrnNo1"))
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun autoReserveTargetsOnlySelectedTrainsAndNarrowsSearch() {
+        // 2번은 좌석이 있어도 대상이 아니므로 건너뛰고, 조회는 대상 열차 시각(07:00)부터 시작합니다.
+        server.enqueue(ok(searchJson(trainJson("3", "070000"), trainJson("4", "080000"))))
+        server.enqueue(ok(RESERVE_OK))
+        server.enqueue(ok(RESERVATIONS))
+        autoReserve(client, cond, StopSignal(), {}, targets = setOf("3/20300101/070000"),
+            now = { LocalDateTime.of(2030, 1, 1, 0, 0) }, retryDelayMs = { 0 }, pageDelayMs = 0)
+        assertEquals("070000", server.takeRequest().requestUrl!!.queryParameter("txtGoHour"))
+        assertEquals("3", server.takeRequest().requestUrl!!.queryParameter("txtTrnNo1"))
+    }
+
+    @Test
+    fun anyGradeFallsBackToSpecial() {
+        val any = cond.copy(grade = SeatGrade.ANY)
+        server.enqueue(ok(searchJson(trainJson("1", "060000", gen = "13", spe = "11"), trainJson("9", "235000"))))
+        server.enqueue(ok(RESERVE_OK))
+        server.enqueue(ok(RESERVATIONS))
+        autoReserve(client, any, StopSignal(), {}, now = { LocalDateTime.of(2030, 1, 1, 0, 0) }, retryDelayMs = { 0 }, pageDelayMs = 0)
+        server.takeRequest()
+        assertEquals("2", server.takeRequest().requestUrl!!.queryParameter("txtPsrmClCd1"))
+    }
+
+    @Test
     fun stopInterruptsWaitImmediately() {
         server.enqueue(ok(NO_RESULTS))
         val stop = StopSignal()

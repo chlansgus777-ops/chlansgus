@@ -11,6 +11,7 @@ import com.chlansgus.ktx.core.StopSignal
 import com.chlansgus.ktx.core.Train
 import com.chlansgus.ktx.core.autoReserve
 import com.chlansgus.ktx.core.errorText
+import com.chlansgus.ktx.core.key
 import com.chlansgus.ktx.core.reserveTrain
 import com.chlansgus.ktx.core.searchTrains
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,7 +30,8 @@ data class UiState(
     val stopRequested: Boolean = false,
     val trains: List<Train> = emptyList(),
     val searched: Conditions? = null,
-    val selected: Int? = null,
+    /** 선택한 열차 키. 1개면 "선택 열차 예약", 여러 개면 자동예약 대상. */
+    val selected: Set<String> = emptySet(),
     val status: String = "로그인 후 검색조건을 입력하세요.",
     val detail: String = "",
     val message: Message? = null,
@@ -107,14 +109,19 @@ object BookingController {
         }
     }
 
-    fun select(index: Int) = _state.update { if (it.busy) it else it.copy(selected = index) }
+    fun toggle(key: String) = _state.update {
+        if (it.busy) it else it.copy(selected = if (key in it.selected) it.selected - key else it.selected + key)
+    }
+
+    fun clearSelection() = _state.update { if (it.busy) it else it.copy(selected = emptySet()) }
 
     fun reserveSelected(form: SearchForm) {
         val conditions = parse(form) ?: return
         val c = client ?: return
         val s = _state.value
         if (conditions != s.searched) return invalid("검색조건이 변경되었습니다. 열차 조회를 다시 실행하세요.")
-        val train = s.selected?.let { s.trains.getOrNull(it) } ?: return invalid("목록에서 예약할 열차를 선택하세요.")
+        if (s.selected.size > 1) return invalid("바로 예약은 열차 1개만 선택하세요. 여러 열차는 자동예약으로 노릴 수 있습니다.")
+        val train = s.trains.firstOrNull { it.key in s.selected } ?: return invalid("목록에서 예약할 열차를 선택하세요.")
         launch("예약") {
             val reservation = try {
                 reserveTrain(c, train, conditions)
@@ -130,8 +137,13 @@ object BookingController {
     fun startAuto(form: SearchForm) {
         val conditions = parse(form) ?: return
         val c = client ?: return
+        val s = _state.value
+        val targets = s.trains.map { it.key }.filter { it in s.selected }.toSet()
+        if (targets.isNotEmpty() && conditions != s.searched) {
+            return invalid("검색조건이 변경되었습니다. 열차 조회를 다시 하거나 선택을 해제하세요.")
+        }
         launch("자동예약", auto = true) {
-            autoReserve(c, conditions, stop, { event ->
+            autoReserve(c, conditions, stop, targets = targets, emit = { event ->
                 when (event) {
                     is BookingEvent.Trains -> showTrains(event.conditions, event.trains)
                     is BookingEvent.Status -> status(event.text)
@@ -198,10 +210,13 @@ object BookingController {
     }
 
     private fun showTrains(conditions: Conditions, trains: List<Train>) = _state.update {
-        val keep = it.selected?.let { i -> it.trains.getOrNull(i) }?.let { old ->
-            trains.indexOfFirst { t -> t.trainNo == old.trainNo && t.depTime == old.depTime }.takeIf { i -> i >= 0 }
+        // 선택 열차만 노리는 자동예약은 좁은 범위만 조회하므로, 기존 목록은 두고 받은 열차의 좌석 상태만 갱신합니다.
+        if (it.auto && it.selected.isNotEmpty() && conditions == it.searched) {
+            val fresh = trains.associateBy { t -> t.key }
+            return@update it.copy(trains = it.trains.map { t -> fresh[t.key] ?: t })
         }
-        it.copy(searched = conditions, trains = trains, selected = keep)
+        val keys = trains.map { t -> t.key }.toSet()
+        it.copy(searched = conditions, trains = trains, selected = it.selected.filter { k -> k in keys }.toSet())
     }
 
     private fun status(text: String) {

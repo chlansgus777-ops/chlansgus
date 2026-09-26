@@ -29,6 +29,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,7 +37,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
@@ -64,6 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chlansgus.ktx.core.KST
 import com.chlansgus.ktx.core.SeatGrade
 import com.chlansgus.ktx.core.Train
+import com.chlansgus.ktx.core.key
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -200,10 +201,13 @@ private fun MainScreen() {
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text("자동예약 중지") }
                     } else {
-                        Button(enabled = ready, onClick = ::startAuto, modifier = Modifier.fillMaxWidth()) { Text("자동예약 시작") }
+                        Button(enabled = ready, onClick = ::startAuto, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (state.selected.isEmpty()) "자동예약 시작 (시간 범위 전체)" else "자동예약 시작 (선택 ${state.selected.size}개 열차)")
+                        }
                     }
                     Text(
-                        "자동예약은 검색조건에 맞는 모든 열차 중 좌석이 있는 첫 열차를 예약합니다. 진행 중에는 다른 앱을 써도 계속됩니다.",
+                        "자동예약: 열차를 선택하지 않으면 시간 범위 전체에서, 선택하면 그 열차들만 노립니다(더 자주 확인). " +
+                            "좌석이 보이는 즉시 예약하며, 진행 중에는 다른 앱을 써도 계속됩니다.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -223,10 +227,17 @@ private fun MainScreen() {
             }
 
             if (state.trains.isNotEmpty()) {
-                item { Text("열차 목록 · 좌석 상태는 예약 확정이 아닙니다", style = MaterialTheme.typography.titleSmall) }
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("열차 목록 · 좌석 상태는 예약 확정이 아닙니다", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        if (state.selected.isNotEmpty()) {
+                            TextButton(enabled = idle, onClick = BookingController::clearSelection) { Text("선택 해제") }
+                        }
+                    }
+                }
             }
             itemsIndexed(state.trains, key = { _, t -> t.trainNo + t.depDate + t.depTime }) { i, train ->
-                TrainRow(train, selected = state.selected == i, enabled = idle) { BookingController.select(i) }
+                TrainRow(train, selected = train.key in state.selected, enabled = idle) { BookingController.toggle(train.key) }
             }
         }
     }
@@ -278,7 +289,7 @@ private fun TrainRow(train: Train, selected: Boolean, enabled: Boolean, onClick:
         ),
     ) {
         Row(Modifier.padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(selected = selected, enabled = enabled, onClick = onClick)
+            Checkbox(checked = selected, enabled = enabled, onCheckedChange = { onClick() })
             Column(Modifier.weight(1f)) {
                 Text("${train.depHhmm()} → ${train.arrHhmm()}", fontWeight = FontWeight.Bold)
                 Text("${train.trainTypeName} ${train.trainNo} · ${train.depName}~${train.arrName}", style = MaterialTheme.typography.bodySmall)
