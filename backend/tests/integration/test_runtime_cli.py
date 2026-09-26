@@ -109,3 +109,21 @@ def test_serve_refuses_a_database_of_the_other_mode(cli_env):
         assert_db_environment(live)
     assert cli._serve(live, "127.0.0.1", 0) == 5
     assert_db_environment(st)  # same mode is fine
+
+
+def test_backend_exits_when_the_desktop_shell_is_gone():
+    """Windows CI found orphan backends after the app closed (PyInstaller bootloader child survives a
+    kill of the sidecar). The backend watches the shell's PID and exits when it disappears."""
+    import subprocess
+    import sys as _sys
+    import threading
+
+    from marketlens.workers.runtime import process_alive, watch_parent
+
+    child = subprocess.Popen([_sys.executable, "-c", "import time; time.sleep(30)"])
+    gone = threading.Event()
+    watch_parent(child.pid, on_gone=gone.set, interval=0.1)
+    assert process_alive(child.pid) and not gone.wait(0.3)
+    child.kill()
+    child.wait()
+    assert gone.wait(3) and not process_alive(child.pid)

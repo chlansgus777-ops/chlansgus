@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import timedelta
 from typing import Any
@@ -50,6 +51,11 @@ def _serve(settings: Any, host: str, port: int) -> int:
         except MixedEnvironmentError as e:
             print(str(e), file=sys.stderr)
             return 5
+        parent = os.environ.get("MARKETLENS_PARENT_PID", "")
+        if parent.isdigit():
+            from marketlens.workers.runtime import watch_parent
+
+            watch_parent(int(parent))  # desktop shell gone → exit (no orphan backend)
         print(f"MARKETLENS_PORT={port}", flush=True)  # read by the desktop shell
         uvicorn.run(app, host=host, port=port, log_level="warning")
         return 0

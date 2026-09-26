@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import os
 import socket
+import sys
+import threading
+import time
 from pathlib import Path
-from typing import IO
+from typing import IO, Callable
 
 
 class PortInUse(RuntimeError):
@@ -82,3 +85,41 @@ class InstanceLock:
         finally:
             self._fh.close()
             self._fh = None
+
+
+def process_alive(pid: int) -> bool:
+    """True while process ``pid`` exists (Windows: OpenProcess + exit code; POSIX: signal 0)."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        h = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = k32.GetExitCodeProcess(h, ctypes.byref(code))
+        k32.CloseHandle(h)
+        return bool(ok) and code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def watch_parent(pid: int, on_gone: Callable[[], None] | None = None, interval: float = 2.0) -> threading.Thread:
+    """Exit this process when the desktop shell (``pid``) is gone — no orphan backend after the app
+    closes, crashes or is killed. Runs in a daemon thread."""
+
+    def loop() -> None:
+        while process_alive(pid):
+            time.sleep(interval)
+        (on_gone or (lambda: os._exit(0)))()
+
+    t = threading.Thread(target=loop, name="parent-watchdog", daemon=True)
+    t.start()
+    return t

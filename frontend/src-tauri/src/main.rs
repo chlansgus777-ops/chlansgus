@@ -50,7 +50,10 @@ fn spawn_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .shell()
         .sidecar("marketlens-backend")?
         .args(["serve", "--host", "127.0.0.1", "--port", port.as_str()])
-        .env("MARKETLENS_API_TOKEN", state.token.as_str());
+        .env("MARKETLENS_API_TOKEN", state.token.as_str())
+        // the backend exits by itself when this app process is gone (also covers crashes and the
+        // PyInstaller bootloader child that a kill of the sidecar process would leave behind)
+        .env("MARKETLENS_PARENT_PID", std::process::id().to_string());
     let (mut rx, child) = cmd.spawn()?;
     *state.child.lock().expect("backend lock poisoned") = Some(child);
     let handle = app.clone();

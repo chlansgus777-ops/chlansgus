@@ -77,23 +77,30 @@ jobs:
           if (-not $app) { throw "installed MarketLens.exe not found" }
           Write-Host "installed at $($app.FullName)"
           $ui = Start-Process $app.FullName -PassThru
-          $backend = $null
-          for ($i = 0; $i -lt 60 -and -not $backend; $i++) { Start-Sleep -Seconds 2; $backend = Get-Process marketlens-backend* -ErrorAction SilentlyContinue | Select-Object -First 1 }
-          if (-not $backend) { throw "backend sidecar was not started by the app" }
+          function Dump { Get-CimInstance Win32_Process -Filter "Name like 'marketlens%'" | Select-Object ProcessId, ParentProcessId, Name, CommandLine | Format-Table -AutoSize | Out-String -Width 300 | Write-Host
+                          Get-ChildItem "$env:LOCALAPPDATA\MarketLensData" -Recurse -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 40 } }
           $port = $null
-          for ($i = 0; $i -lt 60 -and -not $port; $i++) { Start-Sleep -Seconds 2; $port = (Get-NetTCPConnection -OwningProcess $backend.Id -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1).LocalPort }
-          if (-not $port) { throw "backend is not listening" }
+          for ($i = 0; $i -lt 90 -and -not $port; $i++) {
+            Start-Sleep -Seconds 2
+            # PyInstaller one-file: a bootloader process and the real server process — check them all
+            $ids = @(Get-Process marketlens-backend* -ErrorAction SilentlyContinue | ForEach-Object Id)
+            if ($ids.Count) { $port = (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $ids -contains $_.OwningProcess } | Select-Object -First 1).LocalPort }
+          }
+          if (-not $port) { Dump; throw "backend is not listening" }
           $ready = $false
           for ($i = 0; $i -lt 60 -and -not $ready; $i++) { try { $ready = (Invoke-RestMethod "http://127.0.0.1:$port/api/health/ready").ready } catch { Start-Sleep -Seconds 2 } }
-          if (-not $ready) { throw "backend never became ready" }
+          if (-not $ready) { Dump; throw "backend never became ready" }
           $html = (Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing).Content
           if ($html -notmatch "<div id=`"root`">") { throw "UI index not served" }
-          try { Invoke-RestMethod "http://127.0.0.1:$port/api/system" | Out-Null; throw "API answered without the per-launch token" } catch { if ($_.Exception.Message -like "*without the per-launch token*") { throw } }
-          # clean shutdown: closing the app must stop the sidecar (no orphan backend)
+          $unauth = $false
+          try { Invoke-RestMethod "http://127.0.0.1:$port/api/system" | Out-Null } catch { $unauth = $true }
+          if (-not $unauth) { throw "API answered without the per-launch token" }
+          # clean shutdown: closing the app must stop every backend process (no orphans)
           $null = $ui.CloseMainWindow(); Start-Sleep -Seconds 8
-          if (-not $ui.HasExited) { Stop-Process -Id $ui.Id }
-          Start-Sleep -Seconds 5
-          if (Get-Process -Id $backend.Id -ErrorAction SilentlyContinue) { throw "backend still running after the app exited" }
+          if (-not $ui.HasExited) { Stop-Process -Id $ui.Id }  # a hard kill: the backend watchdog must still exit
+          $left = $true
+          for ($i = 0; $i -lt 10 -and $left; $i++) { Start-Sleep -Seconds 2; $left = [bool](Get-Process marketlens-backend* -ErrorAction SilentlyContinue) }
+          if ($left) { Dump; throw "backend still running after the app exited" }
           $un = Get-ChildItem (Split-Path $app.FullName) -Filter "uninstall*.exe" | Select-Object -First 1
           if ($un) { Start-Process $un.FullName -ArgumentList "/S" -Wait }
           Write-Host "installer smoke test passed (port $port)"

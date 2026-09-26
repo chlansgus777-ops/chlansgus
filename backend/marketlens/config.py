@@ -37,7 +37,8 @@ ALEMBIC_DIR = REPO_ROOT / "alembic" if FROZEN else REPO_ROOT / "backend" / "alem
 
 def default_data_dir() -> Path:
     if FROZEN and os.name == "nt":
-        return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "MarketLens"
+        # not the install folder (%LOCALAPPDATA%\MarketLens): an uninstall must never touch the user's data
+        return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "MarketLensData"
     return REPO_ROOT / "data" if not FROZEN else Path.home() / ".marketlens"
 
 SECRET_ENV_KEYS = (
