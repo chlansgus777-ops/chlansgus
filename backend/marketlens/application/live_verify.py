@@ -23,7 +23,7 @@ from marketlens.domain.market_calendar import last_completed_session, to_ny
 from marketlens.providers.contracts import ProviderError, ProviderUnavailable
 
 TICKERS = ("NVDA", "AAPL", "MSFT", "JPM", "XOM", "AMZN", "TSM")
-NETWORK_HINTS = ("http error", "ConnectError", "ProxyError", "timeout", "CONNECT", "403")
+NETWORK_HINTS = ("http error", "ConnectError", "ProxyError", "timeout", "CONNECT")  # the host could not be reached
 
 
 def _classify(err: Exception) -> str:
@@ -37,6 +37,8 @@ def _classify(err: Exception) -> str:
     entries = re.findall(r"\('([^']+)', '([^']*)'\)", msg)  # AllProvidersFailed: [(provider, outcome), ...]
     if entries and all(o.startswith("not configured") for _, o in entries):
         return "BLOCKED_BY_CREDENTIAL"
+    if "unauthorized (401)" in low or "unauthorized (403)" in low:
+        return "BLOCKED_BY_CREDENTIAL"  # the provider answered and refused: key / licence / SEC User-Agent
     if "미설정" in msg or "not set" in low or "api_key" in low or "user_agent" in low or "blocked_by_credential" in low:
         return "BLOCKED_BY_CREDENTIAL"
     return "FAILED"
@@ -92,6 +94,11 @@ def verify(svc: Any, tickers: tuple[str, ...] = TICKERS, record: bool = True) ->
     report: dict[str, Any] = {"as_of": now.isoformat(), "tickers": list(tickers), "categories": {}}
 
     def check(cat: str, fn: Callable[[], list[dict[str, Any]]]) -> None:
+        # every category is judged by its own requests: a circuit opened by an earlier category's failure would
+        # otherwise turn "not tried" into "failed"
+        for ch in getattr(store_data.reg, "chains", {}).values():
+            for br in getattr(ch, "breakers", {}).values():
+                br.reset()
         try:
             samples = fn()
             problems = [f"{x.get('ticker')}: {p}" for x in samples if (p := sample_problem(x, now))] if samples else ["표본 없음"]

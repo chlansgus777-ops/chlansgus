@@ -57,6 +57,11 @@ class CircuitBreaker:
                 return True
             return False
 
+    def reset(self) -> None:
+        """Back to CLOSED (used by the live smoke test so each category is judged by its own request)."""
+        with self._lock:
+            self._state, self._failures, self._half_open_calls = BreakerState.CLOSED, 0, 0
+
     def record_success(self) -> None:
         with self._lock:
             self._failures = 0

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from typing import Any
 
 import httpx
@@ -51,15 +53,29 @@ class HttpClient:
         return r
 
     @staticmethod
+    def _detail(r: httpx.Response) -> str:
+        """The provider's own error message (first 160 chars), with anything that looks like a credential removed —
+        so a 400/403 says WHY (e.g. SEC "undeclared automated tool", a malformed filter) instead of only a code."""
+        try:
+            text = r.text
+        except Exception:  # noqa: BLE001 - an undecodable body just gives no detail
+            return ""
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"(?i)(api[_-]?key|apikey|token|secret|password|authorization)\s*[=:]\s*\S+", r"\1=<redacted>", text)
+        text = re.sub(r"\b[A-Za-z0-9_\-]{32,}\b", "<redacted>", text)
+        text = " ".join(text.split())
+        return f": {text[:160]}" if text else ""
+
+    @staticmethod
     def _check(r: httpx.Response) -> None:
         if r.status_code == 429:
             ra = r.headers.get("Retry-After")
             raise RateLimited("rate limited (429)", float(ra) if ra and ra.isdigit() else None)
         if r.status_code in (401, 403):
-            raise ProviderUnavailable(f"unauthorized ({r.status_code}) — check API key / license")
+            raise ProviderUnavailable(f"unauthorized ({r.status_code}) — check API key / license / SEC User-Agent{HttpClient._detail(r)}")
         if r.status_code == 404:
             raise ProviderDataError("not found (404)")
         if r.status_code >= 500:
             raise ProviderUnavailable(f"server error {r.status_code}")
         if r.status_code >= 400:
-            raise ProviderDataError(f"client error {r.status_code}")
+            raise ProviderDataError(f"client error {r.status_code}{HttpClient._detail(r)}")

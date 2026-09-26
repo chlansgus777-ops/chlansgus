@@ -57,3 +57,31 @@ def test_unconfigured_providers_are_blocked_by_credential_not_failed():
     assert _classify(ProviderError("all fundamental providers failed: [('sec-edgar', 'ProviderUnavailable: http error: ProxyError')]")) == "BLOCKED_BY_NETWORK"
     # a configured provider that answered wrongly is a failure
     assert _classify(ProviderError("all price providers failed: [('polygon', 'ProviderDataError: not found (404)')]")) == "FAILED"
+
+
+def test_provider_refusal_is_a_credential_block_and_the_reason_is_kept():
+    """First real run (GitHub runner): SEC answered 403 to a User-Agent without a contact e-mail. That is the
+    provider refusing the requester, not an unreachable network; and the provider's message is kept (redacted)."""
+    import httpx
+
+    from marketlens.application.live_verify import _classify
+    from marketlens.providers.contracts import ProviderDataError, ProviderUnavailable
+    from marketlens.providers.live.http import HttpClient
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/sec":
+            return httpx.Response(403, text="<html><body>Your Request Originates from an Undeclared Automated Tool</body></html>")
+        return httpx.Response(400, json={"message": "Invalid compareType 'equal'", "apikey": "SECRETSECRETSECRETSECRETSECRETSECRET12"})
+
+    c = HttpClient("https://x.test", transport=httpx.MockTransport(handler))
+    try:
+        c.get_json("/sec")
+        raise AssertionError("no error")
+    except ProviderUnavailable as e:
+        assert "Undeclared Automated Tool" in str(e) and _classify(e) == "BLOCKED_BY_CREDENTIAL"
+    try:
+        c.get_json("/finra")
+        raise AssertionError("no error")
+    except ProviderDataError as e:
+        assert "Invalid compareType" in str(e) and "SECRETSECRET" not in str(e)
+    assert _classify(ProviderUnavailable("http error: ProxyError")) == "BLOCKED_BY_NETWORK"
