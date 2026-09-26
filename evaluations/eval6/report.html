@@ -1,0 +1,339 @@
+<title>MarketLens 6차 평가</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f3f4f7; --paper:#ffffff; --ink:#18202c; --muted:#596272; --line:#dadfe7; --soft:#eef0f5;
+  --accent:#34468a; --accent-soft:#e7eaf6;
+  --p0:#a3261d; --p0-bg:#f9e4e1; --p1:#a4531b; --p1-bg:#fbeadb; --p2:#7f6400; --p2-bg:#f7efcf; --p3:#4f5968; --p3-bg:#e8ebef;
+  --ok:#2b774a; --ok-bg:#e1f1e7; --code:#eceff4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#10141b; --paper:#171d26; --ink:#e4e8ef; --muted:#9aa3b1; --line:#2a323e; --soft:#1d2430;
+    --accent:#9daef0; --accent-soft:#232c45;
+    --p0:#f1958b; --p0-bg:#3b1c1a; --p1:#f0ae78; --p1-bg:#38261a; --p2:#e2c65e; --p2-bg:#332c14; --p3:#b3bcc9; --p3-bg:#262d38;
+    --ok:#7fcf9e; --ok-bg:#1a3124; --code:#212834;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#10141b; --paper:#171d26; --ink:#e4e8ef; --muted:#9aa3b1; --line:#2a323e; --soft:#1d2430;
+  --accent:#9daef0; --accent-soft:#232c45;
+  --p0:#f1958b; --p0-bg:#3b1c1a; --p1:#f0ae78; --p1-bg:#38261a; --p2:#e2c65e; --p2-bg:#332c14; --p3:#b3bcc9; --p3-bg:#262d38;
+  --ok:#7fcf9e; --ok-bg:#1a3124; --code:#212834;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;font-size:15px;line-height:1.7;margin:0;padding-inline:16px;padding-block:28px 72px}
+main{max-width:940px;margin:0 auto;display:grid;gap:24px}
+h1,h2,h3{text-wrap:balance;margin:0}
+h1{font-size:28px;line-height:1.3}
+h2{font-size:19px;line-height:1.4}
+h3{font-size:15.5px;line-height:1.45}
+p{margin:0;max-width:70ch}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-size:12.5px}
+code{background:var(--code);padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}
+pre{background:var(--code);padding:12px 14px;border-radius:4px;overflow-x:auto;margin:0;font-size:12.5px;line-height:1.6}
+pre code{background:none;padding:0}
+a{color:var(--accent)}
+header{display:grid;gap:10px;padding-bottom:18px;border-bottom:2px solid var(--ink)}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+section{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:20px 22px;display:grid;gap:14px}
+.lede{color:var(--muted)}
+/* verdict */
+.verdict{display:grid;grid-template-columns:auto 1fr;gap:18px 26px;align-items:start}
+.stamp{border:2px solid var(--accent);border-radius:6px;padding:12px 18px;display:grid;gap:2px;text-align:center;min-width:150px;background:var(--accent-soft)}
+.stamp .score{font-size:40px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums;color:var(--accent)}
+.stamp .score small{font-size:16px;font-weight:500;color:var(--muted)}
+.stamp .grade{font-size:15px;font-weight:700}
+.stamp .gate{font-size:12.5px;color:var(--p0);font-weight:500}
+.stamp .gate.pass{color:var(--ok)}
+.stamp .gate.short{color:var(--p1)}
+.verdict ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px 22px;margin:0}
+.meta div{display:grid;gap:1px}
+.meta dt{font-size:12px;color:var(--muted);letter-spacing:.03em}
+.meta dd{margin:0;font-weight:500;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+/* tables */
+.tbl{overflow-x:auto;margin:0 -4px;padding:0 4px}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:13.5px}
+th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.03em;white-space:nowrap}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+th.num{text-align:right}
+tfoot td{font-weight:700;border-bottom:none}
+.pill{display:inline-block;font-size:12px;font-weight:500;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.ok{color:var(--ok);background:var(--ok-bg)}
+.part{color:var(--p2);background:var(--p2-bg)}
+.reg{color:var(--p0);background:var(--p0-bg)}
+.no{color:var(--p1);background:var(--p1-bg)}
+.sev{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:500;font-size:12px;padding:1px 7px;border-radius:3px;white-space:nowrap}
+.P0{color:var(--p0);background:var(--p0-bg)} .P1{color:var(--p1);background:var(--p1-bg)} .P2{color:var(--p2);background:var(--p2-bg)} .P3{color:var(--p3);background:var(--p3-bg)}
+/* findings */
+.counts{display:flex;flex-wrap:wrap;gap:8px}
+.findings{display:grid;gap:12px}
+.finding{border:1px solid var(--line);border-left:4px solid var(--p3);border-radius:4px;padding:12px 14px;display:grid;gap:8px;background:var(--paper)}
+.finding.s0{border-left-color:var(--p0)} .finding.s1{border-left-color:var(--p1)} .finding.s2{border-left-color:var(--p2)}
+.fhead{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline}
+.fid{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:500;font-size:13px}
+.finding dl{display:grid;grid-template-columns:52px 1fr;gap:4px 12px;margin:0;font-size:14px}
+.finding dt{color:var(--muted);font-size:12.5px;padding-top:2px}
+.finding dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.where{font-size:12.5px;color:var(--muted)}
+.note{border-left:3px solid var(--accent);padding:4px 0 4px 12px;color:var(--muted);max-width:none}
+ol.prio{margin:0;padding-left:22px;display:grid;gap:6px}
+section > ul{margin:0;padding-left:20px;display:grid;gap:6px}
+section > ul li{max-width:78ch}
+ol.prio li{max-width:78ch}
+@media (max-width:560px){
+  .verdict{grid-template-columns:1fr}
+  .stamp{justify-self:start}
+  .finding dl{grid-template-columns:1fr}
+  .finding dt{padding-top:6px}
+  section{padding:16px 14px}
+}
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">독립 평가 · 6차 결과</div>
+    <h1>MarketLens 6차 평가</h1>
+    <p class="lede">6차 재평가 신청서(대상 커밋 <span class="mono">f80c460</span>)의 주장을 재현하고, 5차 반례 L1~L3과 권고 R7의 처리를 확인했습니다. 신청서가 요청한 다섯 가지도 모두 했습니다. live-verify 실행 기록 확인과 같은 워크플로 재실행, 실적 발표일 짝짓기, 기간별 XBRL 개념 선택과 4분기 계산, 가이던스 부호, 실행 가능한 반례 테스트입니다.</p>
+  </header>
+
+  <section aria-labelledby="h-verdict">
+    <h2 id="h-verdict">판정</h2>
+    <div class="verdict">
+      <div class="stamp" role="img" aria-label="83점, B등급, A등급 Gate 5개 모두 통과, A 기준 85점에 2점 부족">
+        <div class="score">83<small>/100</small></div>
+        <div class="grade">B 등급</div>
+        <div class="gate pass">A Gate 5개 모두 통과</div>
+        <div class="gate short">A 기준 85점에 2점 부족</div>
+      </div>
+      <ul>
+        <li>신청서 수치는 <strong>모두 재현</strong>됐습니다. 545 수집 = 545 통과, 프런트 51 passed, 평가자 반례 42 passed, CI·Windows 실행 4건 모두 success입니다. 5차 반례는 첫 줄만 바꾸고 본문 그대로 편입됐고, <span class="mono">9fdab63</span>→<span class="mono">f80c460</span>은 문서만 바뀐 커밋이 맞습니다.</li>
+        <li><strong>G3를 통과</strong>했습니다. run 36253710550 로그에서 13개 항목 VERIFIED와 종료 코드 0을 확인했습니다. 같은 워크플로를 <span class="mono">f80c460</span>에서 다시 돌린 run 36255567036에서는 SEC가 필요 없는 6개 항목이 같은 값으로 재현됐습니다. SEC가 필요한 7개 항목은 저장소에 <code>SEC_USER_AGENT</code> secret이 없어 재현하지 못했습니다(종료 코드 1).</li>
+        <li>5차 반례 L1~L3과 R7은 <strong>모두 해결</strong>됐습니다. L2에는 긴 공백 뒤에만 나는 잔여 경로(K5, P3)가 남았습니다.</li>
+        <li>새 반례는 <strong>P1 2건, P2 2건, P3 1건</strong>입니다. 가이던스가 관세·환율 영향 같은 변화량을 가이던스 수준으로 저장합니다(K1). 4분기 = 연간 − (1~3분기) 계산이 분할이나 중단영업 재작성으로 10-K에서 바뀐 기준을 섞습니다(K2). NVIDIA 2025 회계연도 형태에서 TTM EPS가 −2.44가 됩니다(실제 약 2.94).</li>
+        <li><strong>Gate는 모두 통과했지만 점수가 83점이라 B입니다.</strong> 열린 P1 두 건이 결정 근거에 틀린 값을 넣기 때문입니다. K1과 K2를 고치면 A 구간에 들어갈 수 있습니다.</li>
+      </ul>
+    </div>
+    <dl class="meta">
+      <div><dt>저장소 · 평가 대상</dt><dd class="mono">chlansgus777-ops/chlansgus @ f80c460</dd></div>
+      <div><dt>평가일</dt><dd>2026-09-26</dd></div>
+      <div><dt>반례 테스트 위치</dt><dd class="mono">claude/new-session-ir1fdw : evaluations/eval6/</dd></div>
+      <div><dt>반례 실행 결과(f80c460)</dt><dd>백엔드 20건 실패 (모두 의도한 실패)</dd></div>
+    </dl>
+  </section>
+
+  <section aria-labelledby="h-trend">
+    <h2 id="h-trend">라운드별 변화</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>평가</th><th>대상</th><th class="num">점수</th><th class="num">Gate 통과</th><th class="num">열린 P0</th><th class="num">열린 P1</th><th class="num">P2</th><th class="num">P3</th></tr></thead>
+      <tbody>
+        <tr><td>3차</td><td class="mono">445221f</td><td class="num">63</td><td class="num">2 / 5</td><td class="num">1</td><td class="num">4</td><td class="num">8</td><td class="num">1</td></tr>
+        <tr><td>4차</td><td class="mono">4182468</td><td class="num">73</td><td class="num">3 / 5</td><td class="num">1</td><td class="num">0</td><td class="num">3</td><td class="num">1</td></tr>
+        <tr><td>5차</td><td class="mono">f6b048b</td><td class="num">78</td><td class="num">4 / 5</td><td class="num">0</td><td class="num">1</td><td class="num">2</td><td class="num">0</td></tr>
+        <tr><td>6차</td><td class="mono">f80c460</td><td class="num">83</td><td class="num">5 / 5</td><td class="num">0</td><td class="num">2</td><td class="num">2</td><td class="num">1</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-gate">
+    <h2 id="h-gate">A 등급 Gate</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>기준</th><th>내용</th><th>결과</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td class="n">G1</td><td>열린 P0 없음</td><td><span class="pill ok">통과</span></td><td>L1 해결. 새 가이던스 오류(K1)와 4분기 기준 혼합(K2)은 틀린 값이 판단에 닿지만, 전체 입력 가운데 일부 공시 형태에서만 나서 P1</td></tr>
+        <tr><td class="n">G2</td><td>시점 정확성·종목 동일성 P1 없음</td><td><span class="pill ok">통과</span></td><td>L2·L3 해결. 새 시점 결함(K3 개념 전환, K4 사전 발표)은 조건이 필요하거나 과거 시점 조회에서만 드러나 P2. K2는 시점이 아니라 기준을 섞는 문제</td></tr>
+        <tr><td class="n">G3</td><td>실제 공급자 검증 기록</td><td><span class="pill ok">통과</span></td><td>run 36253710550 로그: 13/13 VERIFIED, 종료 코드 0, 표본 값이 신청서와 같음. 평가자 재실행 run 36255567036: SEC 없이 되는 6개 항목 같은 값, SEC 7개 항목은 User-Agent가 없어 재현 못 함</td></tr>
+        <tr><td class="n">G4</td><td>대상 커밋 CI 통과</td><td><span class="pill ok">통과</span></td><td>ci run 36253833035, windows-build run 36254611307 모두 <span class="mono">f80c460</span>에서 success</td></tr>
+        <tr><td class="n">G5</td><td>직전 평가 반례가 원문 그대로 재현되지 않음</td><td><span class="pill ok">통과</span></td><td>저장소 루트에서 <code>pytest evaluations</code> 42 passed(3차 19 + 4차 13 + 5차 10)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-claims">
+    <h2 id="h-claims">신청서 주장 확인</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>주장</th><th>확인 결과</th><th>방법</th></tr></thead>
+      <tbody>
+        <tr><td>Backend 545 수집 = 545 통과, 건너뜀 0</td><td><span class="pill ok">일치</span></td><td><code>--collect-only</code> 545개. 프런트 빌드 후 <code>-o addopts=""</code>로 545 passed(88초). E2E 13개가 이 안에 포함됨</td></tr>
+        <tr><td>평가자 원본 반례 42 passed</td><td><span class="pill ok">일치</span></td><td>저장소 루트에서 <code>pytest evaluations</code> → 42 passed</td></tr>
+        <tr><td>5차 반례를 본문 그대로 편입</td><td><span class="pill ok">일치</span></td><td><code>test_evaluation5_counterexamples.py</code>는 첫 줄 설명만 다르고 나머지는 원본과 같음</td></tr>
+        <tr><td>Frontend 51 passed, 타입 오류 0, 빌드 성공</td><td><span class="pill ok">일치</span></td><td><code>tsc</code> 종료 코드 0, vitest 12파일 51 passed, 빌드 성공</td></tr>
+        <tr><td>Linux CI success</td><td><span class="pill ok">일치</span></td><td>run 36253833035(<span class="mono">f80c460</span>), 36253710097(<span class="mono">9fdab63</span>) 모두 success. CI 방식 명령도 로컬에서 종료 코드 0</td></tr>
+        <tr><td>Windows 빌드·설치 테스트 success</td><td><span class="pill ok">일치</span></td><td>run 36253711733(<span class="mono">9fdab63</span>), 36254611307(<span class="mono">f80c460</span>) 모두 success</td></tr>
+        <tr><td>live-verify 13/13 VERIFIED, 종료 코드 0</td><td><span class="pill ok">일치</span></td><td>run 36253710550(<span class="mono">9fdab63</span>) 로그의 13개 항목과 표본 값이 신청서 표와 같음</td></tr>
+        <tr><td><span class="mono">f80c460</span>은 <span class="mono">9fdab63</span>에 문서만 더한 커밋</td><td><span class="pill ok">일치</span></td><td>차이는 <code>docs/DATA_SOURCES.md</code> 한 파일</td></tr>
+        <tr><td>키는 저장소 Secrets에서 읽음(SEC_USER_AGENT 포함)</td><td><span class="pill part">불일치</span></td><td>기본 입력으로 다시 돌리면 <code>SEC_USER_AGENT</code>가 빈 값. secret이 없어서 SEC 7개 항목이 BLOCKED_BY_CREDENTIAL, 종료 코드 1. 신청자 실행은 입력값으로 넣은 것으로 보임</td></tr>
+        <tr><td>기존 테스트 변경: <code>live_fixtures.py</code> 두 곳</td><td><span class="pill ok">일치</span></td><td>FINRA 모의 서버의 정렬 규칙·순서 없는 응답, SEC 공시 색인 페이지 추가. 기존 기대값은 그대로</td></tr>
+        <tr><td>ruff(pyflakes) 3건 그대로</td><td><span class="pill ok">일치</span></td><td>3건 동일</td></tr>
+        <tr><td>한계: 4분기 EPS 근사는 "몇 센트" 차이</td><td><span class="pill reg">과소 서술</span></td><td>연중 분할이 있으면 4분기 EPS −4.49(실제 0.89), TTM EPS 부호가 바뀜(K2)</td></tr>
+        <tr><td>한계: 발표일은 8-K 접수 시각이라 "약간 늦음"</td><td><span class="pill part">한쪽만 서술</span></td><td>잠정 실적 사전 발표가 있으면 발표일이 몇 주 <strong>이르게</strong> 잡힘(K4)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-live">
+    <h2 id="h-live">live-verify 기록과 재실행 대조</h2>
+    <p>신청서 요청대로 같은 워크플로를 평가 대상 커밋에서 다시 실행했습니다(run 36255567036, 2026-09-26 16:28 UTC). SEC User-Agent 입력은 비워 두었습니다. 요청자 이름과 연락처 이메일이 들어가는 값이라 평가자가 임의로 넣지 않았습니다.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>항목</th><th>신청자 run 36253710550</th><th>평가자 run 36255567036</th><th>판정</th></tr></thead>
+      <tbody>
+        <tr><td>price</td><td>NVDA 225.07, AAPL 341.07, MSFT 516.17</td><td>같은 값</td><td><span class="pill ok">재현</span></td></tr>
+        <tr><td>bars</td><td>Polygon 일괄 일봉 종가 225.07 · 341.07 · 516.17 (09-25)</td><td>같은 값</td><td><span class="pill ok">재현</span></td></tr>
+        <tr><td>news</td><td>NVDA 55건 (최신 13:50 UTC)</td><td>69건 (최신 15:35 UTC)</td><td><span class="pill ok">재현</span></td></tr>
+        <tr><td>macro</td><td>DFF 3.88, DGS2 4.87, DGS10 5.18 (09-24)</td><td>같은 값</td><td><span class="pill ok">재현</span></td></tr>
+        <tr><td>estimates</td><td>NVDA 13.464275</td><td>같은 값</td><td><span class="pill ok">재현</span></td></tr>
+        <tr><td>short_interest</td><td>NVDA 294,225,803 · AAPL 128,753,092 (09-15)</td><td>같은 값</td><td><span class="pill ok">재현</span></td></tr>
+        <tr><td>fundamentals · eps_ttm · ifrs · bank · guidance · insider</td><td>VERIFIED. 매출 NVDA 96,221,000,000, TTM EPS 7.91 · 8.71 · 17.95, TSM 2,894,307,700,000, 가이던스 <code>q2fy27pr.htm</code>에서 2개, 내부자 −967,599,313.47</td><td>BLOCKED_BY_CREDENTIAL (SEC 미설정)</td><td><span class="pill part">기록만 확인</span></td></tr>
+        <tr><td>earnings</td><td>NVDA 1.87 (08-26), AAPL 1.91 (07-30)</td><td>FAILED. SEC 발표 시각 없이 달력 대체 경로가 0건</td><td><span class="pill part">기록만 확인</span></td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">검증 방식 자체는 믿을 만합니다. 공급자를 직접 부르고, 표본에 날짜·출처가 붙고, 모의·캐시 출처를 거부합니다. 다만 값이 맞는지 다른 출처와 대조하지 않고, 종목 마스터 동기화는 실데이터로 돌리지 않았습니다(신청서도 인정). 나머지 7개 항목은 <code>sec_user_agent</code> 입력을 넣어 한 번 더 실행하면 재현됩니다.</p>
+  </section>
+
+  <section aria-labelledby="h-items">
+    <h2 id="h-items">5차 반례 처리 확인</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>#</th><th>5차 반례</th><th>결과</th><th>확인 내용 · 남은 문제</th></tr></thead>
+      <tbody>
+        <tr><td class="n">L1</td><td>틀린 부호로 EXTRACTED가 되는 가이던스</td><td><span class="pill ok">해결</span></td><td>반례 7문장이 모두 UNCLEAR 또는 올바른 부호. 신청자의 36문장 목록도 통과. 규칙이 손실 단어가 없는 문장의 금액을 무조건 수준으로 보는 점은 남음(K1)</td></tr>
+        <tr><td class="n">L2</td><td>7일 규칙이 동기화 간격을 셈</td><td><span class="pill ok">해결</span></td><td>부재 기간의 일괄 일봉을 증거로 봄(GAP 이력 기록). 동기화 순서가 일봉 → 유니버스 → 분할로 바뀜. 공백이 30거래일을 넘으면 증거가 다 들어오기 전에 판정함(K5)</td></tr>
+        <tr><td class="n">L3</td><td>짝 미정 개명을 상장폐지로 기록</td><td><span class="pill ok">해결</span></td><td>어제까지 상장된 후보를 먼저 봄. 그래도 못 정하면 UNRESOLVED(상장폐지 아님)로 두어 성과가 확정되지 않음</td></tr>
+        <tr><td class="n">R7</td><td>이전 버전의 잘못된 기록 점검</td><td><span class="pill ok">추가</span></td><td><code>audit-history</code>가 TRADED_AFTER_DELISTING, DELISTING_LOOKS_LIKE_RENAME을 보고함을 확인. 읽기 전용 안내라 은퇴한 클래스가 개명 의심으로 표시되는 오탐은 문제 삼지 않음</td></tr>
+        <tr><td class="n">R2 · R3 · R5 · R6</td><td>실데이터 위험(종목 마스터)</td><td><span class="pill no">미확인</span></td><td>live-verify가 유니버스 동기화를 돌리지 않음(신청서가 한계로 인정)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-new">
+    <h2 id="h-new">새 반례</h2>
+    <div class="counts"><span class="sev P0">P0 × 0</span><span class="sev P1">P1 × 2</span><span class="sev P2">P2 × 2</span><span class="sev P3">P3 × 1</span></div>
+    <p class="note">등급 기준은 3~5차와 같습니다. 흔한 입력에서 결정 근거가 조용히 틀리면 P0, 일부 공시 형태나 덜 흔한 문장에서만 틀리면 P1, 조건이 더 필요하면 P2입니다. K1과 K2는 드물지 않은 공시 형태에서 틀린 값이 판단까지 가지만 전체 입력의 일부라 P1로 봤습니다. 실데이터에서 자주 나오면 P0로 다시 보아야 합니다.</p>
+    <div class="findings">
+
+      <article class="finding s1">
+        <div class="fhead"><span class="fid">K1</span><span class="sev P1">P1</span><h3>가이던스가 변화량·영향 금액을 가이던스 수준으로 저장함. 부정된 손실 표현은 틀린 부호</h3></div>
+        <dl>
+          <dt>입력</dt><dd>① "We expect new tariffs to reduce fourth quarter EPS by approximately $0.10." 같은 형태: "an expected $0.12 per share impact from new tariffs", "dilutive to diluted EPS by $0.05 to $0.10", "negatively impact fourth quarter revenue by approximately $150 million", "revenue to decline by $50 million to $60 million", "revenue to increase by $1.0 billion to $1.2 billion", "gross margin … to decrease 1% to 2%". ② "Instead of the net loss per share we previously expected, we now expect $0.05 to $0.10 per share for fiscal 2027." ③ "operating margin of approximately (3%)"</dd>
+          <dt>기대</dt><dd>① 변화량은 그 지표의 수준이 아니므로 EXTRACTED가 아님(UNCLEAR 또는 별도 유형) ② 양수 또는 UNCLEAR ③ 음수 또는 UNCLEAR</dd>
+          <dt>실제</dt><dd>① 7문장 모두 변화량을 수준으로 EXTRACTED. 감소도 양수로 저장됨. ② −0.10~−0.05 EXTRACTED. ③ +3% EXTRACTED. 끝단: 개요가 글머리표이거나 GAAP·non-GAAP 두 범위를 한 문장에 적은 흔한 형식에서는 수준 문장이 추출되지 않습니다. 글머리표에는 앞을 내다보는 단어가 없고, 두 범위 문장은 설계상 UNCLEAR입니다. 그러면 관세 영향 문장만 EXTRACTED로 남아 다음 분기 EPS 가이던스가 +0.10이 됩니다. 발표 전 컨센서스 1.47 대비 −93%라서 실적이 예상을 넘었는데도 BEAT_WEAK_GUIDE가 됩니다</dd>
+        </dl>
+        <div class="where">위치 <code>domain/guidance.py</code> <code>extract()</code>·<code>_sign()</code>: 손실 단어가 없으면 한 문장의 금액을 그대로 수준으로 봄(reduce, decline, increase by, impact, dilutive 같은 변화 표현을 보지 않음). instead of, contrary to, no longer 같은 부정 표현을 보지 않음. 괄호 퍼센트를 음수 기호로 보지 않음 · 테스트 <code>test_K1_*</code> (12건)</div>
+      </article>
+
+      <article class="finding s1">
+        <div class="fhead"><span class="fid">K2</span><span class="sev P1">P1</span><h3>4분기 = 연간 − (1~3분기)가 10-K에서 바뀐 기준을 섞음</h3></div>
+        <dl>
+          <dt>입력</dt><dd>(a) NVIDIA 2025 회계연도 형태. 2024-06-10 10:1 분할. 1분기 10-Q(분할 전 공시) EPS 5.98, 2·3분기 0.67·0.78, 10-K 연간 2.94. 10-K에 4분기 주식수 없음. (b) 4분기에 사업부를 팔고 중단영업으로 표시. 10-K가 계속영업 기준으로 올해와 전년 연간 값을 재작성(분기 값은 다음 해 10-Q에서야 재작성). 1~3분기 매출 100, 연간 320, 전년 연간 380→300</dd>
+          <dt>기대</dt><dd>(a) 4분기 EPS 0.89 또는 값 없음, 2025-03-15 TTM EPS 약 2.94 또는 값 없음. (b) 4분기 매출 80·영업이익 14 또는 값 없음. 전년 4분기는 95 그대로 또는 값 없음</dd>
+          <dt>실제</dt><dd>(a) 4분기 EPS = 2.94 − (5.98 + 0.67 + 0.78) = <strong>−4.49</strong>. 파생 분기는 공시일이 10-K(분할 뒤)라 분할 정규화 대상에서 빠짐. TTM EPS <strong>−2.44</strong>. 10-K부터 다음 1분기 10-Q까지 약 석 달 동안, 이익을 내는 대형주의 PER과 EPS 기반 지표가 부호가 바뀜. (b) 4분기 매출 320 − 300 = <strong>20</strong>, 영업이익 56 − 60 = <strong>−4</strong>. 전년 4분기도 300 − 285 = 15로 다시 계산됨. 매출 전분기 대비 −80%, 분기 영업이익률 음수</dd>
+        </dl>
+        <div class="where">위치 <code>providers/live/sec_edgar.py</code> <code>q4_from_annual()</code>: 연간 값과 <code>known_at</code>(1~3분기)을 기준 확인 없이 뺌. 분할 여부와 10-K의 재작성(전년 연간 값 변경)을 보지 않음 · <code>domain/corporate_actions.py</code> <code>normalize_quarters()</code>: 파생 4분기는 조정 대상 밖 · 테스트 <code>test_K2_*</code> (4건). 대형주 분할은 해마다 10~20건 정도, 중단영업 재작성은 해마다 상장사의 몇 % 정도에서 나옵니다. 신청서 한계의 "몇 센트 차이"보다 훨씬 큰 오류입니다</div>
+      </article>
+
+      <article class="finding s2">
+        <div class="fhead"><span class="fid">K3</span><span class="sev P2">P2</span><h3>기간별 개념 선택이 과거 시점 보기를 바꿈</h3></div>
+        <dl>
+          <dt>입력</dt><dd>2024년은 <code>Revenues</code>로 공시(1~3분기 100, 10-K 2025-02-15 연간 400). 2025-05-01 10-Q부터 선호 순서가 앞선 <code>RevenueFromContractWithCustomerExcludingAssessedTax</code>로 태그하고 전년 비교치(2024 1분기 90)를 함께 공시</dd>
+          <dt>기대</dt><dd>2025-03-01 시점 보기는 그때 공시된 값. 2024 1~4분기 모두 100</dd>
+          <dt>실제</dt><dd>2025-03-01 시점 보기에서 2024 1분기가 사라짐. 그 기간의 개념이 새 개념으로 정해졌는데 새 개념 값은 05-01에 공시됐기 때문. 4분기는 400 − (90 + 100 + 100) = 110이고 10-K 날짜로 기록됨. <code>known_at</code>가 10-K 뒤에 공시된 값으로 대체하기 때문이고, 두 개념이 섞임</dd>
+        </dl>
+        <div class="where">위치 <code>sec_edgar.py</code> <code>_pick_concept()</code>: 새 개념의 비교치가 옛 개념의 최초 보고값을 기간째 대체 · <code>known_at</code> 대체 규칙 · 테스트 <code>test_K3_*</code> (2건). 개념 전환과 정의 차이가 있어야 값이 틀리고, 시점 누수는 과거 시점 조회에서만 드러나서 P2</div>
+      </article>
+
+      <article class="finding s2">
+        <div class="fhead"><span class="fid">K4</span><span class="sev P2">P2</span><h3>잠정 실적 사전 발표(Item 2.02)가 실적 발표일이 됨</h3></div>
+        <dl>
+          <dt>입력</dt><dd>4분기(기말 2025-12-31). 2026-01-12 잠정 실적 8-K(Item 2.02, 예: 1월 콘퍼런스의 잠정 매출). 2026-02-05 실제 실적 발표(EPS 1.20). <code>earnings_release_times</code>는 Item 2.02 8-K를 모두 돌려줌</dd>
+          <dt>기대</dt><dd>EPS 1.20은 02-05 전에는 알려진 것으로 보지 않음</dd>
+          <dt>실제</dt><dd>발표일이 2026-01-12로 잡혀 <code>earnings_visible</code>이 01-20에 True(발표 3.5주 전). 실시간에서는 Finnhub 행이 실제 발표 뒤에 생기므로 직접 누수보다 다음 문제로 나타남. 마지막 실적일이 틀리게 표시되고, 실적 신선도가 이른 날짜로 계산되며, 실제 발표와 함께 나온 가이던스가 ±3일 규칙에 걸려 붙지 않음</dd>
+        </dl>
+        <div class="where">위치 <code>domain/earnings.py</code> <code>pair_with_releases()</code>: 기말 뒤 첫 Item 2.02 8-K를 발표로 봄 · <code>sec_edgar.py</code> <code>earnings_release_times()</code>: 잠정 실적·콘퍼런스 자료도 포함 · 테스트 <code>test_K4_*</code></div>
+      </article>
+
+      <article class="finding">
+        <div class="fhead"><span class="fid">K5</span><span class="sev P3">P3</span><h3>긴 공백 뒤 첫 동기화가 증거를 다 받기 전에 재상장을 판정함</h3></div>
+        <dl>
+          <dt>입력</dt><dd>TTT는 매 거래일 거래됨. SEC 목록이 동기화한 날(2026-06-02) TTT를 빠뜨림. 9주 뒤 다음 동기화. 일봉은 한 번에 최신 30일만 받음(<code>max_bar_calls=30</code>)</dd>
+          <dt>기대</dt><dd>이력 유지, 상장폐지 기록 없음</dd>
+          <dt>실제</dt><dd>부재 기간 앞쪽 3주의 일봉이 아직 없어 거래 지속 증거가 모자라고, 7일 규칙으로 새 구간이 됨. <code>bars('TTT')</code> 0개, 06-02 상장폐지 기록. 대조 실행: 3주 공백이거나 호출 한도가 100이면 정상</dd>
+        </dl>
+        <div class="where">위치 <code>application/sync.py</code> 1단계(최신 순 30일) 뒤 2a단계 <code>_really_delisted()</code> · 테스트 <code>test_K5_*</code></div>
+      </article>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-obs">
+    <h2 id="h-obs">관찰 (점수 영향 작음)</h2>
+    <ul>
+      <li>SEC 없이 돌리면 earnings가 BLOCKED_BY_CREDENTIAL이 아니라 FAILED("NVDA 응답 0건")로 보고됩니다. 원인은 SEC 미설정인데 메시지는 Finnhub 달력 문제처럼 읽힙니다.</li>
+      <li><code>tests/integration/test_service_api.py</code>는 키 없는 LIVE 레지스트리를 가짜 전송 없이 만듭니다. FINRA는 키 없이도 설정된 것으로 보므로, 네트워크가 있는 CI에서는 실제 FINRA를 부를 수 있습니다. 평가 환경에서도 스위트 실행 중 <code>api.finra.org</code> 연결 시도가 프록시 차단 기록으로 남았습니다.</li>
+      <li>개요 글머리표("• Revenue of $10.2 billion to $10.4 billion")는 앞을 내다보는 단어가 없어 추출 대상에서 빠집니다. 값이 없을 뿐이라 안전하지만, K1이 판단까지 가는 경로가 됩니다.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="h-asked">
+    <h2 id="h-asked">신청서가 요청한 점검 결과</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>요청</th><th>결과</th></tr></thead>
+      <tbody>
+        <tr><td>live-verify 실행 기록과 표본 값 확인, 가능하면 재실행</td><td>run 36253710550 로그의 13개 항목과 값이 신청서와 같음. 재실행 run 36255567036에서 6개 항목 같은 값, SEC 7개 항목은 User-Agent secret이 없어 재현 못 함</td></tr>
+        <tr><td><code>pair_with_releases</code>에서 발표 전 결과가 보이는 경우</td><td>찾음(K4). 잠정 실적 사전 발표가 Item 2.02로 나오면 발표일이 몇 주 이르게 잡힘</td></tr>
+        <tr><td>기간별 XBRL 개념 선택과 4분기 EPS의 시점 누수·틀린 값</td><td>찾음. 연중 분할과 중단영업 재작성에서 4분기가 기준을 섞음(K2, P1). 개념 전환과 전년 비교치가 과거 시점 보기를 바꿈(K3, P2)</td></tr>
+        <tr><td>새 가이던스 규칙에서 틀린 부호로 EXTRACTED가 되는 문장</td><td>찾음(K1). 부정된 손실 표현 2문장은 음수, 괄호 퍼센트 1문장은 양수. 변화량 7문장은 감소가 양수 수준으로 저장됨</td></tr>
+        <tr><td>반례를 실행 가능한 테스트로</td><td><code>evaluations/eval6</code> 20건, 모두 <span class="mono">f80c460</span>에서 의도대로 실패. 3~5차 반례 42건은 계속 통과</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-score">
+    <h2 id="h-score">점수 기준표</h2>
+    <p class="note">3~5차와 같은 기준표입니다. 등급 구간: A는 85점 이상이면서 Gate 5개 모두 통과, B 75~84, C 60~74, D 60 미만.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>영역</th><th class="num">배점</th><th class="num">5차</th><th class="num">6차</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td>데이터 무결성·시점 정확성</td><td class="num">25</td><td class="num">21</td><td class="num">19</td><td>L2·L3 해결, 부채 빈티지의 시점 누수 수정. 4분기 파생의 기준 혼합(K2, P1), 개념 전환(K3), 사전 발표 날짜(K4), 긴 공백 재상장(K5)</td></tr>
+        <tr><td>결정 안전성</td><td class="num">20</td><td class="num">15</td><td class="num">15</td><td>L1 해결. 변화량·영향 금액과 부정 표현이 EXTRACTED로 남아 끝단 BEAT_WEAK_GUIDE(K1)</td></tr>
+        <tr><td>성과 평가·모의투자</td><td class="num">15</td><td class="num">13</td><td class="num">14</td><td>L2·L3의 가짜 상장폐지 성과 경로 해소, UNRESOLVED는 확정하지 않음. 긴 공백 경로(K5)가 남음</td></tr>
+        <tr><td>실데이터 검증</td><td class="num">15</td><td class="num">6</td><td class="num">12</td><td>13개 항목 실제 호출 기록, 실데이터 결함 8건 수정. 재실행은 6개 항목만 재현(SEC secret 없음). 값 대조 없음, 종목 마스터 동기화 미검증</td></tr>
+        <tr><td>테스트·CI·재현성</td><td class="num">10</td><td class="num">9</td><td class="num">9</td><td>수치 정확, 반례 원문 편입. LIVE 테스트 하나가 실제 FINRA를 부를 수 있음</td></tr>
+        <tr><td>UI 정확성</td><td class="num">10</td><td class="num">10</td><td class="num">10</td><td>이번 라운드 UI 변경 없음, 찾은 결함 없음</td></tr>
+        <tr><td>신청서·문서의 정확성</td><td class="num">5</td><td class="num">4</td><td class="num">4</td><td>수치와 실행 기록은 모두 사실. SEC_USER_AGENT secret 설명, "몇 센트" 한계, 사전 발표 방향 누락</td></tr>
+      </tbody>
+      <tfoot><tr><td>합계</td><td class="num">100</td><td class="num">78</td><td class="num">83</td><td>B 등급 · A Gate 5/5</td></tr></tfoot>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-next">
+    <h2 id="h-next">다음 라운드 우선순위</h2>
+    <ol class="prio">
+      <li><strong>K2 4분기 파생.</strong> 빼기 전에 기준이 같은지 확인하십시오. 1~3분기 공시 뒤 10-K 전까지 분할이 있었다면, 주당 값을 연간 기준으로 조정한 뒤 빼거나 4분기 EPS를 비우십시오. 10-K가 전년 연간 값을 바꿨다면(재작성) 그해와 전년의 4분기를 비우십시오.</li>
+      <li><strong>K1 가이던스.</strong> reduce, decline, decrease, increase by, impact, headwind, dilutive, accretive 같은 변화 표현이 있는 문장은 수준 가이던스로 저장하지 마십시오. instead of, contrary to, no longer, rather than 뒤의 손실 표현으로는 부호를 정하지 마십시오. 괄호 퍼센트 "(3%)"는 음수 기호로 보십시오. 글머리표 개요를 읽게 되면 수준 문장이 먼저 잡혀 이 경로가 줄어듭니다.</li>
+      <li><strong>K3 개념 선택.</strong> 과거 시점 보기는 그 시점에 공시된 사실만으로 개념을 고르십시오. <code>known_at</code>가 기준일 뒤에 공시된 값으로 대체하지 않게 하십시오.</li>
+      <li><strong>K4 발표일.</strong> 기말과 다음 기말 사이에 Item 2.02가 여러 건이면 마지막 것을 쓰거나, EPS가 담긴 보도자료인지 확인하십시오.</li>
+      <li><strong>K5.</strong> 부재 기간의 일봉을 다 받기 전에는 재상장 판정을 미루십시오.</li>
+      <li><strong>live-verify 재현성.</strong> <code>SEC_USER_AGENT</code>를 저장소 secret으로 두거나 문서를 고치십시오. 이번 재실행을 <code>sec_user_agent</code> 입력과 함께 한 번 더 돌리면 SEC 7개 항목도 독립 재현됩니다.</li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="h-repro">
+    <h2 id="h-repro">재현 방법</h2>
+    <pre><code># 반례 모음 가져오기 (평가 브랜치 = f80c460 + evaluations/eval6)
+git fetch origin claude/new-session-ir1fdw
+git checkout origin/claude/new-session-ir1fdw -- evaluations/eval6
+
+pip install -r backend/requirements.lock &amp;&amp; pip install --no-deps -e ./backend
+python -m pytest -q -o addopts="" evaluations/eval6        # f80c460: 20 failed (의도한 실패)
+python -m pytest -q -o addopts="" evaluations/eval3 evaluations/eval4 evaluations/eval5   # 42 passed
+
+# 실제 공급자 재검증: GitHub → Actions → live-verify → Run workflow
+#   sec_user_agent 입력에 "이름 이메일"을 넣어야 SEC 7개 항목이 실행됨</code></pre>
+    <p class="note">반례 테스트는 <code>backend/tests</code> 밖에 있어 CI가 수집하지 않습니다. 고친 뒤에는 모두 통과해야 하며, 통과한 테스트는 회귀 테스트로 <code>backend/tests</code>에 옮기면 됩니다.</p>
+  </section>
+</main>
