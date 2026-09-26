@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from statistics import fmean
 from typing import Mapping, Sequence
@@ -214,3 +214,33 @@ def segment_samples(samples: Sequence[OutcomeSample], key: str, value: str, min_
     if len(seg) >= min_n:
         return seg, True
     return list(samples), False
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentReport:
+    """What calibration can honestly say about one sector / regime segment.
+
+    MarketLens scores every segment with the ONE production weight set; no segment-specific model is
+    ever applied (``applied`` is always False). A segment with enough mature, non-overlapping samples gets
+    its own weight *proposal* for human review; an under-sampled one says so and uses the global model."""
+
+    key: str
+    value: str
+    status: str  # SEGMENT_INSUFFICIENT | SEGMENT_PROPOSAL | SEGMENT_NO_SIGNAL
+    mature_samples: int
+    min_samples: int
+    label_ko: str
+    proposal: WeightProposal | None = None
+    applied: bool = False
+
+
+def segment_report(samples: Sequence[OutcomeSample], key: str, value: str, current: Mapping[str, float], as_of: date, cfg: CalibrationConfig) -> SegmentReport:
+    seg = [s for s in samples if getattr(s, key) == value]
+    mature = [s for s in non_overlapping(seg, cfg.horizon) if is_mature(s.rec_day, cfg.horizon, as_of) and s.forward_returns.get(cfg.horizon) is not None]
+    n, need = len(mature), cfg.min_segment_samples
+    if n < need:
+        return SegmentReport(key, value, "SEGMENT_INSUFFICIENT", n, need, f"성숙 표본 {n}개 < {need}개 → 전체 모델 사용 (전용 모델 없음)")
+    prop = propose_weights(seg, current, as_of, replace(cfg, min_samples=min(cfg.min_samples, need)))
+    if prop.status != "PROPOSED":
+        return SegmentReport(key, value, "SEGMENT_NO_SIGNAL", n, need, f"표본 {n}개지만 {prop.reason} → 전체 모델 사용", prop)
+    return SegmentReport(key, value, "SEGMENT_PROPOSAL", n, need, f"표본 {n}개로 전용 가중치 '제안'만 계산 — 검토용이며 운영 점수에는 적용하지 않음", prop)

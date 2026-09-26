@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from marketlens.application.codec import encode
 from marketlens.domain.corporate_actions import split_factor
-from marketlens.domain.calibration import compare_shadow, propose_weights, segment_samples
+from marketlens.domain.calibration import compare_shadow, propose_weights, segment_report
 from marketlens.domain.enums import BULLISH_ACTIONS, Action, ExitReason
 from marketlens.domain.evaluation import HORIZONS, OutcomeSample, bucket_performance, dedupe_samples, factor_ic, forward_outcome, is_mature, rolling_ic
 from marketlens.domain.market import Bar
@@ -345,8 +345,9 @@ class EvaluationService:
             segments = {}
             for key in ("sector", "regime"):
                 for val in sorted({getattr(x, key) for x in samples}):
-                    _seg, is_seg = segment_samples(samples, key, val, ccfg.min_segment_samples)
-                    segments[f"{key}:{val}"] = "업종/국면 전용 모델" if is_seg else "표본 부족 → 전체 모델 사용"
+                    rep = segment_report(samples, key, val, prod_weights, today, ccfg)
+                    segments[f"{key}:{val}"] = {"status": rep.status, "label": rep.label_ko, "mature_samples": rep.mature_samples, "min_samples": rep.min_samples,
+                                                "applied": rep.applied, "proposal": encode(rep.proposal) if rep.proposal is not None else None}
             payload = {"proposal": encode(prop), "segments": segments}
             if prop.status != "PROPOSED":
                 repo.add_calibration_run(s, prop.status, None, payload)

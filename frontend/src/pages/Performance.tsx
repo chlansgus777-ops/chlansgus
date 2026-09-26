@@ -18,13 +18,32 @@ interface Perf {
   sector_performance: Record<string, { n: number; avg_return: number; win_rate: number }>;
   regime_performance: Record<string, { n: number; avg_return: number; win_rate: number }>;
 }
-interface Cal { runs: { id: number; status: string; candidate: string | null; created_at: string }[]; models: { version: string; status: string; weights: Record<string, number> }[]; production_weights: Record<string, number>; production_version: string }
+export interface SegmentInfo { status: string; label: string; mature_samples: number; min_samples: number; applied: boolean }
+interface Cal { runs: { id: number; status: string; candidate: string | null; created_at: string; payload?: { segments?: Record<string, SegmentInfo | string> } }[]; models: { version: string; status: string; weights: Record<string, number> }[]; production_weights: Record<string, number>; production_version: string }
 
 const PAPER_KO: Record<string, string> = {
   trades: "거래 수", closed: "청산 완료", win_rate: "승률", average_return: "평균 수익률", median_return: "중앙값 수익률", profit_factor: "손익비(PF)",
   expectancy: "기대값(거래당)", max_drawdown: "최대 낙폭(계좌 평가 기준)", average_holding_days: "평균 보유 거래일", average_mae: "평균 최대 역행(MAE)",
   average_mfe: "평균 최대 순행(MFE)", excess_vs_benchmark: "SPY 대비 초과수익",
 };
+const SEG_KO: Record<string, string> = { SEGMENT_INSUFFICIENT: "표본 부족 → 전체 모델", SEGMENT_NO_SIGNAL: "신호 없음 → 전체 모델", SEGMENT_PROPOSAL: "전용 가중치 제안(검토용)" };
+
+/** Sector / regime segments of the latest calibration run. Only the one production weight set is ever
+ * used for scoring; a segment "proposal" is for review, never applied. Old runs stored a plain label. */
+export function SegmentTable({ segments }: { segments: Record<string, SegmentInfo | string> }) {
+  const rows = Object.entries(segments);
+  if (!rows.length) return null;
+  return (
+    <div data-testid="segments">
+      <div className="muted">업종·시장 국면별 보정: 점수 계산에는 항상 하나의 운영 가중치만 씁니다. 표본이 충분한 구간은 전용 가중치를 '제안'만 하며 운영에는 적용하지 않습니다.</div>
+      <table><thead><tr><th>구간</th><th>상태</th><th>성숙 표본</th><th>운영 적용</th></tr></thead>
+        <tbody>{rows.map(([k, v]) => typeof v === "string"
+          ? <tr key={k}><td>{k}</td><td colSpan={3} className="muted">이전 형식 기록(검증 전 표시): {v}</td></tr>
+          : <tr key={k}><td>{k}</td><td title={v.label}>{SEG_KO[v.status] ?? v.status}</td><td>{v.mature_samples} / {v.min_samples}</td><td>{v.applied ? "예" : "아니오"}</td></tr>)}</tbody></table>
+    </div>
+  );
+}
+
 const CAL_KO: Record<string, string> = { INSUFFICIENT_SAMPLES: "표본 부족(가중치 변경 없음)", NO_SIGNAL: "유의한 신호 없음", SHADOW_STARTED: "섀도 모델 시작", SHADOW_CONTINUES: "섀도 검증 계속", PROMOTED: "승격(운영 반영)" };
 
 export default function Performance() {
@@ -85,6 +104,7 @@ export default function Performance() {
         <Card title={`가중치 보정 — 운영 모델 ${c.data.production_version}`}>
           <div className="muted">가중치는 ① 겹치지 않는 독립 성숙 표본이 최소 기준 이상이고 ② 섀도(비운영) 기간의 표본 외 IC가 개선되며 ③ 적중률·하방 위험이 나빠지지 않을 때만, 회당 상대 5% 이내로 바뀝니다.</div>
           <div className="row">{Object.entries(c.data.production_weights).map(([k, v]) => <span key={k} className="pill">{k}: {v}</span>)}</div>
+          {c.data.runs[0]?.payload?.segments && <SegmentTable segments={c.data.runs[0].payload.segments} />}
           {c.data.runs.length ? <table><thead><tr><th>실행</th><th>결과</th><th>후보 모델</th><th>시각</th></tr></thead><tbody>{c.data.runs.map((r) => <tr key={r.id}><td>{r.id}</td><td>{CAL_KO[r.status] ?? r.status}</td><td>{r.candidate ?? "—"}</td><td>{day(r.created_at)}</td></tr>)}</tbody></table> : <Empty>보정 실행 기록 없음</Empty>}
         </Card>
       )}

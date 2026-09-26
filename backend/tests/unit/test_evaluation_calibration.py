@@ -108,3 +108,21 @@ def test_segment_fallback_to_global():
     assert not is_seg and len(seg) == len(s)
     seg2, is_seg2 = segment_samples(s, "sector", "Tech", 5)
     assert is_seg2 and all(x.sector == "Tech" for x in seg2)
+
+
+def test_segment_report_never_claims_a_segment_model_it_does_not_have():
+    """Evaluation 2 item 14: an over-threshold segment was labelled '업종/국면 전용 모델' although no segment
+    model exists. Now: a review-only proposal from mature, non-overlapping samples; never applied."""
+    from marketlens.domain.calibration import segment_report
+
+    s = samples(noise=0.01)
+    cfg = CalibrationConfig(min_samples=30, min_segment_samples=60)
+    as_of = date(2026, 9, 1)
+    tech = segment_report(s, "sector", "Tech", DEFAULT_WEIGHTS, as_of, cfg)
+    assert tech.status == "SEGMENT_PROPOSAL" and not tech.applied and "운영 점수에는 적용하지 않음" in tech.label_ko
+    assert tech.proposal is not None and tech.proposal.status == "PROPOSED" and tech.mature_samples >= 60
+    # 5 days of re-recommending the same names: many raw rows, few independent mature samples
+    thin = segment_report(samples(n_days=5, repeat_tickers=True), "sector", "Tech", DEFAULT_WEIGHTS, as_of, cfg)
+    assert thin.status == "SEGMENT_INSUFFICIENT" and thin.mature_samples < 60 and "전체 모델 사용" in thin.label_ko
+    immature = segment_report(samples(start=date(2026, 8, 25)), "sector", "Tech", DEFAULT_WEIGHTS, as_of, cfg)
+    assert immature.status == "SEGMENT_INSUFFICIENT"  # samples that have not matured do not count
