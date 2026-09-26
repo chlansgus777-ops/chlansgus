@@ -8,6 +8,11 @@ Rules (no LLM, no inference):
   "73.5%, plus or minus 50 basis points", "in the range of 45% to 46%", a single "$X billion".
 - Anything else about a metric in a forward-looking sentence → GUIDANCE_UNCLEAR (kept, value None).
 - "does not provide guidance", "withdraw(s/n) … guidance" → NO_GUIDANCE.
+- Sign: a loss is never read as a profit. EPS / operating-margin guidance worded as a loss ("loss per
+  diluted share of $1.10 to $1.20", "net loss of …") is stored negative (low = -1.20, high = -1.10). A
+  sentence that mixes loss and profit wording ("a loss of $0.05 to earnings of $0.02", "breakeven"),
+  writes an explicit negative number ("-$0.10", "$(0.10)", "negative 3%"), or talks about a loss next to
+  revenue / gross margin / capex → GUIDANCE_UNCLEAR, because the sign cannot be read deterministically.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ from dataclasses import dataclass
 FORWARD = ("expect", "outlook", "guidance", "anticipate", "forecast", "project", "we see ", "will be in the range", "is expected")
 NO_GUIDE = re.compile(r"(does not|do not|will not|won't)\s+provide\s+(\w+\s+)?(guidance|outlook)|withdr[ae]w\w*\s+(its\s+|our\s+|the\s+)?(\w+\s+)?(guidance|outlook)", re.I)
 METRICS: list[tuple[str, tuple[str, ...]]] = [
-    ("eps", ("earnings per share", "per diluted share", "diluted eps", "eps")),
+    ("eps", ("earnings per share", "loss per share", "per diluted share", "per share", "diluted eps", "eps")),
     ("gross_margin", ("gross margin",)),
     ("operating_margin", ("operating margin",)),
     ("capex", ("capital expenditures", "capex")),
@@ -107,6 +112,37 @@ def _parse(metric: str, s: str) -> tuple[float | None, float | None, str, bool]:
     return None, None, unit, False
 
 
+_LOSS = re.compile(r"(?<![a-z])(loss|losses|deficit)(?![a-z])")
+_METRIC_PHRASES = re.compile(r"earnings per share|diluted earnings|earnings per diluted share|earnings release|earnings call")
+_PROFIT = re.compile(r"(?<![a-z])(profit|profitable|profitability|net income|income per|earnings|break-?\s?even|positive)(?![a-z])")
+_NEG_MARK = re.compile(r"(?:^|(?<=[\s(]))[-−](?=\s?\$?\s?\d)|\$\s?\(\s?\d|\(\s?\$\s?\d|negative\s+\$?\s?\d|(?<!or )minus\s+\$?\s?\d")
+_RANGE_LEFT = re.compile(r"(\d|%|billion|million|thousand|\bb|\bm)\s*$")
+
+
+def _has_negative_number(low: str) -> bool:
+    """An explicitly negative number ("-$0.10", "$(0.10)", "negative 3%"); a dash between two amounts
+    ("$3.2 billion - $3.4 billion", "45% - 46%") is a range, not a sign."""
+    for m in _NEG_MARK.finditer(low):
+        if m.group(0) in ("-", "−") and _RANGE_LEFT.search(low[: m.start()]):
+            continue
+        return True
+    return False
+
+
+def _sign(metric: str, s: str) -> str:
+    """POS | NEG | UNCLEAR for the numbers of one guidance sentence (see module rules)."""
+    low = s.lower()
+    if _has_negative_number(low):
+        return "UNCLEAR"
+    if not _LOSS.search(low):
+        return "POS"
+    if metric not in ("eps", "operating_margin"):
+        return "UNCLEAR"  # revenue / gross margin / capex cannot be a loss — something else is being discussed
+    if _PROFIT.search(_METRIC_PHRASES.sub(" ", low)):
+        return "UNCLEAR"  # a range from a loss to a profit, or two different measures
+    return "NEG"
+
+
 def extract(text: str) -> list[GuidanceItem]:
     out: list[GuidanceItem] = []
     header_period: str | None = None  # "Outlook for the third quarter of fiscal 2027:" applies to the bullets below
@@ -130,6 +166,11 @@ def extract(text: str) -> list[GuidanceItem]:
             out.append(GuidanceItem(ms[0], None, None, "", period, s[:600], "GUIDANCE_UNCLEAR", "LOW"))  # several metrics in one sentence
             continue
         lo, hi, unit, clean = _parse(ms[0], s)
+        sign = _sign(ms[0], s)
+        if sign == "UNCLEAR":
+            lo = hi = None
+        elif sign == "NEG" and lo is not None and hi is not None:
+            lo, hi = -max(lo, hi), -min(lo, hi)
         if lo is None:
             out.append(GuidanceItem(ms[0], None, None, unit, period, s[:600], "GUIDANCE_UNCLEAR", "LOW"))
             continue

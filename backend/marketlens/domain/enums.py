@@ -73,6 +73,7 @@ class HardVeto(StrEnum):
     UNACCEPTABLE_LIQUIDITY = "UNACCEPTABLE_LIQUIDITY"
     EXTREME_EVENT_RISK = "EXTREME_EVENT_RISK"
     INSUFFICIENT_MODEL_COVERAGE = "INSUFFICIENT_MODEL_COVERAGE"  # sector model cannot judge the core (fundamental/valuation)
+    SEVERE_ESTIMATE_CONFLICT = "SEVERE_ESTIMATE_CONFLICT"  # two consensus providers disagree > 10% → no new buying
 
 
 class Stance(StrEnum):

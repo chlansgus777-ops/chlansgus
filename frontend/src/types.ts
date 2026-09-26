@@ -75,7 +75,7 @@ export interface CommitteeResult {
   synthesis: { committee_agreement: string; strongest_bull_argument: string; strongest_bear_argument: string; unresolved_uncertainty: string[]; advisory_stance: string; confidence_adjustment: number } | null;
   risk_review: { risk_level: string; recommended_action: string | null; concerns: string[]; summary: string } | null;
   portfolio_advice: { portfolio_fit: string; suggested_size: string; concentration_warning: string | null; overlap_risk: string | null; summary: string } | null;
-  consensus_pct: number | null; divergence: string | null; guard: Record<string, { rejected_claims: string[]; invalid_evidence_ids: string[]; confidence_scale?: number }>; injection_flags: string[]; prompt_version: string;
+  consensus_pct: number | null; divergence: string | null; guard: Record<string, { rejected_claims: string[]; invalid_evidence_ids: string[]; confidence_scale?: number }>; injection_flags: string[]; prompt_version: string; depth?: string | null; reused_from?: number | null;
 }
 
 export interface StockDetail { recommendation: OppRow; analysis: Analysis; price_history?: { day: string; close: number }[]; committee: CommitteeResult | null; committee_recommendation_id?: number | null; history: { id: number; as_of: string; score: number; action: string }[]; versions: Record<string, string> }

@@ -207,6 +207,9 @@ def recommendation_freshness(
       *current* quote: max buy, stop, reward/risk and the size of the move since the analysis. Without a
       fresh quote it is NEEDS_REVALIDATION; if the quote breaks the plan it is PLAN_INVALIDATED.
     - A major new issue since the analysis always requires re-analysis.
+    - Whenever a fresh quote newer than the analysis is available, the plan is checked against it first,
+      whatever the age: a young recommendation whose price already broke the stop / max buy / R:R is
+      PLAN_INVALIDATED, not CURRENT.
     Only CURRENT may be shown as actionable.
     """
     pol = policy or RevalidationPolicy()
@@ -222,10 +225,16 @@ def recommendation_freshness(
     if new_major_events:
         return RecommendationFreshness("NEEDS_REVALIDATION", recorded_quality, n, f"{when}; 분석 이후 중요한 새 이슈 발생({', '.join(new_major_events[:3])}) — 재분석 필요")
     age = now - as_of
-    if age <= pol.max_intraday_age or not market_active_between(as_of, now):
-        return RecommendationFreshness("CURRENT", recorded_quality, n, f"{when}; 분석 {int(age.total_seconds() // 60)}분 경과, 이후 가격 변동 가능 시간 없음" if age > pol.max_intraday_age else f"{when}; 분석 {int(age.total_seconds() // 60)}분 경과")
     minutes = int(age.total_seconds() // 60)
     quote_ok = quote_price is not None and quote_ts is not None and timedelta(0) <= now - quote_ts <= pol.max_quote_age
+    # A fresh quote newer than the analysis is always checked against the plan — even for a young
+    # recommendation: ten minutes are enough for a price to fall through the stop.
+    if plan is not None and quote_ok and quote_ts is not None and quote_ts > as_of:
+        problems = _revalidate(plan, quote_price, pol)  # type: ignore[arg-type]
+        if problems:
+            return RecommendationFreshness("PLAN_INVALIDATED", recorded_quality, n, f"분석 후 {minutes}분 경과, 현재가 기준 조건 이탈: " + "; ".join(problems), problems=tuple(problems))
+    if age <= pol.max_intraday_age or not market_active_between(as_of, now):
+        return RecommendationFreshness("CURRENT", recorded_quality, n, f"{when}; 분석 {int(age.total_seconds() // 60)}분 경과, 이후 가격 변동 가능 시간 없음" if age > pol.max_intraday_age else f"{when}; 분석 {int(age.total_seconds() // 60)}분 경과")
     if plan is None or not quote_ok:
         return RecommendationFreshness("NEEDS_REVALIDATION", recorded_quality, n, f"{when}; 장중 분석 후 {minutes}분 경과 — 가격이 바뀌었을 수 있어 현재가 확인 전에는 실행 불가")
     problems = _revalidate(plan, quote_price, pol)  # type: ignore[arg-type]

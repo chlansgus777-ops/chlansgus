@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { advise, priceZone } from "../advice";
 import { api } from "../api";
@@ -57,6 +57,27 @@ export function committeeFor(data: SD | null, ticker: string): CommitteeResult |
   return data.committee;
 }
 
+export interface LiveStatus { id: number; status: string | null; reason: string | null }
+
+/** "현재 유효" is a statement about NOW: while the page stays open the stored recommendation is re-judged
+ * every minute (the server re-checks age, session and the cached quote against the plan). A plain read
+ * of the same recommendation — never a new analysis; a newer recommendation id is ignored here. */
+export function useLiveStatus(ticker: string, recId: number | undefined, everyMs = 60_000): LiveStatus | null {
+  const [live, setLive] = useState<LiveStatus | null>(null);
+  useEffect(() => {
+    if (recId === undefined) return;
+    let alive = true;
+    const timer = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      api.get<SD>(`/stocks/${ticker}`).then((x) => {
+        if (alive && x.recommendation.id === recId) setLive({ id: recId, status: x.recommendation.current_status ?? null, reason: x.recommendation.current_status_reason ?? null });
+      }).catch(() => undefined);
+    }, everyMs);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [ticker, recId, everyMs]);
+  return live && live.id === recId ? live : null;
+}
+
 function StockDetail({ ticker }: { ticker: string }) {
   const [refreshTick, setRefreshTick] = useState(0);
   const d = useApi<SD>(`/stocks/${ticker}${refreshTick ? "?refresh=true" : ""}`, [refreshTick]);
@@ -64,10 +85,12 @@ function StockDetail({ ticker }: { ticker: string }) {
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const evIndex = useMemo(() => new Map<string, Evidence>((d.data?.analysis.evidence ?? []).map((e) => [e.evidence_id, e])), [d.data]);
+  const live = useLiveStatus(ticker, d.data?.recommendation.id);
   if (d.state === "loading") return <Loading what={`${ticker} 분석`} steps={["가격·재무 데이터 확인", "업종 모델 적용", "이슈·거시 반영", "가격 계획 계산"]} />;
   if (!d.data) return <Err error={d.error} retry={d.reload} />;
   if (d.data.analysis.ticker !== ticker) return <Loading what={`${ticker} 분석`} />;  // never render another stock's data
-  const { recommendation: rec, analysis: a } = d.data;
+  const { recommendation: stored, analysis: a } = d.data;
+  const rec = live ? { ...stored, current_status: live.status, current_status_reason: live.reason } : stored;
   const com = committeeFor(d.data, ticker);
   const comps = a.scorecard.components;
   const positives = comps.flatMap((c) => c.reasons.filter((r) => r.sign > 0)).slice(0, 5);

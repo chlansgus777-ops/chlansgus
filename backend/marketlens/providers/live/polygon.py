@@ -39,13 +39,14 @@ class PolygonProvider:
         d = self._get(f"/v2/aggs/ticker/{ticker}/range/1/day/{start.isoformat()}/{end.isoformat()}", adjusted="true", sort="asc", limit=50000)
         return _bars(d.get("results"))
 
-    def get_splits(self, since: date, max_pages: int = 5) -> list[SplitEvent]:
-        """All US stock splits executed on/after ``since`` (one request per 1,000 events)."""
+    def get_splits(self, since: date, until: date, max_pages: int = 5) -> list[SplitEvent]:
+        """All US stock splits executed in [``since``, ``until``] (one request per 1,000 events). Announced
+        future splits are excluded by the query and again defensively on the parsed rows."""
         out: list[SplitEvent] = []
-        params: dict[str, Any] = {"execution_date.gte": since.isoformat(), "order": "asc", "sort": "execution_date", "limit": 1000}
+        params: dict[str, Any] = {"execution_date.gte": since.isoformat(), "execution_date.lte": until.isoformat(), "order": "asc", "sort": "execution_date", "limit": 1000}
         for _ in range(max_pages):
             d = self._get("/v3/reference/splits", **params)
-            out += parse_splits(d.get("results"))
+            out += [e for e in parse_splits(d.get("results")) if e.execution_date <= until]
             nxt = d.get("next_url")
             if not nxt or "cursor=" not in nxt:
                 break

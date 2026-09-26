@@ -5,7 +5,7 @@ import { Action, Card, Empty, EvidenceChips, Stance } from "./ui";
 
 const ORDER = ["fundamental", "earnings", "valuation", "macro", "technical", "news", "risk_analyst"];
 const AGENT_KO: Record<string, string> = { fundamental: "펀더멘털 분석가", earnings: "실적 분석가", valuation: "밸류에이션 분석가", macro: "거시 분석가", technical: "기술적 분석가", news: "뉴스·이슈 분석가", risk_analyst: "리스크 분석가" };
-const STATUS_KO: Record<string, string> = { COMPLETED: "완료", PARTIAL: "일부 완료(무효 출력 제외)", UNAVAILABLE: "사용 불가", SKIPPED: "생략" };
+const STATUS_KO: Record<string, string> = { COMPLETED: "완료", PARTIAL: "일부 완료(무효 출력 제외)", UNAVAILABLE: "사용 불가", SKIPPED: "생략", REUSED: "이전 결과 재사용" };
 const LEVEL_KO: Record<string, string> = { LOW: "낮음", MEDIUM: "보통", HIGH: "높음", EXTREME: "극단적" };
 const FIT_KO: Record<string, string> = { GOOD: "적합", NEUTRAL: "보통", POOR: "부적합" };
 
@@ -25,6 +25,13 @@ export function CommitteeView({ c, evidence }: { c: CommitteeResult; evidence: M
         {c.action_changed_by && <span className="warn">{c.action_changed_by}에 의해 하향</span>}
         <span className="muted">프롬프트 {c.prompt_version}</span>
       </div>
+      {c.status === "REUSED" && (
+        <div className="warn" data-testid="committee-reused">
+          ↺ 이 위원회 의견은 이번 분석에서 새로 나온 것이 아닙니다: {c.reason ?? "이전 위원회 결과 재사용"}
+          {c.reused_from != null && <> (원본 추천 #{c.reused_from})</>}
+          . 아래 분석가 의견과 근거 수치는 그 당시 데이터 기준이며, 신뢰도는 이번 결정론적 신뢰도를 넘지 않게 제한했습니다.
+        </div>
+      )}
       {c.injection_flags.length > 0 && <div className="warn">⚠ 외부 뉴스에서 프롬프트 주입 문구 감지({c.injection_flags.join(", ")}) — 신뢰할 수 없는 데이터로만 취급했습니다.</div>}
       <div className="g4" style={{ gap: 10 }}>
         {ORDER.map((a) => {

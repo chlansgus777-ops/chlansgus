@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Mapping
 from xml.etree import ElementTree
 
 from marketlens.domain.enums import DataMode, Exchange
@@ -351,34 +351,46 @@ def _pick_concept(gaap: dict[str, Any], names: tuple[str, ...], unit_pref: tuple
     return []
 
 
-def _ytd_to_quarters(items: list[dict[str, Any]]) -> dict[date, tuple[float, date]]:
+def _ytd_to_quarters(items: list[dict[str, Any]]) -> dict[date, list[tuple[float, date]]]:
     """Cash-flow items are reported year-to-date; quarter = YTD(n) − YTD(n−1) within one fiscal year.
 
     A YTD figure is only converted when the previous YTD of the same fiscal year is known (or it is itself
-    a single quarter), so a missing Q1 never turns a half-year total into a "quarter"."""
+    a single quarter), so a missing Q1 never turns a half-year total into a "quarter".
+
+    Returns every *vintage* of each derived quarter, oldest filing first: at each filing date F the quarter
+    is recomputed from the YTD values known on F (latest filing ≤ F). The first vintage is the first
+    reported value; a later filing that restates either YTD figure produces a later vintage, which the
+    caller records as a revision (point in time: invisible before F)."""
     groups: dict[str, list[tuple[date, float, date]]] = defaultdict(list)
     for it in items:
         if it.get("form") not in ("10-Q", "10-K") or not it.get("start"):
             continue
         groups[it["start"]].append((date.fromisoformat(it["end"]), float(it["val"]), date.fromisoformat(it["filed"])))
-    out: dict[date, tuple[float, date]] = {}
+    out: dict[date, list[tuple[float, date]]] = defaultdict(list)
     for start_s, rows in groups.items():
         start = date.fromisoformat(start_s)
-        first_filed: dict[date, tuple[float, date]] = {}
-        for end, val, fd in rows:
-            if end not in first_filed or fd < first_filed[end][1]:
-                first_filed[end] = (val, fd)
-        prev_val: float | None = None
-        prev_end: date | None = None
-        for end in sorted(first_filed):
-            val, fd = first_filed[end]
-            if prev_end is None:
-                if (end - start).days <= QUARTER_MAX_DAYS:
-                    out.setdefault(end, (val, fd))
-            elif (end - prev_end).days <= QUARTER_MAX_DAYS and prev_val is not None:
-                out.setdefault(end, (val - prev_val, fd))
-            prev_val, prev_end = val, end
-    return out
+        ends = sorted({e for e, _, _ in rows})
+        for F in sorted({fd for _, _, fd in rows}):
+            known: dict[date, float] = {}
+            for end in ends:
+                vs = [(fd, v) for e, v, fd in rows if e == end and fd <= F]
+                if vs:
+                    known[end] = max(vs, key=lambda x: x[0])[1]
+            prev_end: date | None = None
+            for end in ends:
+                if end not in known:
+                    prev_end = None  # a gap: the next YTD cannot be converted at this vintage
+                    continue
+                if prev_end is None:
+                    q = known[end] if end == ends[0] and (end - start).days <= QUARTER_MAX_DAYS else None
+                elif (end - prev_end).days <= QUARTER_MAX_DAYS:
+                    q = known[end] - known[prev_end]
+                else:
+                    q = None
+                if q is not None and (not out[end] or abs(out[end][-1][0] - q) > 1e-9 * max(1.0, abs(q))):
+                    out[end].append((q, F))
+                prev_end = end
+    return dict(out)
 
 
 def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFinancials]:
@@ -404,6 +416,11 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
         if abs(val - last) > 1e-9 * max(1.0, abs(last)):
             seen.append((fdate, val))
 
+    def known_at(end: date, field_name: str, F: date) -> float:
+        """The value of a stored field as known on ``F`` (first reported, or its latest revision ≤ F)."""
+        vs = [(fd, v) for fd, v in revisions[end].get(field_name, []) if fd <= F]
+        return max(vs, key=lambda o: o[0])[1] if vs else per_period[end][field_name]
+
     def earliest(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return sorted((it for it in items if it.get("form") in ("10-Q", "10-K")), key=lambda it: it.get("filed", ""))
 
@@ -411,10 +428,12 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
         unit_pref = ("USD/shares",) if field_name == "eps_diluted" else ("shares",) if field_name == "shares_diluted" else ("USD",)
         items = _pick_concept(gaap, concepts, unit_pref)
         if field_name in YTD_FIELDS:
-            for end, (val, fdate) in _ytd_to_quarters(items).items():
-                put(end, field_name, val, fdate)
+            for end, vintages in _ytd_to_quarters(items).items():
+                for val, fdate in vintages:  # first reported, then restatements (revisions)
+                    put(end, field_name, val, fdate)
             continue
         annual: dict[date, tuple[date, float, date]] = {}
+        annual_vintages: dict[date, list[tuple[date, float]]] = defaultdict(list)
         # earliest filing first → point-in-time (later restatements never overwrite the original)
         for item in earliest(items):
             end = date.fromisoformat(item["end"])
@@ -423,6 +442,7 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
                 days = (end - st).days
                 if days >= ANNUAL_MIN_DAYS:
                     annual.setdefault(end, (st, float(item["val"]), date.fromisoformat(item["filed"])))
+                    annual_vintages[end].append((date.fromisoformat(item["filed"]), float(item["val"])))
                     continue
                 if days > QUARTER_MAX_DAYS:
                     continue  # half-year / nine-month YTD figures
@@ -435,16 +455,22 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
                 qs = [e for e in per_period if st < e < end and field_name in per_period[e]]
                 if len(qs) == 3:
                     put(end, field_name, fy_val - sum(per_period[e][field_name] for e in qs), fdate)
+                    # later vintages: a restated annual total or a restated Q1–Q3 changes the derived Q4
+                    later = sorted({fd for fd, _ in annual_vintages[end]} | {fd for e in qs for fd, _ in revisions[e].get(field_name, [])})
+                    for F in (x for x in later if x > fdate):
+                        fy_known = max((o for o in annual_vintages[end] if o[0] <= F), key=lambda o: o[0])[1]
+                        put(end, field_name, fy_known - sum(known_at(e, field_name, F) for e in qs), F)
 
     # total debt from its components (instant values), first filing per period
     comp_vals: dict[date, dict[str, tuple[float, date]]] = defaultdict(dict)
+    comp_vintages: dict[date, dict[str, list[tuple[date, float]]]] = defaultdict(lambda: defaultdict(list))
     for names in (DEBT_LONG, DEBT_LONG_PARTS[:1], DEBT_LONG_PARTS[1:], DEBT_SHORT[:1], DEBT_SHORT[1:]):
         for item in earliest(_pick_concept(gaap, names, ("USD",))):
             end = date.fromisoformat(item["end"])
             comp_vals[end].setdefault(names[0], (float(item["val"]), date.fromisoformat(item["filed"])))
-    for end, comps in comp_vals.items():
-        if end not in per_period:
-            continue
+            comp_vintages[end][names[0]].append((date.fromisoformat(item["filed"]), float(item["val"])))
+
+    def debt_total(comps: Mapping[str, tuple[float, date]]) -> tuple[float, date] | None:
         if DEBT_LONG[0] in comps:
             parts = [comps[DEBT_LONG[0]]]
         elif DEBT_LONG_PARTS[0] in comps:
@@ -452,8 +478,21 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
         else:
             parts = []
         parts += [comps[k] for k in DEBT_SHORT if k in comps]
-        if parts:
-            put(end, "total_debt", sum(v for v, _ in parts), max(fd for _, fd in parts))
+        return (sum(v for v, _ in parts), max(fd for _, fd in parts)) if parts else None
+
+    for end, comps in comp_vals.items():
+        if end not in per_period:
+            continue
+        first = debt_total(comps)
+        if first is None:
+            continue
+        put(end, "total_debt", *first)
+        # restated components (a later 10-Q/10-K comparative) → later vintages of the total, same components
+        for F in sorted({fd for vs in comp_vintages[end].values() for fd, _ in vs if fd > first[1]}):
+            at_f = {k: (max((o for o in vs if o[0] <= F), key=lambda o: o[0])[1], F) for k, vs in comp_vintages[end].items() if k in comps}
+            again = debt_total(at_f)
+            if again is not None:
+                put(end, "total_debt", again[0], F)
 
     # bank concepts → extras (quarterly durations only for flows; instants at the period end)
     bank: dict[date, dict[str, float]] = defaultdict(dict)

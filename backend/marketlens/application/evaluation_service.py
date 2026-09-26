@@ -21,6 +21,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from marketlens.application.codec import encode
+from marketlens.domain.corporate_actions import split_factor
 from marketlens.domain.calibration import compare_shadow, propose_weights, segment_samples
 from marketlens.domain.enums import BULLISH_ACTIONS, Action, ExitReason
 from marketlens.domain.evaluation import HORIZONS, OutcomeSample, bucket_performance, dedupe_samples, factor_ic, forward_outcome, is_mature, rolling_ic
@@ -111,9 +112,16 @@ class EvaluationService:
         return written
 
     # ------------------------------------------------------------------ paper trading (one account)
-    def _signal(self, pos: PaperPositionRow, spread_bps: float | None) -> PaperSignal:
-        return PaperSignal(pos.ticker, pos.recommended_at, pos.action, pos.score, pos.confidence, pos.stop, pos.target1, pos.target2,
-                           pos.thesis, pos.model_version, pos.regime, pos.sector, spread_bps, pos.max_buy)
+    def _signal(self, pos: PaperPositionRow, spread_bps: float | None, basis_date: date | None = None) -> PaperSignal:
+        """The plan's price levels expressed on the share basis of the stored bars. Levels were set on the
+        basis of the recommendation day; every split executed after it (and already applied to the bars,
+        i.e. on/before ``basis_date``) divides them, so a 10:1 split does not turn a normal entry into a
+        'gap below the stop' or a stop into an impossible level."""
+        f = 1.0
+        if basis_date is not None:
+            f = split_factor(self.svc.data.splits(pos.ticker), to_ny(pos.recommended_at).date(), basis_date)
+        return PaperSignal(pos.ticker, pos.recommended_at, pos.action, pos.score, pos.confidence, pos.stop / f, pos.target1 / f, pos.target2 / f,
+                           pos.thesis, pos.model_version, pos.regime, pos.sector, spread_bps, pos.max_buy / f if pos.max_buy is not None else None)
 
     def update_paper(self, as_of: datetime | None = None) -> dict[str, Any]:
         """Re-simulate the whole paper account from every paper signal up to ``as_of`` (deterministic)."""
@@ -138,7 +146,7 @@ class EvaluationService:
                     q = (rec.inputs or {}).get("quote") or {}
                     if q.get("bid") and q.get("ask") and q["ask"] >= q["bid"] > 0:
                         spread_bps = (q["ask"] - q["bid"]) / ((q["ask"] + q["bid"]) / 2) * 1e4
-                items.append(AccountItem(str(pos.id), self._signal(pos, spread_bps), tuple(exit_events_for(later, pos.recommended_at))))
+                items.append(AccountItem(str(pos.id), self._signal(pos, spread_bps, to_ny(as_of).date()), tuple(exit_events_for(later, pos.recommended_at))))
                 if pos.ticker not in bars_by:
                     start = min(to_ny(p.recommended_at).date() for p in positions if p.ticker == pos.ticker) - timedelta(days=5)
                     bars_by[pos.ticker] = self._bars(pos.ticker, start, today)

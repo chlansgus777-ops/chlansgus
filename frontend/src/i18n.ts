@@ -50,6 +50,7 @@ export const VETO_KO: Record<string, string> = {
   STALE_PRICE: "현재가 오래됨/없음", STALE_CORE_DATA: "핵심 데이터 오래됨", MISSING_CORE_DATA: "핵심 데이터 부족", SEVERE_DATA_CONFLICT: "데이터 충돌",
   THESIS_INVALIDATED: "투자 논리 훼손", UNACCEPTABLE_LIQUIDITY: "유동성 부족", EXTREME_EVENT_RISK: "극단적 이벤트 위험",
   INSUFFICIENT_MODEL_COVERAGE: "업종 모델 판단 데이터 부족",
+  SEVERE_ESTIMATE_CONFLICT: "추정치 공급자 간 심각한 불일치 — 신규 매수 보류",
 };
 
 export const SESSION_KO: Record<string, string> = { PREMARKET: "프리마켓", REGULAR: "정규장", AFTER_HOURS: "애프터마켓", CLOSED: "장 마감", OVERNIGHT: "야간" };

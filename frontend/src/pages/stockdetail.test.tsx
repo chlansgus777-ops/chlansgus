@@ -53,3 +53,36 @@ describe("Stock page ticker switch", () => {
     expect(screen.queryByText(/NVDA/)).toBeNull();
   });
 });
+
+describe("recommendation status is re-judged while the page is open (evaluation 2, item 15)", () => {
+  it("polls the stored recommendation and picks up PLAN_INVALIDATED without a new analysis", async () => {
+    vi.useFakeTimers();
+    const { useLiveStatus } = await import("./StockDetail");
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", (url: string) => {
+      urls.push(String(url));
+      const body = { recommendation: { id: 7, ticker: "NVDA", current_status: "PLAN_INVALIDATED", current_status_reason: "현재가 $90.00 ≤ 손절 기준 $95.00" }, analysis: { ticker: "NVDA" } };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    const { result } = renderHook(() => useLiveStatus("NVDA", 7, 1000));
+    expect(result.current).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    vi.useRealTimers();
+    await waitFor(() => expect(result.current?.status).toBe("PLAN_INVALIDATED"));
+    expect(urls.every((u) => !u.includes("refresh=true"))).toBe(true); // a read, never a re-analysis
+  });
+});
+
+describe("reused AI committee is labelled with its origin (evaluation 2, item 15)", () => {
+  it("says the opinion is carried over, from when, and which recommendation", async () => {
+    const { CommitteeView } = await import("../components/CommitteeView");
+    const c = { ticker: "NVDA", status: "REUSED", reason: "중요한 변화 없음 → 2026-09-22 위원회 결과 재사용(추가 AI 호출 없음)", deterministic_action: "WAIT", final_action: "WAIT",
+      deterministic_confidence: 60, final_confidence: 55, size_class: null, action_changed_by: null, reports: {}, invalid_outputs: {}, debate: [], synthesis: null, risk_review: null,
+      portfolio_advice: null, consensus_pct: 70, divergence: "LOW", guard: {}, injection_flags: [], prompt_version: "p", depth: "REUSED", reused_from: 41 } as unknown as CommitteeResult;
+    render(<CommitteeView c={c} evidence={new Map()} />);
+    const box = screen.getByTestId("committee-reused");
+    expect(box.textContent).toContain("2026-09-22");
+    expect(box.textContent).toContain("#41");
+    expect(screen.getByText("이전 결과 재사용")).toBeTruthy();
+  });
+});

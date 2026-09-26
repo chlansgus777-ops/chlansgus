@@ -55,6 +55,7 @@ class DecisionContext:
     intraday_stop_breach: bool = False  # the current quote is below that stop but no session has closed there yet
     sector_unknown: bool = False  # no reliable sector/industry → generic model, lower confidence, no full BUY
     model_coverage_gaps: tuple[str, ...] = ()  # core sector-model components that could not be scored (e.g. "fundamental")
+    estimate_conflict: str | None = None  # consensus providers disagree beyond the severe threshold (values excluded)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +88,8 @@ def evaluate_vetoes(ctx: DecisionContext, th: DecisionThresholds) -> list[HardVe
         v.append(HardVeto.EXTREME_EVENT_RISK)
     if ctx.model_coverage_gaps:
         v.append(HardVeto.INSUFFICIENT_MODEL_COVERAGE)
+    if ctx.estimate_conflict:
+        v.append(HardVeto.SEVERE_ESTIMATE_CONFLICT)
     return v
 
 
@@ -147,6 +150,11 @@ def _apply_vetoes(action: Action, vetoes: list[HardVeto], ctx: DecisionContext) 
             return Action.SELL, None, notes
         notes.append(f"하드 거부권: 업종 모델의 핵심 데이터 부족({gaps}) → 매수·매도 판단을 하지 않음 (데이터 부족은 매도 근거가 아님)")
         return Action.DATA_INSUFFICIENT, None, notes
+    if HardVeto.SEVERE_ESTIMATE_CONFLICT in vetoes and action in BULLISH_ACTIONS:
+        # the conflicting consensus values were excluded from the score; a buy cannot rest on estimates
+        # the two free sources disagree about — but a data disagreement is not a reason to sell either
+        notes.append(f"하드 거부권: 애널리스트 추정치 공급자 간 심각한 불일치({ctx.estimate_conflict}) → 신규·추가 매수 보류")
+        return (Action.HOLD if held else Action.WAIT), None, notes
     if HardVeto.UNACCEPTABLE_LIQUIDITY in vetoes and action in BULLISH_ACTIONS:
         notes.append("하드 거부권: 유동성 기준 미달")
         return (Action.HOLD if held else Action.WAIT), None, notes

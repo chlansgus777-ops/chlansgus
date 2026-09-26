@@ -144,8 +144,17 @@ class DataAccess:
             rep = build(t, self.store.estimate_history(t, as_of), as_of)
             if rep.snapshot is None:
                 return Fetched(None, None, "; ".join(rep.notes) or "추정치 없음")
-            conflicts = [f"analyst:{rep.cross.detail}"] if rep.cross.status in ("DATA_CONFLICT", "SEVERE_DATA_CONFLICT") else []
-            return Fetched(rep.snapshot, rep.snapshot.source, None, conflicts)
+            conflicts = [f"analyst:{rep.cross.status} {rep.cross.detail}"] if rep.cross.status in ("DATA_CONFLICT", "SEVERE_DATA_CONFLICT") else []
+            snap = rep.snapshot
+            if rep.cross.status == "SEVERE_DATA_CONFLICT":
+                # the providers disagree by more than the severe threshold: the EPS consensus and everything
+                # derived from it is excluded (never averaged, never one side picked); the decision engine
+                # additionally blocks new buying (HardVeto.SEVERE_ESTIMATE_CONFLICT)
+                from dataclasses import replace
+
+                snap = replace(snap, forward_eps=None, forward_eps_growth=None, forward_eps_basis=None, eps_revision_7d=None, eps_revision_30d=None,
+                               eps_revision_60d=None, eps_revision_90d=None, cross_check=f"{snap.cross_check} → EPS 추정치 제외")
+            return Fetched(snap, snap.source, None, conflicts)
         return self._get("analyst", "analyst", "get_estimates", f"{t}:{as_of}", t, as_of)
 
     def prefetch_guidance(self, tickers: Sequence[str], day: date) -> dict[str, str]:

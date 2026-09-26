@@ -620,6 +620,8 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         intraday_stop_breach=intraday_stop_breach,
         sector_unknown=not sector_known,
         model_coverage_gaps=coverage_gaps,
+        estimate_conflict=next((c.split("SEVERE_DATA_CONFLICT", 1)[1].strip() or "SEVERE" for c in inp.provider_conflicts
+                                if c.split(":")[0] == "analyst" and "SEVERE_DATA_CONFLICT" in c), None),
     )
     decision = decide(card, entry, ctx, cfg.decision)
     unchanged = prev is not None and prev.action == decision.action.value

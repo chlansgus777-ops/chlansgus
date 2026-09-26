@@ -76,6 +76,14 @@ def test_conflicting_price_blocks_decision(cfg, t):
 
 
 @pytest.mark.parametrize("t", GOLDEN)
+def test_severe_consensus_conflict_blocks_buying_through_the_pipeline(cfg, t):
+    """Evaluation 2: a 50% analyst-provider conflict left BUY with no veto."""
+    c = "analyst: analyst:SEVERE_DATA_CONFLICT alphavantage 1 vs finnhub 0.5 (차이 50.0%)"
+    r = run_analysis(replace(load(t), provider_conflicts=(c,)), cfg)
+    assert r.decision.action not in BULLISH_ACTIONS and HardVeto.SEVERE_ESTIMATE_CONFLICT in r.decision.vetoes
+
+
+@pytest.mark.parametrize("t", GOLDEN)
 def test_extreme_event_risk_limits_sizing(cfg, t):
     inp = load(t)
     ev = CatalystEvent("E", CatalystType.EARNINGS, add_trading_days(inp.as_of.date(), 1), "earnings", (t,), 1.0, expected_move=0.25)

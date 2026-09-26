@@ -62,9 +62,68 @@ def test_stored_prefsplit_bars_are_rescaled_once(tmp_path):
         s.get(PriceBarRow, ("NVDA", date(2024, 6, 7), "polygon")).retrieved_at = datetime(2024, 6, 8, tzinfo=timezone.utc)
         s.commit()
     st.save_splits([SplitEvent("NVDA", date(2024, 6, 10), 1, 10, "polygon")])
-    assert st.adjust_bars_for_splits() == 1 and st.adjust_bars_for_splits() == 0  # idempotent
+    assert st.adjust_bars_for_splits(date(2024, 6, 30)) == 1 and st.adjust_bars_for_splits(date(2024, 6, 30)) == 0  # idempotent
     b = st.bars("NVDA", date(2024, 6, 1), date(2024, 6, 30))[0]
     assert b.close == 120 and b.volume == 1e7
+
+
+def _store(tmp_path):
+    from marketlens.application.market_store import MarketStore
+    from marketlens.infrastructure.db.models import Base
+    from marketlens.infrastructure.db.session import make_engine, make_session_factory
+
+    eng = make_engine(f"sqlite:///{(tmp_path / 's.db').as_posix()}")
+    Base.metadata.create_all(eng)
+    return MarketStore(make_session_factory(eng), "LIVE")
+
+
+def test_announced_future_split_does_not_rescale_todays_prices(tmp_path):
+    """Evaluation 2 P0 counterexample: a 10:1 split dated 10 days ahead turned a stored 100 into 10 at once."""
+    from marketlens.domain.market import Bar
+
+    st = _store(tmp_path)
+    st.save_bars("ABC", [Bar(date(2026, 9, 24), 100, 101, 99, 100, 1e6)], "polygon")
+    st.save_splits([SplitEvent("ABC", date(2026, 10, 5), 1, 10, "polygon")])
+    assert st.adjust_bars_for_splits(date(2026, 9, 25)) == 0
+    assert st.bars("ABC", date(2026, 9, 1), date(2026, 9, 30))[0].close == 100  # still the real traded price
+    # once the split has executed, bars fetched before it are rescaled exactly once
+    assert st.adjust_bars_for_splits(date(2026, 10, 5)) == 1 and st.adjust_bars_for_splits(date(2026, 10, 6)) == 0
+    assert st.bars("ABC", date(2026, 9, 1), date(2026, 9, 30))[0].close == 10
+
+
+def test_same_split_from_two_sources_is_applied_once(tmp_path):
+    from datetime import datetime, timezone
+
+    from marketlens.domain.market import Bar
+    from marketlens.infrastructure.db.models import PriceBarRow
+
+    st = _store(tmp_path)
+    st.save_bars("ABC", [Bar(date(2026, 9, 24), 100, 101, 99, 100, 1e6)], "polygon")
+    with st.sf() as s:
+        s.get(PriceBarRow, ("ABC", date(2026, 9, 24), "polygon")).retrieved_at = datetime(2026, 9, 24, 22, tzinfo=timezone.utc)
+        s.commit()
+    st.save_splits([SplitEvent("ABC", date(2026, 9, 25), 1, 10, "polygon"), SplitEvent("ABC", date(2026, 9, 25), 1, 10, "other")])
+    st.adjust_bars_for_splits(date(2026, 9, 25))
+    assert st.bars("ABC", date(2026, 9, 1), date(2026, 9, 30))[0].close == 10  # not 1
+
+
+def test_polygon_split_query_is_bounded_to_executed_splits():
+    import httpx
+
+    from marketlens.providers.live.polygon import PolygonProvider
+
+    seen: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(dict(req.url.params))
+        return httpx.Response(200, json={"status": "OK", "results": [
+            {"ticker": "A", "execution_date": "2026-09-20", "split_from": 1, "split_to": 2},
+            {"ticker": "B", "execution_date": "2026-10-05", "split_from": 1, "split_to": 10}]})  # vendor ignored the bound
+
+    p = PolygonProvider("k", transport=httpx.MockTransport(handler))
+    got = p.get_splits(date(2026, 9, 1), date(2026, 9, 25))
+    assert [e.ticker for e in got] == ["A"]
+    assert seen[0]["execution_date.lte"] == "2026-09-25"
 
 
 def test_finra_uses_oauth_bearer_token_not_basic_credentials_on_data_requests():

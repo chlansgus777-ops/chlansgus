@@ -18,7 +18,7 @@ from marketlens.application.codec import decode, encode
 from marketlens.domain.enums import Exchange
 from marketlens.domain.fundamentals import QuarterlyFinancials
 from marketlens.domain.market import Bar, Security
-from marketlens.domain.market_calendar import UTC
+from marketlens.domain.market_calendar import NY, UTC
 from marketlens.domain.corporate_actions import SplitEvent, split_factor
 from marketlens.domain.estimates import EstimateObservation
 from marketlens.domain.guidance import GuidanceItem
@@ -235,20 +235,30 @@ class MarketStore:
             rows = list(s.scalars(select(CorporateActionRow).where(CorporateActionRow.ticker == ticker).order_by(CorporateActionRow.execution_date)))
         return [SplitEvent(r.ticker, r.execution_date, r.split_from, r.split_to, r.source) for r in rows]
 
-    def adjust_bars_for_splits(self) -> int:
+    def adjust_bars_for_splits(self, as_of: date) -> int:
         """Rescale stored bars that were retrieved *before* a split became effective (vendor-adjusted bars
-        fetched after the split are already on the new basis). Each split is applied exactly once."""
+        fetched after the split are already on the new basis). Each split is applied exactly once and only
+        once it has actually executed (``execution_date <= as_of``, the New York calendar date): an
+        announced future split must not change today's prices. A split reported by two sources for the
+        same ticker and day is applied once."""
         n = 0
         with self.sf() as s:
-            for ev in list(s.scalars(select(CorporateActionRow).where(CorporateActionRow.bars_adjusted_at.is_(None)))):
+            pending = list(s.scalars(select(CorporateActionRow).where(CorporateActionRow.bars_adjusted_at.is_(None), CorporateActionRow.execution_date <= as_of)
+                                     .order_by(CorporateActionRow.execution_date)))
+            for ev in pending:
                 if ev.split_from <= 0 or ev.split_to <= 0:
                     continue
-                ratio = ev.split_to / ev.split_from
-                effective = datetime.combine(ev.execution_date, datetime.min.time(), tzinfo=UTC)
-                for b in s.scalars(select(PriceBarRow).where(PriceBarRow.ticker == ev.ticker, PriceBarRow.day < ev.execution_date, PriceBarRow.retrieved_at < effective)):
-                    b.open, b.high, b.low, b.close, b.volume = b.open / ratio, b.high / ratio, b.low / ratio, b.close / ratio, b.volume * ratio
-                    n += 1
+                twin = s.scalars(select(CorporateActionRow.source).where(CorporateActionRow.ticker == ev.ticker, CorporateActionRow.execution_date == ev.execution_date,
+                                                                        CorporateActionRow.bars_adjusted_at.is_not(None)).limit(1)).first()
+                if twin is None:
+                    ratio = ev.split_to / ev.split_from
+                    # the split takes effect at the New York start of its execution day
+                    effective = datetime.combine(ev.execution_date, datetime.min.time(), tzinfo=NY).astimezone(UTC)
+                    for b in s.scalars(select(PriceBarRow).where(PriceBarRow.ticker == ev.ticker, PriceBarRow.day < ev.execution_date, PriceBarRow.retrieved_at < effective)):
+                        b.open, b.high, b.low, b.close, b.volume = b.open / ratio, b.high / ratio, b.low / ratio, b.close / ratio, b.volume * ratio
+                        n += 1
                 ev.bars_adjusted_at = _now()
+                s.flush()
             s.commit()
         return n
 
@@ -311,7 +321,11 @@ class MarketStore:
     def save_quarters(self, ticker: str, quarters: Iterable[QuarterlyFinancials]) -> None:
         """One row per (period, first filing). Re-fetching the same period only ever *adds* revisions
         (later filings with different values) and refreshes ``retrieved_at`` so a TTL-valid store is not
-        downloaded again. First-reported values are never overwritten."""
+        downloaded again. First-reported values are never overwritten.
+
+        A field the stored vintage did not have (e.g. a concept a newer parser reads, a derived Q4 that
+        became computable) is *added* with its own first-publication date in ``field_filed``, so it stays
+        invisible before that date; an existing value is never replaced."""
         with self.sf() as s:
             for q in quarters:
                 key = (ticker, q.period_end, q.filed_date, q.source)
@@ -320,9 +334,16 @@ class MarketStore:
                     s.add(FundamentalVintageRow(ticker=ticker, period_end=q.period_end, filed_date=q.filed_date, source=q.source, payload=encode(q), retrieved_at=_now()))
                     continue
                 old = decode(QuarterlyFinancials, row.payload)
+                upd: dict[str, Any] = {}
+                filed = dict(old.field_filed)
+                for k in VALUE_FIELDS:
+                    if getattr(old, k) is None and (v := getattr(q, k)) is not None:
+                        upd[k] = v
+                        filed[k] = q.field_filed.get(k, q.filed_date)
+                extras = {**dict(q.extras), **dict(old.extras)}  # new keys added, stored ones kept
                 merged = _merge_revisions(old.revisions, q.revisions)
-                if merged != dict(old.revisions):
-                    row.payload = encode(replace(old, revisions=merged))
+                if upd or extras != dict(old.extras) or merged != dict(old.revisions):
+                    row.payload = encode(replace(old, **upd, field_filed=filed, extras=extras, revisions=merged))
                 row.retrieved_at = _now()
             s.commit()
 
@@ -339,10 +360,16 @@ class MarketStore:
                 latest[r.period_end] = q  # earliest vintage = first reported
             else:  # a later first-filing row for the same period: its values are revisions of the first
                 base = latest[r.period_end]
-                extra = {k: ((r.filed_date, v),) for k in ("revenue", "net_income", "eps_diluted", "shares_diluted", "shares_outstanding")
+                extra = {k: ((r.filed_date, v),) for k in VALUE_FIELDS
                          if (v := getattr(q, k)) is not None and getattr(base, k) is not None and abs(v - getattr(base, k)) > 1e-9 * max(1.0, abs(getattr(base, k)))}
-                latest[r.period_end] = replace(base, revisions=_merge_revisions(_merge_revisions(base.revisions, q.revisions), extra))
+                fill = {k: getattr(q, k) for k in VALUE_FIELDS if getattr(base, k) is None and getattr(q, k) is not None}
+                filed = {**dict(base.field_filed), **{k: q.field_filed.get(k, r.filed_date) for k in fill}}
+                latest[r.period_end] = replace(base, **fill, field_filed=filed, revisions=_merge_revisions(_merge_revisions(base.revisions, q.revisions), extra))
         return [latest[d] for d in sorted(latest)]
+
+
+VALUE_FIELDS = ("revenue", "gross_profit", "operating_income", "net_income", "eps_diluted", "operating_cash_flow", "capex", "sbc", "depreciation_amortization",
+                "cash", "total_debt", "total_equity", "shares_diluted", "inventory", "shares_outstanding")
 
 
 def _merge_revisions(a: Mapping[str, Iterable[Iterable[Any]]], b: Mapping[str, Iterable[Iterable[Any]]]) -> dict[str, tuple[tuple[date, float], ...]]:

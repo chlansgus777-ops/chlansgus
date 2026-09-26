@@ -16,7 +16,7 @@ from typing import Any
 
 from marketlens.application.market_store import MarketStore
 from marketlens.application.registry import ProviderRegistry
-from marketlens.domain.market_calendar import is_trading_day, last_completed_session
+from marketlens.domain.market_calendar import is_trading_day, last_completed_session, to_ny
 from marketlens.providers.contracts import ProviderError
 
 log = logging.getLogger("marketlens.sync")
@@ -93,27 +93,31 @@ class MarketSync:
             if rep.bar_days_empty:
                 self.store.set_setting("grouped_empty_days", ",".join(sorted(x.isoformat() for x in empty)))
         # 2b) stock splits (one bulk request) → rescale stored bars fetched before the split
+        # Only splits that have already executed (New York date) are fetched and applied: an announced
+        # future split must not rescale today's prices.
+        ny_today = to_ny(now).date()
         splitter = _find(self.reg, "price", "get_splits")
         if splitter is not None:
             since_s = self.store.get_setting("splits_checked_through")
             since = date.fromisoformat(since_s) - timedelta(days=7) if since_s else today - timedelta(days=3 * 365)
             try:
-                rep.splits_new = len(self.store.save_splits(splitter.get_splits(since)))
+                rep.splits_new = len(self.store.save_splits(splitter.get_splits(since, ny_today)))
                 self.store.set_setting("splits_checked_through", today.isoformat())
             except ProviderError as e:
                 rep.errors.append(f"splits: {e}")
-        rep.bars_split_adjusted = self.store.adjust_bars_for_splits()
+        rep.bars_split_adjusted = self.store.adjust_bars_for_splits(ny_today)
         # 2c) consensus snapshot for every upcoming report (Finnhub earnings calendar, a few requests),
         #     once per day — the append-only history MarketLens accumulates its own revisions from
         cal = _find(self.reg, "analyst", "get_calendar_estimates")
-        if cal is not None and self.store.get_setting("estimates_snapshot_day") != today.isoformat():
+        #     (labelled with the New York day it was actually observed on, not the last completed session)
+        if cal is not None and self.store.get_setting("estimates_snapshot_day") != ny_today.isoformat():
             try:
                 obs = []
                 for k in range(4):  # ~100 days ahead in 25-day windows
-                    start = today + timedelta(days=25 * k)
-                    obs += cal.get_calendar_estimates(start, start + timedelta(days=24), today)
+                    start = ny_today + timedelta(days=25 * k)
+                    obs += cal.get_calendar_estimates(start, start + timedelta(days=24), ny_today)
                 rep.estimate_snapshots = self.store.save_estimates(obs)
-                self.store.set_setting("estimates_snapshot_day", today.isoformat())
+                self.store.set_setting("estimates_snapshot_day", ny_today.isoformat())
             except ProviderError as e:
                 rep.errors.append(f"estimates: {e}")
         # 3) shares outstanding → market caps

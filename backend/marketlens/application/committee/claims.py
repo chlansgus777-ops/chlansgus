@@ -2,10 +2,12 @@
 
 A number in AI text is accepted only if an evidence item supports it on ALL of:
 - entity  : the company the sentence talks about (the analysed ticker, or market-wide data for macro);
-- metric  : the metric named next to the number (price, EPS, P/E, margin, …) must match the evidence metric;
+- metric  : the metric named next to the number (price, EPS, P/E, gross vs operating margin, …) must match
+            the evidence metric exactly; only a generic "margin" may match any margin;
 - unit    : $ amounts only match USD evidence, % only fraction/percent evidence, "x" only multiples, …;
 - scale   : K/M/B/T, thousand/million/billion, 만/억/조 are applied before comparing;
-- sign    : an explicit minus (or a direction word such as "declined"/"감소") must agree with the evidence;
+- sign    : an explicit minus, a loss word ("loss of $5", "적자") or a direction word ("declined"/"감소")
+            must agree with the evidence; an unsigned number never supports a negative value;
 - value   : within the precision the text printed (half a unit of the last digit) or 0.5%.
 
 Matching "any number that appears somewhere in the evidence" is NOT enough: "Price is $100" is rejected
@@ -60,7 +62,10 @@ def metric_class(key: str) -> str:
     if head == "analyst" and "revision" in last:
         return "revision"
     if head == "fund":
-        if "margin" in last:
+        if "margin" in last:  # gross / operating / fcf margins are different metrics
+            for kind in ("gross", "operating", "net", "fcf", "ebitda", "pretax"):
+                if last.startswith(kind):
+                    return f"{kind}_margin"
             return "margin"
         if "growth" in last or last.endswith("_yoy"):
             return "growth"
@@ -71,7 +76,7 @@ def metric_class(key: str) -> str:
 
 # text keyword → claimed metric class (English + Korean). Longer phrases are listed first.
 _KEYWORDS: list[tuple[str, str]] = [
-    ("earnings per share", "eps"), ("주당순이익", "eps"), ("eps", "eps"),
+    ("earnings per share", "eps"), ("loss per share", "eps"), ("per share", "eps"), ("per diluted share", "eps"), ("주당순이익", "eps"), ("주당순손실", "eps"), ("eps", "eps"),
     ("price-to-earnings", "pe"), ("p/e", "pe"), ("pe ratio", "pe"), ("per ", "pe"), ("주가수익비율", "pe"),
     ("ev/ebitda", "multiple"), ("ev/sales", "multiple"), ("p/s", "multiple"), ("p/b", "multiple"), ("pbr", "multiple"), ("psr", "multiple"), ("p/fcf", "multiple"), ("p/ffo", "multiple"), ("멀티플", "multiple"), ("배수", "multiple"),
     ("peg", "peg"),
@@ -81,7 +86,12 @@ _KEYWORDS: list[tuple[str, str]] = [
     ("stop-loss", "stop"), ("stop", "stop"), ("손절", "stop"),
     ("price target", "target"), ("target", "target"), ("목표", "target"),
     ("risk/reward", "rr"), ("reward/risk", "rr"), ("r/r", "rr"), ("손익비", "rr"),
-    ("gross margin", "margin"), ("operating margin", "margin"), ("margin", "margin"), ("마진", "margin"), ("이익률", "margin"),
+    ("gross margin", "gross_margin"), ("gross profit margin", "gross_margin"), ("매출총이익률", "gross_margin"), ("총이익률", "gross_margin"),
+    ("operating margin", "operating_margin"), ("operating profit margin", "operating_margin"), ("영업이익률", "operating_margin"),
+    ("net margin", "net_margin"), ("net profit margin", "net_margin"), ("순이익률", "net_margin"),
+    ("fcf margin", "fcf_margin"), ("free cash flow margin", "fcf_margin"), ("잉여현금흐름 마진", "fcf_margin"),
+    ("ebitda margin", "ebitda_margin"), ("pretax margin", "pretax_margin"),
+    ("margin", "margin"), ("마진", "margin"), ("이익률", "margin"),
     ("revision", "revision"), ("리비전", "revision"), ("추정치 변화", "revision"),
     ("surprise", "surprise"), ("서프라이즈", "surprise"),
     ("guidance", "guidance"), ("가이던스", "guidance"),
@@ -110,10 +120,13 @@ _KEYWORDS: list[tuple[str, str]] = [
 _COMPATIBLE: dict[str, frozenset[str]] = {
     "price": frozenset({"price"}),
     "pe": frozenset({"pe"}), "multiple": frozenset({"multiple", "pe"}), "peg": frozenset({"peg"}),
-    "growth": frozenset({"growth", "revision"}), "rate": frozenset({"rate", "yield"}), "confidence": frozenset({"confidence"}),
+    "growth": frozenset({"growth", "revision"}),
+    # a generic "margin" may be any margin; a named one (gross / operating / …) only that exact margin
+    "margin": frozenset({"margin", "gross_margin", "operating_margin", "net_margin", "fcf_margin", "ebitda_margin", "pretax_margin"}), "rate": frozenset({"rate", "yield"}), "confidence": frozenset({"confidence"}),
 }
 _TIME_WORDS = re.compile(r"^\s*[-\s]?(day|days|week|weeks|month|months|year|years|quarter|quarters|session|sessions|round|rounds|일|주|개월|년|분기|거래일|라운드|단계)", re.I)
 _NEG_WORDS = ("decline", "declined", "fell", "fall", "drop", "dropped", "down", "decrease", "decreased", "shrank", "contract", "감소", "하락", "하회", "악화", "축소", "마이너스")
+_LOSS_WORDS = ("loss", "losses", "negative", "deficit", "in the red", "적자", "손실", "순손실", "마이너스", "음수")
 _POS_WORDS = ("rose", "rise", "increase", "increased", "grew", "up ", "improved", "expanded", "증가", "상승", "상회", "개선", "확대", "플러스")
 
 NUM_RE = re.compile(
@@ -140,6 +153,7 @@ class NumericClaim:
     entity: str | None  # ticker named nearest before the number (None = not named)
     direction: int  # -1 / +1 from direction words near the number, 0 = none
     basis: str | None = None  # ACTUAL | FORECAST when the sentence says so ("forward", "trailing", "예상", …)
+    loss_word: bool = False  # "a loss of $5", "적자 5달러": the unsigned number describes a negative value
 
 
 # words that say whether a number is a reported value or an estimate/forecast (longest first)
@@ -169,12 +183,17 @@ def _basis(before: str, after: str) -> str | None:
 
 
 def _nearest_keyword(before: str) -> str:
+    """The metric phrase that ends closest to the number; on a tie the longer phrase wins, so "gross
+    margin" is not read as the generic "margin" it ends with."""
     low = before.lower()
-    best, pos = "other", -1
+    best, key = "other", (-1, 0)
     for kw, cls in _KEYWORDS:
         i = low.rfind(kw)
-        if i > pos:
-            best, pos = cls, i
+        if i < 0:
+            continue
+        k = (i + len(kw), len(kw))
+        if k > key:
+            best, key = cls, k
     return best
 
 
@@ -217,7 +236,7 @@ def extract_claims(text: str, known_tickers: Iterable[str] = ()) -> list[Numeric
         v = -value * scale if neg else value * scale
         claimed = _nearest_keyword(before)
         if claimed == "other":
-            claimed = _nearest_keyword(after[:8])  # Korean often puts the noun after the number ("84점")
+            claimed = _nearest_keyword(after[:10])  # Korean often puts the noun after the number ("84점"); "$5 per share"
         entity = None
         if tick_re is not None:
             hits = list(tick_re.finditer(before))
@@ -225,7 +244,9 @@ def extract_claims(text: str, known_tickers: Iterable[str] = ()) -> list[Numeric
                 entity = hits[-1].group(1)
         low = (before[-30:] + " " + after).lower()
         direction = -1 if any(w in low for w in _NEG_WORDS) else 1 if any(w in low for w in _POS_WORDS) else 0
-        out.append(NumericClaim(raw, v, bool(sign), kind, dec, scale, claimed, entity, direction, _basis(before, after)))
+        near = (before[-24:] + " " + after[:12]).lower()
+        loss = any(re.search(r"(?<![a-z])" + re.escape(w) + r"(?![a-z])", near) if w.isascii() else w in near for w in _LOSS_WORDS)
+        out.append(NumericClaim(raw, v, bool(sign), kind, dec, scale, claimed, entity, direction, _basis(before, after), loss))
     return out
 
 
@@ -290,8 +311,12 @@ def supported(c: NumericClaim, evidence: Sequence[Evidence], ticker: str) -> tup
                 continue
             if c.explicit_sign and (c.value < 0) != (ev < 0) and abs(ev) > 1e-12:
                 continue  # explicit sign disagrees with the evidence
-            if not c.explicit_sign and c.direction != 0 and ev != 0 and (ev < 0) != (c.direction < 0) and metric_class(e.metric) in _CHANGE_CLASSES:
-                continue  # "EPS declined 12%" vs evidence +12%
+            if not c.explicit_sign and abs(ev) > 1e-12:
+                claimed_negative = c.loss_word or (c.direction < 0 and metric_class(e.metric) in _CHANGE_CLASSES)
+                if c.direction != 0 and metric_class(e.metric) in _CHANGE_CLASSES and (ev < 0) != (c.direction < 0):
+                    continue  # "EPS declined 12%" vs evidence +12%
+                if (ev < 0) != claimed_negative:
+                    continue  # "EPS is $5" vs evidence -5 (a loss written as a profit), or "a loss of $5" vs +5
             return True, e.evidence_id
     return False, ("단위가 맞는 근거 없음" if not unit_ok else "값·부호가 근거와 불일치")
 

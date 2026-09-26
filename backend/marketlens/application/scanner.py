@@ -209,7 +209,7 @@ class Scanner:
         if full and earnings and self.data.store is not None:  # LIVE: SEC 8-K guidance vs the pre-release consensus
             from marketlens.application.estimate_book import attach_guidance
 
-            day = ctx.as_of.date()
+            day = d  # New York date of the analysis
             earnings = attach_guidance(earnings, self.data.store.guidance(t, ctx.as_of), self.data.store.estimate_history(t, day), day)
         model, _ = select_sector_model(sec, self.cfg.sector_models)
         vh = take("valuation_history", self.data.valuation_history(t, model.primary_multiple))
@@ -400,8 +400,11 @@ class Scanner:
         stages.append(StageStats("4-event-issue", len(s3), len(s4), f"이슈 {len(ctx.issues.issues) if ctx.issues else 0}건, 그래프 ≤{self.cfg.impact.max_hops}단계, 기업 뉴스 {len(s4)}종목"))
 
         # free consensus with provider revision history, only for the best-ranked names (daily-limited)
-        ctx.estimate_fetch = self.data.prefetch_estimates(s4[: sc.estimate_top_n], last_completed_session(ctx.as_of), sc.estimate_daily_budget, sc.estimate_ttl_days)
-        ctx.guidance_fetch = self.data.prefetch_guidance(s4[: sc.estimate_top_n], last_completed_session(ctx.as_of))
+        # snapshots are labelled with the New York calendar day they were actually observed on (not the
+        # previous session): a consensus seen at 11:00 on 09-25 is a 09-25 observation
+        obs_day = to_ny(ctx.as_of).date()
+        ctx.estimate_fetch = self.data.prefetch_estimates(s4[: sc.estimate_top_n], obs_day, sc.estimate_daily_budget, sc.estimate_ttl_days)
+        ctx.guidance_fetch = self.data.prefetch_guidance(s4[: sc.estimate_top_n], obs_day)
         full: dict[str, AnalysisResult] = {}
         inputs: dict[str, AnalysisInputs] = {}
         for t in s4:
@@ -425,7 +428,8 @@ class Scanner:
             raise KeyError(f"{ticker}: 분석 시점의 유니버스에 없음")
         self.add_company_news(ctx, [ticker])
         sc = self.cfg.scanner
-        self.data.prefetch_estimates([ticker], last_completed_session(ctx.as_of), sc.estimate_daily_budget + 3, sc.estimate_ttl_days)  # user-requested page may use the reserve
-        self.data.prefetch_guidance([ticker], last_completed_session(ctx.as_of))
+        obs_day = to_ny(ctx.as_of).date()
+        self.data.prefetch_estimates([ticker], obs_day, sc.estimate_daily_budget + 3, sc.estimate_ttl_days)  # user-requested page may use the reserve
+        self.data.prefetch_guidance([ticker], obs_day)
         inp = self.gather_inputs(ctx, sec, portfolio, (), full=True)
         return run_analysis(inp, self.cfg), inp
