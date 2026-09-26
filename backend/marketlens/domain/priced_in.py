@@ -27,10 +27,13 @@ class PricedInInputs:
 
 @dataclass(frozen=True, slots=True)
 class PricedInEstimate:
-    value: float | None  # 0..100
-    confidence: float  # 0..1
+    value: float | None  # 0..100 (audit value; the UI shows ``band`` unless confidence is HIGH)
+    confidence: float  # 0..1 = share of the 7 possible inputs that were available
     components: tuple[tuple[str, float], ...]
     label: str = "estimate"
+    model: str = "LITE"  # FULL only with options inputs (implied move / IV); otherwise "Priced-In Lite"
+    confidence_level: str = "LOW"  # LOW | MEDIUM | HIGH
+    band: str | None = None  # 낮음 | 중간 | 높음 (None when the estimate is too limited to state)
 
 
 def _clip01(x: float) -> float:
@@ -60,7 +63,11 @@ def estimate_priced_in(x: PricedInInputs) -> PricedInEstimate:
         comps.append(("time_since_first_report", _clip01(x.days_since_first_report / 10)))
     total_inputs = 7
     if not comps:
-        return PricedInEstimate(None, 0.0, ())
+        return PricedInEstimate(None, 0.0, (), model="LITE", confidence_level="LOW", band=None)
     value = sum(v for _, v in comps) / len(comps) * 100
     confidence = len(comps) / total_inputs
-    return PricedInEstimate(round(value, 1), round(confidence, 3), tuple((k, round(v, 3)) for k, v in comps))
+    names = {k for k, _ in comps}
+    model = "FULL" if {"gap_vs_expected_move", "iv_rank"} & names else "LITE"
+    level = "HIGH" if confidence >= 6 / 7 and model == "FULL" else "MEDIUM" if confidence >= 4 / 7 else "LOW"
+    band = None if level == "LOW" else ("낮음" if value < 34 else "중간" if value < 67 else "높음")
+    return PricedInEstimate(round(value, 1), round(confidence, 3), tuple((k, round(v, 3)) for k, v in comps), model=model, confidence_level=level, band=band)

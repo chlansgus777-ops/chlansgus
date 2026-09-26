@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Iterable, Mapping, Sequence
 from urllib.parse import urlsplit
@@ -53,7 +53,14 @@ CATEGORY_RULES: list[tuple[IssueCategory, tuple[str, ...]]] = [
 ]
 
 POSITIVE = ("raise", "raises", "beat", "beats", "surge", "jump", "jumps", "climb", "climbs", "expand", "expands", "approval", "record", "upgrade", "lifts", "boost")
-NEGATIVE = ("cut", "cuts", "restriction", "restrictions", "ban", "miss", "misses", "fall", "falls", "plunge", "probe", "downgrade", "delay", "lawsuit", "halt")
+NEGATIVE = ("cut", "cuts", "restriction", "restrictions", "ban", "miss", "misses", "fall", "falls", "plunge", "probe", "downgrade", "delay", "lawsuit", "halt", "hurt", "hurts", "slump", "slumps")
+# words that negate or dispute the polarity word that follows within a few tokens
+NEGATORS = frozenset({"not", "no", "never", "without", "deny", "denies", "denied", "rejects", "rejected", "dismisses", "dismissed",
+                      "refutes", "unlikely", "won't", "wont", "doesn't", "doesnt", "didn't", "didnt", "isn't", "isnt", "wasn't", "rules", "downplays"})
+NEGATION_WINDOW = 5
+# single-word company-name keys that are ordinary words are never used for untagged entity discovery
+COMMON_WORDS = frozenset({"target", "visa", "block", "snap", "gap", "match", "ball", "dollar", "general", "apple", "oracle", "shell", "crown",
+                          "progressive", "united", "southern", "public", "first", "best", "live", "sea", "arm", "coherent", "unity", "fair"})
 
 SOURCE_QUALITY = {"OFFICIAL": 0.95, "WIRE": 0.8, "COMMERCIAL": 0.6, "OTHER": 0.4}
 STATUS_BY_SOURCE = {"OFFICIAL": ConfirmedStatus.CONFIRMED, "WIRE": ConfirmedStatus.REPORTED, "COMMERCIAL": ConfirmedStatus.REPORTED, "OTHER": ConfirmedStatus.RUMOR}
@@ -68,6 +75,7 @@ CLUSTER_WINDOW = timedelta(hours=48)
 STORY_SIMILARITY = 0.55  # same story (independent coverage)
 SYNDICATION_SIMILARITY = 0.85  # near-identical copy of the same article
 MIN_RELEVANCE = 0.5
+HEDGED_DISCOUNT = 0.3  # impact kept for a negated/denied claim
 _NAME_SUFFIXES = re.compile(r"\b(incorporated|inc|corp|corporation|co|company|ltd|limited|plc|holdings?|group|sa|nv|ag|adr|class [a-z])\b\.?", re.I)
 
 
@@ -125,11 +133,28 @@ def classify(text: str) -> tuple[IssueCategory | None, float]:
     return None, 0.0
 
 
+def polarity_detail(text: str) -> tuple[int, bool]:
+    """(polarity, hedged). A polarity word preceded by a negator/denial within a few tokens is not counted
+    ("Nvidia denies export restrictions will hurt earnings" is not a negative earnings story); ``hedged``
+    marks that the story's key claim is disputed or negated, so its impact must be discounted."""
+    words = re.findall(r"[a-z'\-]+", text.lower())
+    p = n = 0
+    hedged = False
+    for i, w in enumerate(words):
+        if w not in POSITIVE and w not in NEGATIVE:
+            continue
+        if any(x in NEGATORS for x in words[max(0, i - NEGATION_WINDOW):i]):
+            hedged = True
+            continue
+        if w in POSITIVE:
+            p += 1
+        else:
+            n += 1
+    return (1 if p > n else -1 if n > p else 0), hedged
+
+
 def polarity(text: str) -> int:
-    words = re.findall(r"[a-z\-]+", text.lower())
-    p = sum(1 for w in words if w in POSITIVE)
-    n = sum(1 for w in words if w in NEGATIVE)
-    return 1 if p > n else -1 if n > p else 0
+    return polarity_detail(text)[0]
 
 
 _GENERIC_FIRST_WORDS = frozenset({
@@ -161,12 +186,13 @@ def _name_keys(company: str | None) -> list[str]:
     return [x for x in dict.fromkeys(out) if len(x) >= 3]
 
 
-def relevance(item: NewsItem, ticker: str, company: str | None = None) -> float:
-    """0..1 relevance of an article to one company, from explicit entity mentions.
+def relevance(item: NewsItem, ticker: str, company: str | None = None, aliases: Sequence[str] = ()) -> float:
+    """0..1 relevance of an article to one company, from explicit entity mentions (ticker, company name,
+    curated product/executive/subsidiary aliases).
 
     title mention 0.6, summary mention 0.3, provider tag 0.2 (−0.1 for round-ups tagging >5 names)."""
     tick = re.compile(rf"(?<![A-Za-z0-9])\$?{re.escape(ticker)}(?![A-Za-z0-9])")
-    names = _name_keys(company)
+    names = _name_keys(company) + [a for a in aliases if a]
     name_re = re.compile(r"(?<![A-Za-z0-9])(" + "|".join(re.escape(n) for n in names) + r")(?![A-Za-z0-9])", re.I) if names else None
 
     def mentions(text: str) -> bool:
@@ -260,9 +286,54 @@ def _effects(cat: IssueCategory, pol: int, text: str, tickers: tuple[str, ...]) 
     return tuple(IssueEffect(tk, 0.6 * pol, chain) for tk in tickers)
 
 
-def build_issues(items: Iterable[NewsItem], now: datetime, names: Mapping[str, str] | None = None) -> IssueBuildResult:
-    """Structure news into issues. ``names`` maps ticker → company name for entity relevance."""
+def load_entity_aliases(path: "Path | None" = None) -> dict[str, tuple[str, ...]]:
+    """config/entity_aliases.toml → {ticker: aliases} (versioned, curated; no generated relationships)."""
+    import tomllib
+    from pathlib import Path
+
+    from marketlens.config import CONFIG_DIR
+
+    p = Path(path) if path else CONFIG_DIR / "entity_aliases.toml"
+    if not p.exists():
+        return {}
+    data = tomllib.loads(p.read_text(encoding="utf-8"))
+    return {k.upper(): tuple(str(x) for x in v) for k, v in (data.get("aliases") or {}).items()}
+
+
+class EntityIndex:
+    """Find companies named in text without a ticker tag: cleaned company names (multi-word, or a
+    distinctive single word that is not an ordinary English word) and curated aliases."""
+
+    def __init__(self, names: Mapping[str, str], aliases: Mapping[str, Sequence[str]] | None = None) -> None:
+        self.keys: dict[str, set[str]] = {}
+        for t, name in names.items():
+            for k in _name_keys(name):
+                if " " not in k and (k.lower() in COMMON_WORDS or len(k) < 4):
+                    continue
+                self.keys.setdefault(k.lower(), set()).add(t)
+        for t, al in (aliases or {}).items():
+            for a in al:
+                self.keys.setdefault(a.lower(), set()).add(t)
+        self.max_len = max((len(k.split()) for k in self.keys), default=1)
+
+    def find(self, text: str) -> set[str]:
+        words = re.findall(r"[A-Za-z0-9.&'\-]+", text)
+        found: set[str] = set()
+        low = [w.lower().strip(".'") for w in words]
+        for n in range(1, self.max_len + 1):
+            for i in range(0, len(low) - n + 1):
+                hit = self.keys.get(" ".join(low[i:i + n]))
+                if hit and len(hit) == 1:  # a key shared by two companies is ambiguous → not used
+                    found |= hit
+        return found
+
+
+def build_issues(items: Iterable[NewsItem], now: datetime, names: Mapping[str, str] | None = None, aliases: Mapping[str, Sequence[str]] | None = None) -> IssueBuildResult:
+    """Structure news into issues. ``names`` maps ticker → company name for entity relevance; ``aliases``
+    maps ticker → curated product/executive/subsidiary names (config/entity_aliases.toml)."""
     names = names or {}
+    aliases = aliases or {}
+    index = EntityIndex(names, aliases)
     raw = [it for it in items if it.published_at <= now]  # never future-dated articles
     flags: dict[str, list[str]] = {}
     for it in raw:
@@ -280,17 +351,19 @@ def build_issues(items: Iterable[NewsItem], now: datetime, names: Mapping[str, s
         if cat is None:
             unclassified += 1
             continue
-        pol = polarity(text)
-        # entity relevance: which tagged companies does the story actually concern?
-        candidates = sorted({t for g in group for t in g.tickers})
+        pol, hedged = polarity_detail(text)
+        # entity relevance: tagged companies AND companies named in the text without a tag
+        candidates = sorted({t for g in group for t in g.tickers} | {t for g in group for t in index.find(f"{g.title}. {g.summary}")})
         relevant: list[str] = []
         for tk in candidates:
-            per_article = {g.news_id: relevance(g, tk, names.get(tk)) for g in group}
+            per_article = {g.news_id: relevance(g, tk, names.get(tk), aliases.get(tk, ())) for g in group}
             for nid, r in per_article.items():
                 rel_map.setdefault(nid, {})[tk] = r
             if max(per_article.values()) >= MIN_RELEVANCE:
                 relevant.append(tk)
         effects = _effects(cat, pol, text, tuple(relevant))
+        if hedged:  # disputed / negated claim: keep the story, discount its impact
+            effects = tuple(replace(e, direction=round(e.direction * HEDGED_DISCOUNT, 4)) for e in effects)
         if not effects:
             unclassified += 1
             continue
@@ -315,7 +388,7 @@ def build_issues(items: Iterable[NewsItem], now: datetime, names: Mapping[str, s
                 importance=round(importance, 3),
                 surprise_factor=0.5,
                 market_awareness=round(min(1.0, independent / 5), 3),
-                confidence=round(cconf * sq, 3),
+                confidence=round(cconf * sq * (0.5 if hedged else 1.0), 3),
                 evidence_id=iid,
                 news_ids=tuple(sorted(g.news_id for g in group)),
             )

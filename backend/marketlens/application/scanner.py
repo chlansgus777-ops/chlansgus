@@ -23,7 +23,7 @@ from typing import Callable, Mapping
 
 from marketlens.application.data_access import DataAccess
 from marketlens.application.graph_seed import GraphSeed
-from marketlens.application.issue_engine import IssueBuildResult, build_issues
+from marketlens.application.issue_engine import load_entity_aliases, IssueBuildResult, build_issues
 from marketlens.application.pipeline import AnalysisInputs, AnalysisResult, filing_visibility_day, run_analysis
 from marketlens.application.theses import ThesisBook
 from marketlens.config import ModelConfig
@@ -122,6 +122,7 @@ class Scanner:
         previous_lookup: PreviousLookup = lambda _t, _ts: (None, None),
     ) -> None:
         self.data = data
+        self.aliases = load_entity_aliases()
         self.cfg = cfg
         fr = cfg.raw.get("freshness")
         self._fresh_rules = rules_from_config(fr.get("rules") if isinstance(fr, dict) else None)
@@ -138,7 +139,7 @@ class Scanner:
         ev_f = self.data.events(today - timedelta(days=1), today + timedelta(days=90))
         news_f = self.data.news(as_of - NEWS_LOOKBACK, None)  # market-wide news path
         names = {t: s.company_name for t, s in securities.items()}
-        issues = build_issues(news_f.value, as_of, names) if news_f.value is not None else None
+        issues = build_issues(news_f.value, as_of, names, self.aliases) if news_f.value is not None else None
         if issues:
             for nid, flags in issues.injection_flags.items():
                 log_event(log, Event.PROMPT_INJECTION_DETECTED, level=logging.WARNING, news_id=nid, patterns=len(flags))
@@ -172,7 +173,7 @@ class Scanner:
                 items.extend(f.value)
         if not items:
             return
-        company = build_issues(items, ctx.as_of, names)
+        company = build_issues(items, ctx.as_of, names, self.aliases)
         ctx.issues = company if ctx.issues is None else ctx.issues.merged(company)
 
     # ------------------------------------------------------------------ inputs

@@ -101,13 +101,14 @@ def _row_summary(r: Any, s: MarketLensService | None = None, fetch_quote: bool =
 @router.get("/opportunities")
 def opportunities(req: Request) -> dict[str, Any]:
     s = svc(req)
+    ready = s.readiness()  # "no rows" must be explainable: not ready ≠ no opportunities
     with s.sf() as ss:
         scan = repo.latest_scan(ss, mode=s.mode.value)
         if scan is None:
-            return {"scan": None, "rows": []}
+            return {"scan": None, "rows": [], "readiness": ready}
         rows = repo.recommendations_for_scan(ss, scan.id)
         return {"scan": {"id": scan.id, "as_of": scan.as_of.isoformat(), "mode": scan.mode, "stages": scan.stages, "excluded": scan.excluded_count, "scoring_model_version": scan.scoring_model_version},
-                "rows": [_row_summary(r, s) for r in rows]}
+                "rows": [_row_summary(r, s) for r in rows], "readiness": ready}
 
 
 @router.post("/scan")
@@ -270,6 +271,7 @@ def dashboard(req: Request) -> dict[str, Any]:
         "upcoming_catalysts": cal["events"][:10],
         "portfolio": {"holdings": len(pf.holdings), "cash": pf.cash},
         "provider_health": [h.as_dict() for h in s.health.all()],
+        "readiness": opp["readiness"],
     }
 
 
@@ -386,6 +388,12 @@ def calibration(req: Request) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- health & settings
+@router.get("/readiness")
+def readiness(req: Request) -> dict[str, Any]:
+    """Can today's recommendations be trusted? FULL / LIMITED / PAPER ONLY / NOT READY, with progress."""
+    return svc(req).readiness()
+
+
 @router.get("/health")
 def health(req: Request) -> dict[str, Any]:
     s = svc(req)

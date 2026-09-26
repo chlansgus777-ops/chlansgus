@@ -181,6 +181,11 @@ def _stdev(xs: Sequence[float]) -> float | None:
     return (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5
 
 
+# Required history per indicator: a value computed from a shorter window is NOT that indicator.
+MIN_BARS_52W = 240  # ≈ one year of sessions (252) allowing for a few missing days
+MIN_BARS_20D = 20
+
+
 def compute_technicals(
     bars: Sequence[Bar],
     benchmark: Sequence[Bar] | None = None,
@@ -190,8 +195,8 @@ def compute_technicals(
     closes = [b.close for b in bars]
     vols = [b.volume for b in bars]
     last = closes[-1] if closes else None
-    w52 = bars[-252:]
-    w20 = bars[-20:]
+    w52 = bars[-252:] if len(bars) >= MIN_BARS_52W else []  # fewer bars → 52-week values are N/A, not "partial"
+    w20 = bars[-20:] if len(bars) >= MIN_BARS_20D else []
     rets = [closes[i] / closes[i - 1] - 1 for i in range(max(1, len(closes) - 20), len(closes)) if closes[i - 1] > 0]
     sd = _stdev(rets)
     lows, highs = swing_levels(bars[-120:])

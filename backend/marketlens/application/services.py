@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import logging
 import threading
 from dataclasses import dataclass
@@ -38,7 +40,7 @@ from marketlens.providers.llm.base import LLMProvider, UnavailableLLM
 
 log = logging.getLogger("marketlens.service")
 DEFAULT_CASH = 100_000.0
-COMMITTEE_OK = ("COMPLETED", "PARTIAL")
+COMMITTEE_OK = ("COMPLETED", "PARTIAL", "REUSED")
 
 
 def build_llm(settings: Settings) -> LLMProvider:
@@ -260,10 +262,40 @@ class MarketLensService:
         arts = news_for_ticker(ctx.issues if ctx else None, r.ticker, [i.issue_id for i in r.issue_impacts])
         return [(a.source, f"{a.title}\n{a.summary}\n{a.body}") for a in arts]
 
-    def run_committee(self, r: AnalysisResult, ctx: ScanContext | None, s: Session) -> CommitteeResult:
+    def run_committee(self, r: AnalysisResult, ctx: ScanContext | None, s: Session, depth: str = "FULL") -> CommitteeResult:
         cfg = self.base_cfg
         committee = Committee(self.llm, repo.DbLLMCache(s), cfg.committee_max_confidence_adjustment)
-        return committee.run(r, self._external_news(r, ctx), set(ctx.securities) if ctx else None)
+        return committee.run(r, self._external_news(r, ctx), set(ctx.securities) if ctx else None, depth=depth)
+
+    def _reusable_committee(self, r: AnalysisResult, s: Session, max_sessions: int = 5) -> CommitteeResult | None:
+        """Material-change gate: when nothing material changed since the last committee on this ticker (same
+        deterministic action, no material change, ≤ ``max_sessions`` sessions old), carry its result forward
+        instead of paying for the same debate again."""
+        from marketlens.domain.market_calendar import last_completed_session, trading_days_between
+
+        if any(c.material for c in r.changes):
+            return None
+        hit = repo.latest_committee_for_ticker(s, r.ticker)
+        if hit is None:
+            return None
+        prev_rec, prev_com = hit
+        if prev_com.status == "REUSED" and prev_com.payload.get("reused_from"):
+            orig = repo.get_recommendation(s, int(prev_com.payload["reused_from"]))  # age counts from the real debate
+            prev_rec = orig if orig is not None else prev_rec
+        if prev_com.status not in COMMITTEE_OK or prev_rec.deterministic_action != r.decision.action.value or prev_rec.mode != self.mode.value:
+            return None
+        if trading_days_between(last_completed_session(prev_rec.as_of), last_completed_session(r.as_of)) > max_sessions:
+            return None
+        p = prev_com.payload
+        return CommitteeResult(
+            ticker=r.ticker, status="REUSED", reason=f"중요한 변화 없음 → {prev_rec.as_of.date().isoformat()} 위원회 결과 재사용(추가 AI 호출 없음)",
+            deterministic_action=r.decision.action.value, final_action=p.get("final_action", r.decision.action.value),
+            deterministic_confidence=r.decision.confidence, final_confidence=min(float(p.get("final_confidence", r.decision.confidence)), r.decision.confidence),
+            size_class=p.get("size_class"), action_changed_by=p.get("action_changed_by"), synthesis=p.get("synthesis"), risk_review=p.get("risk_review"),
+            portfolio_advice=p.get("portfolio_advice"), consensus_pct=p.get("consensus_pct"), divergence=p.get("divergence"),
+            depth="REUSED", reused_from=prev_rec.id,
+            reports=p.get("reports") or {}, debate=p.get("debate") or [],
+        )
 
     # ------------------------------------------------------------------ use cases
     def run_scan(self, run_committee: bool = True, only: list[str] | None = None) -> ScanSummary:
@@ -294,12 +326,14 @@ class MarketLensService:
                 repo.upsert_issues(s, [(i.issue_id, i.category.value, i.importance, encode(i) | {"injection_flagged": any(n in ctx.issues.injection_flags for n in i.news_ids)}) for i in ctx.issues.issues])
             committee_run = 0
             paper = 0
-            top_n = cfg.scanner.ai_committee_top_n
+            top_n, full_n = cfg.scanner.ai_committee_top_n, cfg.scanner.committee_full_top_n
             for rank, r in enumerate(result.candidates, start=1):
                 committee = None
                 if run_committee and self.settings.enable_ai_committee and rank <= top_n:
-                    committee = self.run_committee(r, ctx, s)
-                    committee_run += committee.status != "SKIPPED"
+                    committee = self._reusable_committee(r, s) if r.decision.action != Action.DATA_INSUFFICIENT else None
+                    if committee is None:
+                        committee = self.run_committee(r, ctx, s, depth="FULL" if rank <= full_n else "LIGHT")
+                    committee_run += committee.status not in ("SKIPPED", "REUSED")
                 row = self._persist(s, r, result.inputs[r.ticker], cfg, scan.id, rank, committee)
                 if Action(row.final_action) in BULLISH_ACTIONS and self.settings.enable_paper_trading:
                     paper += 1
@@ -377,4 +411,16 @@ class MarketLensService:
         rep = MarketSync(self.registry, self.store).run(self.now(), **limits)
         self.data.cache = type(self.data.cache)()  # the store changed → drop cached provider reads
         # "sync finished" is not "data complete": a partial sync says how much is still missing
-        return {"status": "SYNC_COMPLETE" if rep.complete else "SYNC_PARTIAL", "bar_days_remaining": max(0, rep.bar_days_missing - rep.bar_days_loaded - rep.bar_days_empty), **rep.__dict__}
+        out = {"status": "SYNC_COMPLETE" if rep.complete else "SYNC_PARTIAL", "bar_days_remaining": max(0, rep.bar_days_missing - rep.bar_days_loaded - rep.bar_days_empty), **rep.__dict__}
+        self.store.set_setting("last_sync", json.dumps({"status": out["status"], "at": self.now().isoformat(), "bar_days_remaining": out["bar_days_remaining"], "errors": rep.errors[:5]}))
+        return out
+
+    def readiness(self) -> dict[str, Any]:
+        """Scanner readiness + recommendation readiness gate + per-category data status (see readiness.py)."""
+        from marketlens.application.readiness import evaluate
+        from marketlens.domain.market_calendar import last_completed_session
+
+        stats = self.store.coverage_stats(last_completed_session(self.now()), self.base_cfg.scanner.min_market_cap) if self.store is not None else None
+        sync_state = self.store.get_setting("last_sync") if self.store is not None else None
+        verified = json.loads(self.store.get_setting("live_verified") or "{}") if self.store is not None else {}
+        return evaluate(self.mode.value, self.registry, stats, sync_state, verified).as_dict()

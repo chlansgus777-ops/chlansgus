@@ -596,7 +596,12 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
     )
     changes = diff(prev, digest, cfg.decision)
     prev_bullish = prev is not None and prev.action in {a.value for a in BULLISH_ACTIONS}
-    prior_stop_breached = bool(prev_bullish and prev is not None and prev.stop is not None and price is not None and price <= prev.stop)
+    # stop semantics: the decision rule is CLOSE-based (a completed session closing at/below the previous
+    # stop); an intraday quote below it is only a warning (no new buy, holders wait for the close)
+    last_close_bar = bars[-1] if bars else None
+    prior_stop_breached = bool(prev_bullish and prev is not None and prev.stop is not None and last_close_bar is not None
+                               and last_close_bar.day >= to_ny(prev.as_of).date() and last_close_bar.close <= prev.stop)
+    intraday_stop_breach = bool(prev_bullish and prev is not None and prev.stop is not None and price is not None and price <= prev.stop and not prior_stop_breached)
     ctx = DecisionContext(
         held=inp.held,
         previous_action=inp.previous_action,
@@ -612,6 +617,7 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         stale_core=stale_core,
         binary_event=ev_risk.binary,
         prior_stop_breached=prior_stop_breached,
+        intraday_stop_breach=intraday_stop_breach,
         sector_unknown=not sector_known,
         model_coverage_gaps=coverage_gaps,
     )

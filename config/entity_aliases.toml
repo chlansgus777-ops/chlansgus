@@ -1,0 +1,20 @@
+# Entity aliases for news → company matching when an article carries no ticker tag.
+# Only unambiguous, well-known product / executive / subsidiary names. A single common English word is
+# never an alias. Every entry must be verifiable from the company's own filings or website.
+version = "entity-aliases-1.0.0"
+
+[aliases]
+NVDA = ["Jensen Huang", "GeForce", "Blackwell GPU", "CUDA"]
+AAPL = ["Tim Cook", "iPhone", "iPad", "MacBook", "App Store"]
+MSFT = ["Satya Nadella", "Azure", "Windows 11", "Microsoft 365"]
+AMZN = ["Andy Jassy", "Amazon Web Services", "AWS"]
+GOOGL = ["Sundar Pichai", "YouTube", "Google Cloud", "Waymo"]
+META = ["Mark Zuckerberg", "Instagram", "WhatsApp", "Facebook"]
+TSLA = ["Elon Musk", "Cybertruck", "Model Y"]
+TSM = ["TSMC"]
+AMD = ["Lisa Su", "Ryzen", "Radeon", "Instinct MI"]
+AVGO = ["Hock Tan", "VMware"]
+JPM = ["Jamie Dimon", "JPMorgan", "J.P. Morgan", "Chase Bank"]
+XOM = ["ExxonMobil", "Exxon"]
+ASML = ["EUV lithography"]
+NFLX = ["Netflix"]

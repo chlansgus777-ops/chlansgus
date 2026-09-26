@@ -79,7 +79,7 @@ class MemoryLLMCache:
 @dataclass
 class CommitteeResult:
     ticker: str
-    status: str  # COMPLETED | PARTIAL | UNAVAILABLE | SKIPPED
+    status: str  # COMPLETED | PARTIAL | UNAVAILABLE | SKIPPED | REUSED
     reason: str | None
     deterministic_action: str
     final_action: str
@@ -99,6 +99,8 @@ class CommitteeResult:
     injection_flags: list[str] = field(default_factory=list)
     calls: list[LLMCallRecord] = field(default_factory=list)
     prompt_version: str = PROMPT_VERSION
+    depth: str = "FULL"  # FULL (7 analysts, 2 debate rounds, synthesizer, risk, portfolio) | LIGHT | REUSED
+    reused_from: int | None = None  # recommendation id whose committee result was carried forward
 
     def as_dict(self) -> dict[str, Any]:
         d = dict(self.__dict__)
@@ -168,13 +170,17 @@ class Committee:
         return clean
 
     # ------------------------------------------------------------------ main
-    def run(self, r: AnalysisResult, external_news: list[tuple[str, str]] | None = None, known_tickers: set[str] | None = None) -> CommitteeResult:
+    def run(self, r: AnalysisResult, external_news: list[tuple[str, str]] | None = None, known_tickers: set[str] | None = None, depth: str = "FULL") -> CommitteeResult:
+        """``depth``: FULL = 14 calls (7 analysts, bull/bear ×2, synthesizer, risk, portfolio);
+        LIGHT = 5 calls (fundamental, valuation, news analysts + risk manager + portfolio manager) — the two
+        roles that may downgrade are always present."""
         det = r.decision
         res = CommitteeResult(
             ticker=r.ticker, status="COMPLETED", reason=None, deterministic_action=det.action.value, final_action=det.action.value,
             deterministic_confidence=det.confidence, final_confidence=det.confidence,
-            size_class=r.portfolio_review.size_cap.value if r.portfolio_review else None, action_changed_by=None,
+            size_class=r.portfolio_review.size_cap.value if r.portfolio_review else None, action_changed_by=None, depth=depth,
         )
+        self._depth = depth
         if det.action == Action.DATA_INSUFFICIENT:
             # downgrade-only: nothing the committee says can change DATA INSUFFICIENT → don't spend on it
             res.status, res.reason = "SKIPPED", "데이터 부족/오래됨(하드 거부권) → AI 위원회 생략(결과를 바꿀 수 없음)"
@@ -220,8 +226,9 @@ class Committee:
                 return name, None
             return name, rep
 
+        roles = ANALYSTS if getattr(self, "_depth", "FULL") == "FULL" else LIGHT_ANALYSTS
         with ThreadPoolExecutor(max_workers=self.parallel) as ex:
-            results = list(ex.map(analyst, ANALYSTS))
+            results = list(ex.map(analyst, roles))
         reports = {n: rep for n, rep in results if rep is not None}
         res.reports = {n: rep.model_dump() for n, rep in reports.items()}
         cons, div = consensus(reports, sm)
@@ -230,7 +237,8 @@ class Committee:
         # ---- Bull / Bear: 2 fixed rounds, evidence-cited
         summaries = {n: {"stance": rep.stance, "confidence": rep.confidence, "evidence_ids": rep.evidence_ids} for n, rep in reports.items()}
         prev: dict[str, Any] = {}
-        for rnd in (1, 2):
+        light = getattr(self, "_depth", "FULL") != "FULL"
+        for rnd in (() if light else (1, 2)):
             for side in ("bull", "bear"):
                 pack = evidence_pack(r.evidence, side)
                 ctx = {"round": rnd, "agent_reports": summaries, "opponent_previous": prev.get("bear" if side == "bull" else "bull")}
@@ -248,7 +256,7 @@ class Committee:
         ctx_s = {"consensus_pct": cons, "divergence": div, "deterministic_score": r.scorecard.total, "deterministic_action": det.action.value, "debate": res.debate}
         system, user = build_prompt("synthesizer", r.ticker, sm, pack, ctx_s)
         extra = [Evidence("COMMITTEE_CONSENSUS", "score", "위원회 합의도", cons, "calc", None, "FRESH", "committee.consensus", r.ticker, "pct")] if cons is not None else []
-        syn = self._ask(Synthesis, "synthesizer", TIER["synthesizer"], system, user, pack_evidence(r.evidence, "synthesizer") + extra, res)
+        syn = None if light else self._ask(Synthesis, "synthesizer", TIER["synthesizer"], system, user, pack_evidence(r.evidence, "synthesizer") + extra, res)
         res.synthesis = syn.model_dump() if syn else None
 
         # ---- Risk manager (downgrade-only)
@@ -280,6 +288,7 @@ class Committee:
 
 
 SIZE_TO_ACTION = {"SMALL": Action.BUY_SMALL, "WATCH": Action.WATCH}
+LIGHT_ANALYSTS = ("fundamental", "valuation", "news")
 
 
 def apply_committee(deterministic: Action, risk: RiskReview | None, pm: PortfolioAdvice | None, size_cap: str | None) -> tuple[Action, str | None]:

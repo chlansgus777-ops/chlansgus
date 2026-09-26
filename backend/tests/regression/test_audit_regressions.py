@@ -294,14 +294,26 @@ def test_plan_with_stop_above_price_can_never_become_a_buy():
 
 
 def test_prior_stop_breach_forces_exit_and_blocks_new_buy(cfg):
+    """Stop semantics (one meaning everywhere): a session CLOSING at/below the previous stop exits a holder
+    and blocks new buys; an intraday quote below it only blocks new buys (holders wait for the close)."""
     inp = golden()
     r0 = run_analysis(inp, cfg)
-    prev = replace(r0.digest, action="BUY", stop=(r0.price or 100) * 1.05)
-    held = run_analysis(replace(inp, previous=prev, previous_action=Action.BUY, held=True), cfg)
-    assert held.decision.action == Action.SELL and any("손절" in x for x in held.decision.reasons)
+    last_close = inp.bars[-1].close
+    earlier = r0.digest.as_of - timedelta(days=7)
+    closed_below = replace(r0.digest, action="BUY", stop=last_close * 1.02, as_of=earlier)  # the last close is below it
+    held = run_analysis(replace(inp, previous=closed_below, previous_action=Action.BUY, held=True), cfg)
+    assert held.decision.action == Action.SELL and any("종가 기준 이탈" in x for x in held.decision.reasons)
     assert any("손절" in c.text for c in held.changes)
-    flat = run_analysis(replace(inp, previous=prev, previous_action=Action.BUY, held=False), cfg)
+    flat = run_analysis(replace(inp, previous=closed_below, previous_action=Action.BUY, held=False), cfg)
     assert flat.decision.action not in (Action.BUY, Action.BUY_SMALL, Action.ADD)
+    # intraday only: current price below the stop, last close above it
+    px = r0.price or last_close
+    if px < last_close:
+        intraday = replace(r0.digest, action="BUY", stop=(px + last_close) / 2, as_of=earlier)
+        h2 = run_analysis(replace(inp, previous=intraday, previous_action=Action.BUY, held=True), cfg)
+        assert h2.decision.action != Action.SELL
+        f2 = run_analysis(replace(inp, previous=intraday, previous_action=Action.BUY, held=False), cfg)
+        assert f2.decision.action not in (Action.BUY, Action.BUY_SMALL, Action.ADD)
 
 
 def test_cumulative_small_changes_are_caught_by_the_material_gate():

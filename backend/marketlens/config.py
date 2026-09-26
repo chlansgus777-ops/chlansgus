@@ -179,6 +179,7 @@ class ScannerConfig:
     final_candidates: int
     ai_committee_top_n: int
     stage2_weights: dict[str, float]
+    committee_full_top_n: int = 5  # Tier 2: full committee (14 calls); ranks up to ai_committee_top_n get LIGHT (5 calls)
     estimate_top_n: int = 20  # final candidates that get the (daily-limited) Alpha Vantage consensus
     estimate_daily_budget: int = 22  # stay under the free 25/day, leaving room for manual stock pages
     estimate_ttl_days: int = 3  # an Alpha Vantage snapshot younger than this is not re-requested
@@ -277,6 +278,7 @@ def load_model_config(config_dir: Path | None = None, weights_override: dict[str
             final_candidates=int(sc["final_candidates"]),
             ai_committee_top_n=int(os.environ.get("AI_COMMITTEE_TOP_N", sc["ai_committee_top_n"])),
             stage2_weights={k: float(v) for k, v in sc["stage2_weights"].items()},
+            committee_full_top_n=int(sc.get("committee_full_top_n", 5)),
             estimate_top_n=int(sc.get("estimate_top_n", 20)),
             estimate_daily_budget=int(sc.get("estimate_daily_budget", 22)),
             estimate_ttl_days=int(sc.get("estimate_ttl_days", 3)),

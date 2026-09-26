@@ -176,6 +176,32 @@ class MarketStore:
                 out.setdefault(r.ticker, {}).setdefault(r.day, Bar(r.day, r.open, r.high, r.low, r.close, r.volume))
         return {t: [d[k] for k in sorted(d)] for t, d in out.items()}
 
+    # ------------------------------------------------------------------ coverage (readiness)
+    def coverage_stats(self, today: date, min_market_cap: float) -> dict[str, Any]:
+        """Aggregate counts for the scanner-readiness gate (SQL aggregates, no row loading)."""
+        with self.sf() as s:
+            active = list(s.execute(select(SecurityRow.ticker, SecurityRow.market_cap, SecurityRow.sector, SecurityRow.exchange)
+                                    .where(SecurityRow.mode == self.mode, SecurityRow.active.is_(True))).all())
+            counts = dict(s.execute(select(PriceBarRow.ticker, func.count(func.distinct(PriceBarRow.day)))
+                                    .where(PriceBarRow.day >= today - timedelta(days=400), PriceBarRow.day <= today).group_by(PriceBarRow.ticker)).all())
+            fund = {t for (t,) in s.execute(select(FundamentalVintageRow.ticker).distinct())}
+            days = s.execute(select(func.count(func.distinct(PriceBarRow.day))).where(PriceBarRow.day >= today - timedelta(days=400))).scalar() or 0
+            est_first = s.execute(select(func.min(EstimateSnapshotRow.observed_on)).where(EstimateSnapshotRow.provider == "finnhub")).scalar()
+        listed = [a for a in active if a[3] != "OTC"]
+        big = [a for a in listed if a[1] is not None and a[1] >= min_market_cap]
+        return {
+            "listed": len(listed),
+            "with_market_cap": sum(1 for a in listed if a[1] is not None),
+            "large": len(big),
+            "bars_60": sum(1 for a in listed if counts.get(a[0], 0) >= 60),
+            "bars_200": sum(1 for a in listed if counts.get(a[0], 0) >= 200),
+            "bars_240": sum(1 for a in listed if counts.get(a[0], 0) >= 240),
+            "large_with_sector": sum(1 for a in big if a[2] not in (None, "", "Unknown")),
+            "large_with_fundamentals": sum(1 for a in big if a[0] in fund),
+            "market_days": int(days),
+            "estimate_history_days": (today - est_first).days if est_first else 0,
+        }
+
     # ------------------------------------------------------------------ checkpoints
     def get_setting(self, key: str) -> str | None:
         with self.sf() as s:

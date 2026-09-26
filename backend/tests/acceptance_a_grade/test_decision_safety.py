@@ -106,3 +106,12 @@ def test_sector_model_reports_coverage_critical_missing_and_usable():
     assert ok.usable and ok.coverage == 0.8 and ok.critical_missing == ()
     no_core = score_rules(rules, {"loan_growth": 0.05, "roe": 0.12}, 0.1)  # 40% coverage but the core metric is missing
     assert not no_core.usable and no_core.critical_missing == ("rotce",)
+
+
+def test_stop_has_one_meaning_close_based_exit_intraday_warning():
+    c = _card({n: 0.9 for n in COMPONENTS})
+    assert decide(c, plan(), ctx(held=True, previous_action=Action.BUY, prior_stop_breached=True)).action == Action.SELL
+    held_intraday = decide(c, plan(), ctx(held=True, previous_action=Action.BUY, intraday_stop_breach=True))
+    assert held_intraday.action not in (Action.SELL, Action.ADD) and any("종가 확인 전" in r for r in held_intraday.reasons)
+    new_intraday = decide(c, plan(), ctx(held=False, previous_action=Action.BUY, intraday_stop_breach=True))
+    assert new_intraday.action not in (Action.BUY, Action.BUY_SMALL, Action.ADD)

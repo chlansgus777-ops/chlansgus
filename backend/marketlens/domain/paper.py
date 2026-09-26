@@ -131,6 +131,7 @@ def simulate(
     hi_px = entry_px
     sell_cost = (cfg.slippage_bps + half_spread) / 10_000
     last_day = first.day
+    notes: list[str] = ["모의투자 손절은 장중 손절 주문(가격 도달 시 체결, 갭 하락은 시가 체결)을 가정합니다 — 추천 판단의 '종가 기준 이탈'과 다름"]
 
     for b in usable:
         last_day = b.day
@@ -142,6 +143,8 @@ def simulate(
             remaining = 0
             break
         # stop first (conservative): a gap below the stop fills at the open
+        if b.low <= stop and not t1_done and b.high >= signal.target1:
+            notes.append(f"{b.day.isoformat()}: 같은 날 1차 목표가와 손절가가 모두 도달 — 일봉으로는 순서를 알 수 없어 손절 우선(보수적) 처리")
         if b.low <= stop:
             fill = min(b.open, stop)
             lo_px = min(lo_px, fill)
@@ -157,6 +160,12 @@ def simulate(
             t1_done = True
             if cfg.move_stop_to_breakeven_after_t1:
                 stop = max(stop, entry_px)
+                if b.low <= stop and remaining > 0:  # the same bar also traded at the new (breakeven) stop
+                    exits.append(Fill(b.day, round(stop * (1 - sell_cost), 4), remaining, ExitReason.STOP))
+                    notes.append(f"{b.day.isoformat()}: 1차 목표 도달 후 같은 날 본전 손절선도 도달 — 순서 불명, 나머지 물량 본전 청산(보수적)")
+                    lo_px, hi_px = min(lo_px, b.low), max(hi_px, b.high)
+                    remaining = 0
+                    break
         if t1_done and b.high >= signal.target2 and remaining > 0:
             fill = max(b.open, signal.target2)
             lo_px, hi_px = min(lo_px, b.low), max(hi_px, fill)
@@ -183,6 +192,7 @@ def simulate(
         mae_pct=round(lo_px / entry_px - 1, 6),
         mfe_pct=round(hi_px / entry_px - 1, 6),
         holding_days=trading_days_between(entry.day, last_day),
+        notes=tuple(notes),
     )
 
 

@@ -51,7 +51,8 @@ class DecisionContext:
     portfolio_size_cap: str | None = None  # FULL/HALF/SMALL/WATCH from deterministic portfolio check
     stale_core: tuple[str, ...] = ()  # core inputs present but too old (fundamentals, price history)
     binary_event: bool = False  # EXTREME risk comes from a binary outcome (FDA/antitrust/regulatory)
-    prior_stop_breached: bool = False  # price is below the stop of the previous bullish recommendation
+    prior_stop_breached: bool = False  # a completed session CLOSED at/below the stop of the previous bullish recommendation
+    intraday_stop_breach: bool = False  # the current quote is below that stop but no session has closed there yet
     sector_unknown: bool = False  # no reliable sector/industry → generic model, lower confidence, no full BUY
     model_coverage_gaps: tuple[str, ...] = ()  # core sector-model components that could not be scored (e.g. "fundamental")
 
@@ -192,7 +193,10 @@ def decide(card: ScoreCard, plan: EntryPlan | None, ctx: DecisionContext, th: De
     raw, reasons = _raw_action(card.total, ctx.held, plan, ctx.previous_action, th, card.sell_side_total)
     if ctx.prior_stop_breached and raw in BULLISH_ACTIONS | {Action.HOLD}:
         raw = Action.SELL if ctx.held else Action.WAIT
-        reasons.append("직전 추천의 손절가 이탈 → " + ("매도" if ctx.held else "대기"))
+        reasons.append("종가 기준 이탈: 직전 추천의 손절 기준가 아래로 마감 → " + ("매도" if ctx.held else "대기"))
+    elif ctx.intraday_stop_breach and raw in BULLISH_ACTIONS:
+        raw = Action.HOLD if ctx.held else Action.WAIT
+        reasons.append("장중 손절 기준가 하회(종가 확인 전) → 신규 매수 중단" + (", 보유분은 종가 기준으로 판단" if ctx.held else ""))
     action, size_limit, notes = _apply_vetoes(raw, vetoes, ctx)
 
     suppressed = False
