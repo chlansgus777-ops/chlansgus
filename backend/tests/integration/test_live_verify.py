@@ -44,3 +44,16 @@ def test_estimate_snapshots_are_labelled_with_the_new_york_day_observed(live):  
     assert days == {ny_day}
     if last_completed_session(svc.now()) != ny_day:
         assert last_completed_session(svc.now()) not in days
+
+
+def test_unconfigured_providers_are_blocked_by_credential_not_failed():
+    """Found in a keyless dry run: 'all providers not configured' was reported FAILED."""
+    from marketlens.application.live_verify import _classify
+    from marketlens.providers.contracts import ProviderError
+
+    assert _classify(ProviderError("NVDA: all price providers failed: [('finnhub', 'not configured'), ('polygon', 'not configured')]")) == "BLOCKED_BY_CREDENTIAL"
+    assert _classify(ProviderError("alphavantage: ALPHAVANTAGE_API_KEY 없음(BLOCKED_BY_CREDENTIAL)")) == "BLOCKED_BY_CREDENTIAL"
+    # one provider configured but unreachable → the network, not the key
+    assert _classify(ProviderError("all fundamental providers failed: [('sec-edgar', 'ProviderUnavailable: http error: ProxyError')]")) == "BLOCKED_BY_NETWORK"
+    # a configured provider that answered wrongly is a failure
+    assert _classify(ProviderError("all price providers failed: [('polygon', 'ProviderDataError: not found (404)')]")) == "FAILED"

@@ -1,0 +1,281 @@
+<title>MarketLens 5차 평가</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f3f4f7; --paper:#ffffff; --ink:#18202c; --muted:#596272; --line:#dadfe7; --soft:#eef0f5;
+  --accent:#34468a; --accent-soft:#e7eaf6;
+  --p0:#a3261d; --p0-bg:#f9e4e1; --p1:#a4531b; --p1-bg:#fbeadb; --p2:#7f6400; --p2-bg:#f7efcf; --p3:#4f5968; --p3-bg:#e8ebef;
+  --ok:#2b774a; --ok-bg:#e1f1e7; --code:#eceff4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#10141b; --paper:#171d26; --ink:#e4e8ef; --muted:#9aa3b1; --line:#2a323e; --soft:#1d2430;
+    --accent:#9daef0; --accent-soft:#232c45;
+    --p0:#f1958b; --p0-bg:#3b1c1a; --p1:#f0ae78; --p1-bg:#38261a; --p2:#e2c65e; --p2-bg:#332c14; --p3:#b3bcc9; --p3-bg:#262d38;
+    --ok:#7fcf9e; --ok-bg:#1a3124; --code:#212834;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#10141b; --paper:#171d26; --ink:#e4e8ef; --muted:#9aa3b1; --line:#2a323e; --soft:#1d2430;
+  --accent:#9daef0; --accent-soft:#232c45;
+  --p0:#f1958b; --p0-bg:#3b1c1a; --p1:#f0ae78; --p1-bg:#38261a; --p2:#e2c65e; --p2-bg:#332c14; --p3:#b3bcc9; --p3-bg:#262d38;
+  --ok:#7fcf9e; --ok-bg:#1a3124; --code:#212834;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;font-size:15px;line-height:1.7;margin:0;padding-inline:16px;padding-block:28px 72px}
+main{max-width:940px;margin:0 auto;display:grid;gap:24px}
+h1,h2,h3{text-wrap:balance;margin:0}
+h1{font-size:28px;line-height:1.3}
+h2{font-size:19px;line-height:1.4}
+h3{font-size:15.5px;line-height:1.45}
+p{margin:0;max-width:70ch}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-size:12.5px}
+code{background:var(--code);padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}
+pre{background:var(--code);padding:12px 14px;border-radius:4px;overflow-x:auto;margin:0;font-size:12.5px;line-height:1.6}
+pre code{background:none;padding:0}
+a{color:var(--accent)}
+header{display:grid;gap:10px;padding-bottom:18px;border-bottom:2px solid var(--ink)}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+section{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:20px 22px;display:grid;gap:14px}
+.lede{color:var(--muted)}
+/* verdict */
+.verdict{display:grid;grid-template-columns:auto 1fr;gap:18px 26px;align-items:start}
+.stamp{border:2px solid var(--accent);border-radius:6px;padding:12px 18px;display:grid;gap:2px;text-align:center;min-width:150px;background:var(--accent-soft)}
+.stamp .score{font-size:40px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums;color:var(--accent)}
+.stamp .score small{font-size:16px;font-weight:500;color:var(--muted)}
+.stamp .grade{font-size:15px;font-weight:700}
+.stamp .gate{font-size:12.5px;color:var(--p0);font-weight:500}
+.verdict ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px 22px;margin:0}
+.meta div{display:grid;gap:1px}
+.meta dt{font-size:12px;color:var(--muted);letter-spacing:.03em}
+.meta dd{margin:0;font-weight:500;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+/* tables */
+.tbl{overflow-x:auto;margin:0 -4px;padding:0 4px}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:13.5px}
+th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.03em;white-space:nowrap}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+th.num{text-align:right}
+tfoot td{font-weight:700;border-bottom:none}
+.pill{display:inline-block;font-size:12px;font-weight:500;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.ok{color:var(--ok);background:var(--ok-bg)}
+.part{color:var(--p2);background:var(--p2-bg)}
+.reg{color:var(--p0);background:var(--p0-bg)}
+.no{color:var(--p1);background:var(--p1-bg)}
+.sev{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:500;font-size:12px;padding:1px 7px;border-radius:3px;white-space:nowrap}
+.P0{color:var(--p0);background:var(--p0-bg)} .P1{color:var(--p1);background:var(--p1-bg)} .P2{color:var(--p2);background:var(--p2-bg)} .P3{color:var(--p3);background:var(--p3-bg)}
+/* findings */
+.counts{display:flex;flex-wrap:wrap;gap:8px}
+.findings{display:grid;gap:12px}
+.finding{border:1px solid var(--line);border-left:4px solid var(--p3);border-radius:4px;padding:12px 14px;display:grid;gap:8px;background:var(--paper)}
+.finding.s0{border-left-color:var(--p0)} .finding.s1{border-left-color:var(--p1)} .finding.s2{border-left-color:var(--p2)}
+.fhead{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline}
+.fid{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:500;font-size:13px}
+.finding dl{display:grid;grid-template-columns:52px 1fr;gap:4px 12px;margin:0;font-size:14px}
+.finding dt{color:var(--muted);font-size:12.5px;padding-top:2px}
+.finding dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.where{font-size:12.5px;color:var(--muted)}
+.note{border-left:3px solid var(--accent);padding:4px 0 4px 12px;color:var(--muted);max-width:none}
+ol.prio{margin:0;padding-left:22px;display:grid;gap:6px}
+ol.prio li{max-width:78ch}
+@media (max-width:560px){
+  .verdict{grid-template-columns:1fr}
+  .stamp{justify-self:start}
+  .finding dl{grid-template-columns:1fr}
+  .finding dt{padding-top:6px}
+  section{padding:16px 14px}
+}
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">독립 평가 · 5차 결과</div>
+    <h1>MarketLens 5차 평가</h1>
+    <p class="lede">5차 재평가 신청서(대상 커밋 <span class="mono">f6b048b</span>)의 주장을 재현하고, 4차 반례 M1~M5의 처리를 확인했습니다. 신청서가 요청한 세 가지도 시도했습니다. 새 가이던스 규칙에서 틀린 부호로 EXTRACTED가 되는 문장, 재상장·되돌아가는 개명·클래스 개명이 섞인 동기화, 7일 경계입니다. 새 반례는 이번에도 실행 가능한 테스트로 남겼습니다.</p>
+  </header>
+
+  <section aria-labelledby="h-verdict">
+    <h2 id="h-verdict">판정</h2>
+    <div class="verdict">
+      <div class="stamp" role="img" aria-label="78점, B등급, A등급 Gate 5개 중 4개 통과">
+        <div class="score">78<small>/100</small></div>
+        <div class="grade">B 등급</div>
+        <div class="gate">A Gate 실패 (5개 중 4개 통과)</div>
+      </div>
+      <ul>
+        <li>신청서 수치는 <strong>한 가지를 빼고 모두 재현</strong>됐습니다. 백엔드 "459 passed (E2E 포함)"은 실제로는 E2E를 <strong>뺀</strong> 수입니다. E2E를 켜면 472 passed, 끄면 459 passed + 13 skipped입니다. 통과 수를 적게 적은 쪽이라 감점하지 않았습니다.</li>
+        <li>4차 반례 M1~M5는 <strong>모두 해결</strong>됐습니다. 신청서가 요청한 섞인 동기화(되돌아가는 개명 + 같은 티커 재상장 + 두 클래스 개명)도 한 번에 올바르게 처리됩니다. 열린 P0이 없어 <strong>G1을 통과</strong>했습니다.</li>
+        <li>새 반례는 <strong>P1 1건, P2 2건</strong>입니다. 가이던스 규칙에서 틀린 부호로 EXTRACTED가 되는 문장 7개를 찾았습니다. 다만 흔한 문장은 이제 맞거나 UNCLEAR로 처리되어, 남은 오류는 덜 흔한 구성이라 P1로 봤습니다.</li>
+        <li><strong>자체 등급 B를 인정합니다.</strong> A는 실제 공급자 검증(G3) 없이는 불가능합니다.</li>
+      </ul>
+    </div>
+    <dl class="meta">
+      <div><dt>저장소 · 평가 대상</dt><dd class="mono">chlansgus777-ops/chlansgus @ f6b048b</dd></div>
+      <div><dt>평가일</dt><dd>2026-09-26</dd></div>
+      <div><dt>반례 테스트 위치</dt><dd class="mono">claude/new-session-ir1fdw : evaluations/eval5/</dd></div>
+      <div><dt>반례 실행 결과(f6b048b)</dt><dd>백엔드 10건 실패 (모두 의도한 실패)</dd></div>
+    </dl>
+  </section>
+
+  <section aria-labelledby="h-trend">
+    <h2 id="h-trend">라운드별 변화</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>평가</th><th>대상</th><th class="num">점수</th><th class="num">Gate 통과</th><th class="num">열린 P0</th><th class="num">열린 P1</th><th class="num">P2</th><th class="num">P3</th></tr></thead>
+      <tbody>
+        <tr><td>3차</td><td class="mono">445221f</td><td class="num">63</td><td class="num">2 / 5</td><td class="num">1</td><td class="num">4</td><td class="num">8</td><td class="num">1</td></tr>
+        <tr><td>4차</td><td class="mono">4182468</td><td class="num">73</td><td class="num">3 / 5</td><td class="num">1</td><td class="num">0</td><td class="num">3</td><td class="num">1</td></tr>
+        <tr><td>5차</td><td class="mono">f6b048b</td><td class="num">78</td><td class="num">4 / 5</td><td class="num">0</td><td class="num">1</td><td class="num">2</td><td class="num">0</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-gate">
+    <h2 id="h-gate">A 등급 Gate</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>기준</th><th>내용</th><th>결과</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td class="n">G1</td><td>열린 P0 없음</td><td><span class="pill ok">통과</span></td><td>2~4차 가이던스 문장은 모두 맞거나 UNCLEAR. 남은 부호 오류는 덜 흔한 구성(L1, P1)</td></tr>
+        <tr><td class="n">G2</td><td>시점 정확성·종목 동일성 P1 없음</td><td><span class="pill ok">통과</span></td><td>M2~M4 해결. 새 종목 마스터 결함(L2·L3)은 조건이 필요한 경우라 P2</td></tr>
+        <tr><td class="n">G3</td><td>실제 공급자 검증 기록</td><td><span class="pill reg">실패</span></td><td>미실행 (신청서도 인정)</td></tr>
+        <tr><td class="n">G4</td><td>대상 커밋 CI 통과</td><td><span class="pill ok">통과</span></td><td>ci #23 run 36239377700, windows-build #8 run 36239377641 모두 success</td></tr>
+        <tr><td class="n">G5</td><td>직전 평가 반례가 원문 그대로 재현되지 않음</td><td><span class="pill ok">통과</span></td><td><code>pytest evaluations</code> 32 passed(3차 19 + 4차 13), 프런트 반례 2건 통과</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-claims">
+    <h2 id="h-claims">신청서 주장 확인</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>주장</th><th>확인 결과</th><th>방법</th></tr></thead>
+      <tbody>
+        <tr><td>Backend 459 passed (E2E 포함)</td><td><span class="pill part">표기 불일치</span></td><td>수집 472개. 프런트 빌드와 Playwright를 갖추면 472 passed, 빌드가 없으면 459 passed + 13 skipped. 459는 E2E를 뺀 수</td></tr>
+        <tr><td>평가자 원본 반례 32 passed</td><td><span class="pill ok">일치</span></td><td>저장소 루트에서 <code>pytest evaluations</code> → 32 passed. <code>evaluations/eval4</code> 폴더는 평가자 커밋과 같음</td></tr>
+        <tr><td>4차 반례를 본문 그대로 편입</td><td><span class="pill ok">일치</span></td><td>첫 줄 설명만 추가. 프런트 M5 테스트는 원본과 동일</td></tr>
+        <tr><td>Frontend 51 passed, 타입 오류 0</td><td><span class="pill ok">일치</span></td><td><code>tsc -b</code> 종료 코드 0, vitest 12파일 51 passed, 빌드 성공</td></tr>
+        <tr><td>E2E 13 passed</td><td><span class="pill ok">일치</span></td><td>472에 포함되어 통과</td></tr>
+        <tr><td>CI · Windows 빌드 success</td><td><span class="pill ok">일치</span></td><td>두 실행 모두 <span class="mono">f6b048b</span>에서 success. CI 방식 명령도 로컬에서 종료 코드 0</td></tr>
+        <tr><td>기존 테스트 변경 1곳 공개</td><td><span class="pill ok">일치</span></td><td>같은 티커 재상장 테스트가 새 구간 규칙으로 바뀜(공개한 그대로). 7일 이내 공백 테스트 추가</td></tr>
+        <tr><td>ruff(pyflakes) 3건 그대로</td><td><span class="pill ok">일치</span></td><td>3건 동일</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-items">
+    <h2 id="h-items">4차 반례 처리 확인</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>#</th><th>4차 반례</th><th>결과</th><th>확인 내용 · 남은 문제</th></tr></thead>
+      <tbody>
+        <tr><td class="n">M1</td><td>손실 가이던스가 이익으로 저장</td><td><span class="pill ok">해결</span></td><td>4차 문장 10건과 2·3차 문장이 모두 맞거나 UNCLEAR. 덜 흔한 구성에서 틀린 부호가 남음(L1)</td></tr>
+        <tr><td class="n">M2</td><td>같은 티커 재상장이 상장폐지를 지움</td><td><span class="pill ok">해결</span></td><td>7일 넘게 빠졌다 돌아오면 새 구간, 이전 구간은 보관. 경계는 6·7일 공백, 8일 새 구간으로 설계대로 동작. 다만 날수는 동기화 시점으로 셈(L2)</td></tr>
+        <tr><td class="n">M3</td><td>되돌아가는 개명이 상장폐지로 기록</td><td><span class="pill ok">해결</span></td><td>BBB는 상장폐지가 아니고 AAA 이력이 이어짐. 섞인 동기화 안에서도 정상</td></tr>
+        <tr><td class="n">M4</td><td>클래스 이력이 서로 바뀜</td><td><span class="pill ok">해결</span></td><td>접미사로 짝이 정해질 때만 연결하고 순서와 무관. 짝을 못 정하면 옛 티커를 상장폐지로 기록함(L3)</td></tr>
+        <tr><td class="n">M5</td><td>폴링 실패 시 CURRENT 유지</td><td><span class="pill ok">해결</span></td><td>3회 연속 실패하면 "상태 확인 불가"</td></tr>
+        <tr><td class="n">의견</td><td>20분 규칙 표시</td><td><span class="pill ok">반영</span></td><td>시세 없이 CURRENT인 경우 "분석 시점 가격 기준(현재가 미확인, 최대 20분)" 표시</td></tr>
+        <tr><td class="n">추가</td><td>"respectively" 두 측정치를 범위로 저장(신청자 자체 발견)</td><td><span class="pill ok">해결</span></td><td>회귀 테스트 통과</td></tr>
+        <tr><td class="n">R2 · R3 · R5 · R6</td><td>실데이터 위험</td><td><span class="pill no">미처리</span></td><td>신청서가 한계로 인정</td></tr>
+        <tr><td class="n">R7</td><td>이전 버전의 잘못된 기록</td><td><span class="pill part">문서화만</span></td><td>README에 명시, 복구 스크립트 없음</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-new">
+    <h2 id="h-new">새 반례</h2>
+    <div class="counts"><span class="sev P0">P0 × 0</span><span class="sev P1">P1 × 1</span><span class="sev P2">P2 × 2</span><span class="sev P3">P3 × 0</span></div>
+    <p class="note">등급 기준은 3·4차와 같습니다. 가이던스 부호 오류는 흔한 문장에서 나면 P0, 덜 흔한 구성에서만 나면 P1로 봅니다. 이번 L1은 2~4차에서 문제가 된 흔한 문장이 모두 해결된 뒤에 남은 경우라 P1입니다. 실데이터에서 이런 문장이 자주 나오면 P0로 다시 보아야 합니다.</p>
+    <div class="findings">
+
+      <article class="finding s1">
+        <div class="fhead"><span class="fid">L1</span><span class="sev P1">P1</span><h3>틀린 부호로 EXTRACTED가 되는 가이던스 문장이 남아 있음</h3></div>
+        <dl>
+          <dt>입력</dt><dd>① "For the fourth quarter, we expect a GAAP net loss and non-GAAP EPS of $0.10 to $0.15." · 발표 전 컨센서스 +0.12. 같은 형태: "While we expect a GAAP net loss …, we expect adjusted EPS of $0.40 to $0.50", "After a net loss in fiscal 2026, the Company expects diluted EPS of $1.10 to $1.20", "narrow the net loss and deliver diluted EPS of $0.05 to $0.10". ② "The Company expects to lose between $0.10 and $0.12 per share", "diluted EPS of approximately –$0.10", "operating margin of approximately –5%" (en dash 마이너스)</dd>
+          <dt>기대</dt><dd>①은 양수 또는 UNCLEAR, ②는 음수 또는 UNCLEAR. 틀린 부호의 EXTRACTED는 안 됨</dd>
+          <dt>실제</dt><dd>① 4문장 모두 음수 EXTRACTED(MEDIUM). 끝단에서 <code>guide_eps_vs_cons</code> −204%, BEAT_WEAK_GUIDE(실적 품질 0.75→0.40). ② 3문장 모두 양수 EXTRACTED(손실→이익 방향)</dd>
+        </dl>
+        <div class="where">위치 <code>backend/marketlens/domain/guidance.py</code> <code>_sign()</code>: "net loss"가 숫자 앞에 있기만 하면 음수로 봄(그 숫자를 "non-GAAP EPS"·"adjusted EPS"가 가리키는지 확인하지 않음, <code>_PROFIT</code>에 EPS 표현이 없음). 손실 단어 목록에 "lose"가 없고, <code>_NEG_MARK</code>가 en dash를 음수 기호로 보지 않음 · 테스트 <code>test_L1_*</code> (8건)</div>
+      </article>
+
+      <article class="finding s2">
+        <div class="fhead"><span class="fid">L2</span><span class="sev P2">P2</span><h3>7일 규칙이 부재 기간이 아니라 동기화 간격을 셈</h3></div>
+        <dl>
+          <dt>입력</dt><dd>TTT는 매 거래일 거래됐고 일괄 일봉도 매일 저장됨. SEC 목록에서 하루 빠진 날(2026-06-02) 동기화가 돌았고, 사용자가 10일 뒤 앱을 열어 다음 동기화가 돔</dd>
+          <dt>기대</dt><dd>계속 거래된 종목이므로 이력 유지. 상장폐지 기록 없음</dd>
+          <dt>실제</dt><dd>새 구간(RELIST)으로 처리되어 모든 봉이 보관 키 <code>TTT~3</code>로 옮겨짐. <code>bars('TTT')</code>는 0개라 스캐너에서 약 60거래일 동안 빠짐. 06-01 추천은 06-02에 상장폐지된 보관 구간으로 풀려 DELISTED_LAST_PRICE로 평가됨. 데스크톱 앱은 동기화가 불규칙해 일주일 넘게 쉬는 일이 흔함</dd>
+        </dl>
+        <div class="where">위치 <code>application/market_store.py</code> <code>sync_universe()</code> 1단계: <code>(today - row.delisted_at).days &gt; RELIST_GAP_DAYS</code>. 부재를 관측한 날부터 센 날수이고, 그사이 저장된 일봉(거래 지속 증거)은 보지 않음 · 테스트 <code>test_L2_*</code></div>
+      </article>
+
+      <article class="finding s2">
+        <div class="fhead"><span class="fid">L3</span><span class="sev P2">P2</span><h3>짝을 정하지 못한 개명을 상장폐지로 기록함</h3></div>
+        <dl>
+          <dt>입력</dt><dd>CIK 5에는 두 클래스가 있었고 OLDA는 은퇴(상장폐지)함. 몇 달 뒤 남은 클래스 XYZA가 NEWA로 개명. 어제까지 상장된 옛 티커 하나, 오늘 새 티커 하나</dd>
+          <dt>기대</dt><dd>XYZA→NEWA 개명으로 연결. 정할 수 없다면 적어도 상장폐지로 확정하지 않음</dd>
+          <dt>실제</dt><dd>은퇴한 OLDA도 끝 글자가 "A"라 짝을 정하지 못해 연결하지 않음. NEWA는 이력 0개이고, XYZA는 개명일에 상장폐지로 기록되어 XYZA 추천이 DELISTED_LAST_PRICE로 평가됨. 끝 글자가 겹치는 실제 클래스 쌍도 있음(예: UA·UAA). 신청서 한계에는 "새 티커 이력이 비어 있음"만 적혀 있고 옛 티커의 상장폐지 기록은 빠져 있음</dd>
+        </dl>
+        <div class="where">위치 <code>market_store.py</code> <code>_link_source()</code>: 끝 글자 비교, 은퇴한 행도 후보에 포함, 판단 불가 시 NEW로 두고 마지막 처리에서 옛 티커를 상장폐지로 기록 · 테스트 <code>test_L3_*</code></div>
+      </article>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-asked">
+    <h2 id="h-asked">신청서가 요청한 점검 결과</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>요청</th><th>결과</th></tr></thead>
+      <tbody>
+        <tr><td>틀린 부호로 EXTRACTED가 되는 문장</td><td>7문장 찾음(L1). 이익이 손실로 저장된 4개, 손실이 이익으로 저장된 3개. 2~4차의 흔한 문장은 모두 맞거나 UNCLEAR</td></tr>
+        <tr><td>재상장·되돌아가는 개명·클래스 개명이 섞인 동기화</td><td>한 번의 동기화에서 AAA 이력 연속, CCC 이전 구간의 상장폐지(06-03) 유지, YA←600·YB←400으로 모두 올바름</td></tr>
+        <tr><td>7일 경계(6일·8일)</td><td>6·7일은 데이터 공백(이력 유지), 8일은 새 구간으로 설계대로 동작. 다만 기준이 동기화 시점이라 실제 부재가 하루여도 새 구간이 될 수 있음(L2)</td></tr>
+        <tr><td>반례를 실행 가능한 테스트로</td><td><code>evaluations/eval5</code> 10건, 모두 <span class="mono">f6b048b</span>에서 의도대로 실패</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-score">
+    <h2 id="h-score">점수 기준표</h2>
+    <p class="note">3·4차와 같은 기준표입니다. 등급 구간: A는 85점 이상이면서 Gate 5개 모두 통과, B 75~84, C 60~74, D 60 미만.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>영역</th><th class="num">배점</th><th class="num">4차</th><th class="num">5차</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td>데이터 무결성·시점 정확성</td><td class="num">25</td><td class="num">20</td><td class="num">21</td><td>M2~M4 해결, 섞인 동기화 정상. 동기화 간격 기반 재상장 판정(L2), 짝 미정 개명의 상장폐지 기록(L3)</td></tr>
+        <tr><td>결정 안전성</td><td class="num">20</td><td class="num">12</td><td class="num">15</td><td>가이던스 P0 해소. 덜 흔한 구성의 틀린 부호가 남음(L1)</td></tr>
+        <tr><td>성과 평가·모의투자</td><td class="num">15</td><td class="num">13</td><td class="num">13</td><td>M3·M4 해결. L2·L3가 가짜 상장폐지 성과를 만들 수 있음</td></tr>
+        <tr><td>실데이터 검증</td><td class="num">15</td><td class="num">6</td><td class="num">6</td><td>변화 없음. 실행 기록 없음</td></tr>
+        <tr><td>테스트·CI·재현성</td><td class="num">10</td><td class="num">9</td><td class="num">9</td><td>반례 원문 편입, 결과 재현. 테스트 수 표기 오류 1건</td></tr>
+        <tr><td>UI 정확성</td><td class="num">10</td><td class="num">9</td><td class="num">10</td><td>M5와 20분 표시 반영. 이번 라운드에 찾은 UI 결함 없음</td></tr>
+        <tr><td>신청서·문서의 정확성</td><td class="num">5</td><td class="num">4</td><td class="num">4</td><td>한계 공개가 대체로 정확. 테스트 수 표기, L3의 상장폐지 기록이 한계에 빠짐</td></tr>
+      </tbody>
+      <tfoot><tr><td>합계</td><td class="num">100</td><td class="num">73</td><td class="num">78</td><td>B 등급 · A Gate 4/5</td></tr></tfoot>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-next">
+    <h2 id="h-next">다음 라운드 우선순위</h2>
+    <ol class="prio">
+      <li><strong>실제 공급자 검증(G3).</strong> A로 가는 데 남은 유일한 Gate입니다. 실행하면서 R1·R2·R3·R5·R6 결과도 함께 기록하십시오. 이 개발 환경에서는 네트워크가 막혀 있으니, 키와 네트워크가 있는 환경에서 <code>marketlens live-verify</code>를 실행하고 보고서를 첨부하면 됩니다.</li>
+      <li><strong>L1 가이던스.</strong> NEG는 손실 표현이 그 숫자를 지배할 때만 저장하십시오. 손실 표현과 숫자 사이에 "EPS", "earnings per share", "non-GAAP", "adjusted" 같은 다른 지표 표현이 있으면 UNCLEAR입니다. 손실 단어에 "lose/losing"을 더하고, 왼쪽에 범위가 없는 en dash·figure dash(–, ‒)도 음수 기호로 보십시오.</li>
+      <li><strong>L2 재상장 판정.</strong> 부재 기간은 동기화 시점이 아니라 증거로 판단하십시오. 부재 기간에 일괄 일봉이 계속 저장됐으면 데이터 공백입니다. 또는 부재가 서로 7일 넘게 떨어진 두 번 이상의 동기화에서 관측될 때만 새 구간으로 보십시오.</li>
+      <li><strong>L3.</strong> 짝을 정하지 못한 옛 티커는 상장폐지로 확정하지 말고 "미확정"으로 두어 성과 계산이 확정하지 않게 하십시오. 오래전에 은퇴한 행은 후보에서 빼거나 뒤로 미루십시오.</li>
+      <li><strong>R7.</strong> 이전 버전이 남긴 잘못된 기록을 찾아 알려 주는 점검 명령이라도 두십시오.</li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="h-repro">
+    <h2 id="h-repro">재현 방법</h2>
+    <pre><code># 반례 모음 가져오기 (평가 브랜치 = f6b048b + evaluations/eval5)
+git fetch origin claude/new-session-ir1fdw
+git checkout origin/claude/new-session-ir1fdw -- evaluations/eval5
+
+pip install -r backend/requirements.lock &amp;&amp; pip install --no-deps -e ./backend
+python -m pytest -q -o addopts="" evaluations/eval5        # f6b048b: 10 failed (의도한 실패)
+python -m pytest -q -o addopts="" evaluations/eval3 evaluations/eval4   # 32 passed
+
+# 테스트 수 확인
+cd backend &amp;&amp; python -m pytest -q -o addopts="" --collect-only | tail -1   # 472 tests collected</code></pre>
+    <p class="note">반례 테스트는 <code>backend/tests</code> 밖에 있어 CI가 수집하지 않습니다. 고친 뒤에는 모두 통과해야 하며, 통과한 테스트는 회귀 테스트로 <code>backend/tests</code>에 옮기면 됩니다.</p>
+  </section>
+</main>

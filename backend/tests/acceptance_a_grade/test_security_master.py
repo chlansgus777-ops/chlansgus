@@ -3,7 +3,7 @@ ticker never inherits another company's prices or financials."""
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from marketlens.domain.enums import Exchange
 from marketlens.domain.fundamentals import QuarterlyFinancials
@@ -122,3 +122,87 @@ def test_listing_order_does_not_change_a_same_day_ticker_swap(tmp_path):
         st.sync_universe(todays if order == 0 else todays[::-1], D2)
         assert [b.close for b in st.bars("META", D1 - timedelta(days=10), D2)] == [300.0] * 5
         assert [b.close for b in st.bars("METV", D1 - timedelta(days=10), D2)] == [15.0] * 5
+
+
+def _session_days(a, b):
+    from marketlens.domain.market_calendar import is_trading_day
+
+    out, d = [], a
+    while d <= b:
+        if is_trading_day(d):
+            out.append(d)
+        d += timedelta(days=1)
+    return out
+
+
+def test_bars_that_only_resume_after_a_long_absence_are_a_relist_not_a_gap(tmp_path):
+    """Evidence rule (evaluation 5, L2): continuous trading through the absence = data gap; a hole in the bars
+    for the whole absence (trading resumed only at the relisting) = a real delisting and a new interval."""
+    st = _store(tmp_path)
+    st.sync_universe([_sec("RRR", 4)], D1)
+    st.save_bars("RRR", [Bar(d, 10, 10, 10, 10, 1e6) for d in _session_days(D1 - timedelta(days=60), D1)], "polygon")
+    st.sync_universe([], D1 + timedelta(days=1))
+    back = D1 + timedelta(days=60)
+    st.save_bars("RRR", [Bar(d, 12, 12, 12, 12, 1e6) for d in _session_days(back - timedelta(days=2), back)], "polygon")
+    out = st.sync_universe([_sec("RRR", 4)], back)
+    assert out["relisted"] == 1
+    with st.sf() as s:
+        assert repo.delisted_on(s, st.resolve("RRR", D1), "LIVE") == D1 + timedelta(days=1)
+
+
+def test_continuous_trading_through_a_long_absence_is_a_data_gap(tmp_path):
+    st = _store(tmp_path)
+    st.sync_universe([_sec("TTT", 3)], D1)
+    st.save_bars("TTT", [Bar(d, 10, 10, 10, 10, 1e6) for d in _session_days(D1 - timedelta(days=60), D1 + timedelta(days=30))], "polygon")
+    st.sync_universe([], D1 + timedelta(days=1))
+    out = st.sync_universe([_sec("TTT", 3)], D1 + timedelta(days=30))
+    assert out["relisted"] == 0 and st.resolve("TTT", D1) == "TTT"
+    with st.sf() as s:
+        assert repo.delisted_on(s, "TTT", "LIVE") is None
+
+
+def test_an_undecidable_class_rename_is_unresolved_never_a_final_delisting(tmp_path):
+    """Two classes vanish and two new tickers appear whose class suffix cannot be matched: nothing is linked
+    (no wrong history), and the vanished names are UNRESOLVED — not delisted — so outcomes stay pending."""
+    st = _store(tmp_path)
+    st.sync_universe([_sec("XA", 9), _sec("XB", 9)], D1)
+    _bars(st, "XA", D1 - timedelta(days=5), 5, 600.0)
+    _bars(st, "XB", D1 - timedelta(days=5), 5, 400.0)
+    out = st.sync_universe([_sec("QQ1", 9), _sec("QQ2", 9)], D2)
+    assert out["unresolved"] == 2 and out["delisted"] == 0 and out["renamed"] == 0
+    with st.sf() as s:
+        assert repo.delisted_on(s, "XA", "LIVE") is None and repo.delisted_on(s, "XB", "LIVE") is None
+    assert st.bars("QQ1", D1 - timedelta(days=10), D2) == [] and st.bars("QQ2", D1 - timedelta(days=10), D2) == []
+    assert {s.ticker for s in st.securities(D2)} == {"QQ1", "QQ2"}  # one row per company-class and day
+    assert {s.ticker for s in st.securities(D1)} == {"XA", "XB"}
+
+
+def test_a_long_retired_class_does_not_block_the_rename_of_the_listed_one(tmp_path):
+    st = _store(tmp_path)
+    st.sync_universe([_sec("OLDA", 5), _sec("XYZA", 5)], D1)
+    st.sync_universe([_sec("XYZA", 5)], D1 + timedelta(days=1))
+    _bars(st, "XYZA", D1 - timedelta(days=5), 5, 30.0)
+    out = st.sync_universe([_sec("NEWA", 5)], D2 + timedelta(days=30))
+    assert out["renamed"] == 1 and len(st.bars("NEWA", D1 - timedelta(days=10), D2 + timedelta(days=30))) == 5
+
+
+def test_audit_history_reports_records_an_earlier_version_may_have_written_wrong(tmp_path):
+    """Evaluation 5, R7: rows written before these fixes are not rewritten automatically; the audit finds them."""
+    from marketlens.infrastructure.db.models import SecurityRow
+
+    st = _store(tmp_path)
+    st.sync_universe([_sec("GAP", 1), _sec("OLDN", 2), _sec("NOCIK", None)], D1)
+    st.save_bars("GAP", [Bar(D1 + timedelta(days=i), 1, 1, 1, 1, 1) for i in range(1, 5)], "polygon")
+    with st.sf() as s:  # simulate what an earlier version stored: plain delistings, an unlinked new ticker
+        for t in ("GAP", "OLDN"):
+            r = s.get(SecurityRow, t)
+            r.active, r.delisted_at = False, D1
+        s.add(SecurityRow(ticker="NEWN", company_name="n", exchange="NASDAQ", sector="Unknown", industry="Unknown", market_cap=None, active=True,
+                          mode="LIVE", updated_at=datetime(2026, 6, 3, tzinfo=timezone.utc), first_seen=D1 + timedelta(days=2), cik=2))
+        s.commit()
+    kinds = {(f["kind"], f["ticker"]) for f in st.audit_history()}
+    assert ("TRADED_AFTER_DELISTING", "GAP") in kinds
+    assert ("DELISTING_LOOKS_LIKE_RENAME", "OLDN") in kinds
+    assert ("NO_CIK", "NOCIK") in kinds
+    with st.sf() as s:  # read-only
+        assert s.get(SecurityRow, "GAP").delisted_at == D1

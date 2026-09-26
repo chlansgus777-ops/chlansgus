@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
@@ -26,11 +27,18 @@ NETWORK_HINTS = ("http error", "ConnectError", "ProxyError", "timeout", "CONNECT
 
 
 def _classify(err: Exception) -> str:
+    """BLOCKED_BY_NETWORK when a configured provider could not be reached; BLOCKED_BY_CREDENTIAL when no provider
+    of the category is configured (no key / no SEC User-Agent); FAILED for everything else (a real answer that was
+    wrong, a contract mismatch, a circuit opened by earlier failures of the same provider in this run)."""
     msg = str(err)
-    if isinstance(err, ProviderUnavailable) and ("미설정" in msg or "not set" in msg or "API_KEY" in msg or "USER_AGENT" in msg.upper()):
-        return "BLOCKED_BY_CREDENTIAL"
-    if any(h.lower() in msg.lower() for h in NETWORK_HINTS):
+    low = msg.lower()
+    if any(h.lower() in low for h in NETWORK_HINTS):
         return "BLOCKED_BY_NETWORK"
+    entries = re.findall(r"\('([^']+)', '([^']*)'\)", msg)  # AllProvidersFailed: [(provider, outcome), ...]
+    if entries and all(o.startswith("not configured") for _, o in entries):
+        return "BLOCKED_BY_CREDENTIAL"
+    if "미설정" in msg or "not set" in low or "api_key" in low or "user_agent" in low or "blocked_by_credential" in low:
+        return "BLOCKED_BY_CREDENTIAL"
     return "FAILED"
 
 

@@ -79,10 +79,12 @@ def main(argv: list[str] | None = None) -> int:
     rp = sub.add_parser("replay", help="replay a stored recommendation from its snapshot")
     rp.add_argument("rec_id", type=int)
     sub.add_parser("migrate", help="apply database migrations")
+    sub.add_parser("audit-history", help="LIVE: read-only check of the stored security history for records an earlier version may have written wrong")
     bk = sub.add_parser("backup", help="consistent copy of the SQLite database (safe while the app runs)")
     bk.add_argument("dest")
     sub.add_parser("sync", help="LIVE only: refresh the local point-in-time store from free sources")
-    sub.add_parser("live-verify", help="LIVE only: smoke-test every free provider (NVDA AAPL MSFT JPM XOM AMZN TSM)")
+    lv = sub.add_parser("live-verify", help="LIVE only: smoke-test every free provider (NVDA AAPL MSFT JPM XOM AMZN TSM)")
+    lv.add_argument("--out", help="write the full JSON report to this file (stdout is truncated)")
     sim = sub.add_parser("simulate", help="MOCK only: run weekly scans over past weeks to populate evaluation data")
     sim.add_argument("--weeks", type=int, default=12)
     args = p.parse_args(argv)
@@ -110,6 +112,13 @@ def main(argv: list[str] | None = None) -> int:
     s = _service(settings)
     if args.cmd == "sync":
         print(json.dumps(s.sync_market(), default=str)[:4000])
+    elif args.cmd == "audit-history":
+        if s.store is None:
+            print("audit-history는 LIVE 모드 저장소에서만 의미가 있습니다", file=sys.stderr)
+            return 2
+        found = s.store.audit_history()
+        print(json.dumps({"findings": found, "count": len(found)}, ensure_ascii=False, indent=1, default=str))
+        return 0 if not found else 1
     elif args.cmd == "live-verify":
         if s.mode.value != "LIVE":
             print("live-verify는 MARKETLENS_MODE=LIVE 에서만 의미가 있습니다", file=sys.stderr)
@@ -117,7 +126,12 @@ def main(argv: list[str] | None = None) -> int:
         from marketlens.application.live_verify import verify
 
         rep = verify(s)
-        print(json.dumps(rep, default=str, ensure_ascii=False, indent=1)[:20000])
+        text = json.dumps(rep, default=str, ensure_ascii=False, indent=1)
+        if args.out:
+            from pathlib import Path
+
+            Path(args.out).write_text(text, encoding="utf-8")
+        print(text[:20000])
         return 0 if all(v == "VERIFIED" for v in rep["summary"].values()) else 1
     elif args.cmd == "scan":
         print(json.dumps(s.run_scan(run_committee=not args.no_committee).__dict__, default=str))

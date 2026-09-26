@@ -1,0 +1,53 @@
+name: live-verify
+# Real-provider smoke test (A-grade gate G3). Runs `marketlens live-verify` against the REAL free providers from a
+# GitHub-hosted runner (the development sandbox has no outbound network). Nothing here is a fixture.
+#
+# Keys are read from repository secrets; a provider without its key is reported BLOCKED_BY_CREDENTIAL, never
+# VERIFIED. SEC EDGAR needs no key, only a User-Agent that names the requester (SEC fair-access policy):
+# set the repository secret SEC_USER_AGENT to "Your Name your@email", or pass it as the run input.
+on:
+  workflow_dispatch:
+    inputs:
+      sec_user_agent:
+        description: "SEC User-Agent (name + contact email). Empty = use the SEC_USER_AGENT secret."
+        required: false
+        default: ""
+jobs:
+  live-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend (lock file)
+        run: pip install -r backend/requirements.lock && pip install --no-deps -e ./backend
+      - name: Run live-verify against the real providers
+        env:
+          MARKETLENS_MODE: LIVE
+          MARKETLENS_DATA_DIR: ${{ runner.temp }}/marketlens
+          SEC_USER_AGENT: ${{ inputs.sec_user_agent != '' && inputs.sec_user_agent || secrets.SEC_USER_AGENT }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+          FINRA_API_KEY: ${{ secrets.FINRA_API_KEY }}
+          FINRA_API_SECRET: ${{ secrets.FINRA_API_SECRET }}
+        run: |
+          set +e
+          marketlens live-verify --out live-verify-report.json > /dev/null
+          code=$?
+          echo "exit code: $code (0 = every category VERIFIED)"
+          python - <<'EOF'
+          import json
+          rep = json.load(open("live-verify-report.json"))
+          print("as_of:", rep.get("as_of"))
+          for cat, v in rep["categories"].items():
+              print(f"{cat:16} {v['status']:22} {v.get('note', '')[:160]}")
+          EOF
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: live-verify-report
+          path: live-verify-report.json

@@ -97,6 +97,8 @@ def _parse(metric: str, s: str) -> tuple[float | None, float | None, str, bool, 
         return None, None, "fraction", False, -1
     unit = "USD/share" if metric == "eps" else "USD"
     scale_word = r"\s*(billion|million|thousand|b|m)?(?![a-z])"
+    if metric == "eps" and re.search(r"\$\s?" + _NUM + r"\s*(billion|million|thousand|b|m)(?![a-z])", low):
+        return None, None, unit, False, -1  # a dollar total next to a per-share figure: not an EPS value
     m = re.search(r"\$\s?" + _NUM + scale_word + r"\s*,?\s*plus or minus\s*" + _NUM + r"\s*%", low)
     if m:
         c = _val(m.group(1), m.group(2)) * (_SCALE.get(m.group(3) or "", 1.0) if metric != "eps" else 1.0)
@@ -115,7 +117,9 @@ def _parse(metric: str, s: str) -> tuple[float | None, float | None, str, bool, 
 
 
 _PROFIT = re.compile(r"(?<![a-z])(profit|profitable|profitability|net income|income|earnings|break-?\s?even|positive)(?![a-z])")
-_NEG_MARK = re.compile(r"(?:^|(?<=[\s(]))[-−](?=\s?\$?\s?\d)|\$\s?\(\s?\d|\(\s?\$\s?\d|(?<!or )minus\s+\$?\s?\d")
+# minus signs: hyphen, U+2212 minus, and the en / figure dashes typesetters use for minus ("–$0.10", "‒5%")
+_MINUS = "-−–‒"
+_NEG_MARK = re.compile(r"(?:^|(?<=[\s(]))[-−–‒](?=\s?\$?\s?\d)|\$\s?\(\s?\d|\(\s?\$\s?\d|(?<!or )minus\s+\$?\s?\d")
 _RANGE_LEFT = re.compile(r"(\d|%|billion|million|thousand|\bb|\bm)\s*$")
 
 
@@ -123,19 +127,23 @@ def _has_negative_number(low: str) -> bool:
     """An explicitly negative number ("-$0.10", "$(0.10)"); a dash between two amounts
     ("$3.2 billion - $3.4 billion", "45% - 46%") is a range, not a sign."""
     for m in _NEG_MARK.finditer(low):
-        if m.group(0) in ("-", "−") and _RANGE_LEFT.search(low[: m.start()]):
+        if m.group(0) in _MINUS and _RANGE_LEFT.search(low[: m.start()]):
             continue
         return True
     return False
 
 
-_LOSS_WORD = re.compile(r"(?<![a-z])(loss|losses|deficit)(?![a-z])")
+_LOSS_WORD = re.compile(r"(?<![a-z])(loss|losses|deficit|lose|loses|losing|lost)(?![a-z])")
 # the clear forms of loss guidance: "net loss (per share)", "loss per (diluted) share"
 _LOSS_EPS_FORM = re.compile(r"(?<![a-z])(net\s+loss|loss\s+per\s+(diluted\s+|basic\s+)?(common\s+)?share)(?![a-z])")
+# another measure named between the loss phrase and the number: the number belongs to THAT measure
+# ("a GAAP net loss and non-GAAP EPS of $0.10 to $0.15", "after a net loss …, diluted EPS of $1.10")
+_OTHER_MEASURE = re.compile(r"(?<![a-z])(eps|earnings|non-gaap|adjusted|income|profit|profitable|operating|ebitda|revenue|margin)(?![a-z])")
+_CLAUSE_BREAK = re.compile(r"(?<![a-z])(and|while|after|before|but|then|deliver|delivering|narrow|narrowing|reduce|reducing)(?![a-z])|[;:]")
 # words that put a loss into another clause than the guided number
 _OTHER_CLAUSE = re.compile(r"(?<![a-z])(excluding|excludes|exclude|compared|versus|vs\.?|despite|reflecting|including|includes|which|related to|on the sale|from the sale|charge|charges|impairment|credit)(?![a-z])")
 _AMOUNT = {"usd": re.compile(r"\$\s?\(?\d"), "pct": re.compile(r"\d(?:\.\d+)?\s*%")}
-_JOIN = re.compile(r"^\s*(?:to|and|-|–|or)\s*$")
+_JOIN = re.compile(r"^\s*(?:to|and|-|–|‒)\s*$")  # "or" is not a range: "$40 million, or $0.40 per share" is two amounts
 
 
 def _number_groups(low: str, metric: str) -> int:
@@ -172,6 +180,8 @@ def _sign(metric: str, s: str, start: int) -> str:
         return "UNCLEAR"  # two amounts of the same unit (GAAP and non-GAAP, an excluded item, last year's value)
     if re.search(r"(?<![a-z])respectively(?![a-z])|gaap and non-gaap|gaap and adjusted|non-gaap and gaap", low):
         return "UNCLEAR"  # "GAAP and non-GAAP margins of 73.3% and 73.5%, respectively" is two measures, not a range
+    if re.search(r"(?<![a-z])break[-\s]?even(?![a-z])", low):
+        return "UNCLEAR"  # "breakeven to $0.05": one end of the range is not a written number
     if not _LOSS_WORD.search(low):
         return "POS"
     if metric != "eps" or start < 0:
@@ -183,6 +193,8 @@ def _sign(metric: str, s: str, start: int) -> str:
         return "UNCLEAR"  # a loss word that is not the clear loss-per-share form ("credit losses", "the loss on …")
     between = low[form.end():start]
     rest = low[start:]
+    if _OTHER_MEASURE.search(between) or _CLAUSE_BREAK.search(between):
+        return "UNCLEAR"  # the loss phrase does not govern this number
     if _OTHER_CLAUSE.search(low[: form.start()] + " " + between) or _OTHER_CLAUSE.search(rest):
         return "UNCLEAR"
     if _PROFIT.search(between + " " + rest) or _PROFIT.search(_LOSS_EPS_FORM.sub(" ", low[: form.start()])):
