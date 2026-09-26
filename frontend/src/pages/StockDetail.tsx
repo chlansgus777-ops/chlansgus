@@ -62,20 +62,28 @@ export interface LiveStatus { id: number; status: string | null; reason: string 
 /** "현재 유효" is a statement about NOW: while the page stays open the stored recommendation is re-judged
  * every minute (the server re-checks age, session and the cached quote against the plan). A plain read
  * of the same recommendation — never a new analysis; a newer recommendation id is ignored here. */
+const LIVE_STATUS_MAX_FAILURES = 3;
+
 export function useLiveStatus(ticker: string, recId: number | undefined, everyMs = 60_000): LiveStatus | null {
   const [live, setLive] = useState<LiveStatus | null>(null);
   useEffect(() => {
     if (recId === undefined) return;
     let alive = true;
+    let failures = 0;
     const timer = window.setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       api.get<SD>(`/stocks/${ticker}`).then((x) => {
         if (!alive) return;
+        failures = 0;
         if (x.recommendation.id === recId) setLive({ id: recId, status: x.recommendation.current_status ?? null, reason: x.recommendation.current_status_reason ?? null });
         // a newer analysis of this stock exists: the plan on screen is no longer the current one, and nobody
         // re-judges it any more — never leave it showing "현재 유효"
         else setLive({ id: recId, status: "SUPERSEDED", reason: `더 최근 분석(#${x.recommendation.id})이 있습니다 — 새로고침하면 최신 분석을 봅니다`, newer: x.recommendation.id });
-      }).catch(() => undefined);
+      }).catch(() => {
+        // the server can no longer re-judge this recommendation: after a few misses never keep showing "현재 유효"
+        failures += 1;
+        if (alive && failures >= LIVE_STATUS_MAX_FAILURES) setLive({ id: recId, status: "UNVERIFIED", reason: `서버에서 상태를 ${failures}번 연속 확인하지 못했습니다 — 실행 전에 새로고침하세요` });
+      });
     }, everyMs);
     return () => { alive = false; window.clearInterval(timer); };
   }, [ticker, recId, everyMs]);

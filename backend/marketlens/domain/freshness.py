@@ -238,7 +238,10 @@ def recommendation_freshness(
     # (``max_quote_age``). After that, while the market has traded, a newer quote is required — listings that
     # show only cached quotes must say "check the price" instead of calling an unchecked BUY actionable.
     if not market_active_between(as_of, now) or age <= pol.max_quote_age:
-        return RecommendationFreshness("CURRENT", recorded_quality, n, f"{when}; 분석 {int(age.total_seconds() // 60)}분 경과, 이후 가격 변동 가능 시간 없음" if age > pol.max_intraday_age else f"{when}; 분석 {int(age.total_seconds() // 60)}분 경과")
+        if not market_active_between(as_of, now):
+            return RecommendationFreshness("CURRENT", recorded_quality, n, f"{when}; 분석 {minutes}분 경과, 이후 가격 변동 가능 시간 없음")
+        limit = int(pol.max_quote_age.total_seconds() // 60)
+        return RecommendationFreshness("CURRENT", recorded_quality, n, f"{when}; 분석 {minutes}분 경과 — 분석 시점 가격 기준(현재가 미확인, 최대 {limit}분)")
     if plan is None or not quote_ok:
         return RecommendationFreshness("NEEDS_REVALIDATION", recorded_quality, n, f"{when}; 장중 분석 후 {minutes}분 경과 — 가격이 바뀌었을 수 있어 현재가 확인 전에는 실행 불가")
     problems = _revalidate(plan, quote_price, pol)  # type: ignore[arg-type]
