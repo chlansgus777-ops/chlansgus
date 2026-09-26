@@ -44,3 +44,58 @@ def test_estimate_snapshots_are_labelled_with_the_new_york_day_observed(live):  
     assert days == {ny_day}
     if last_completed_session(svc.now()) != ny_day:
         assert last_completed_session(svc.now()) not in days
+
+
+def test_unconfigured_providers_are_blocked_by_credential_not_failed():
+    """Found in a keyless dry run: 'all providers not configured' was reported FAILED."""
+    from marketlens.application.live_verify import _classify
+    from marketlens.providers.contracts import ProviderError
+
+    assert _classify(ProviderError("NVDA: all price providers failed: [('finnhub', 'not configured'), ('polygon', 'not configured')]")) == "BLOCKED_BY_CREDENTIAL"
+    assert _classify(ProviderError("alphavantage: ALPHAVANTAGE_API_KEY 없음(BLOCKED_BY_CREDENTIAL)")) == "BLOCKED_BY_CREDENTIAL"
+    # one provider configured but unreachable → the network, not the key
+    assert _classify(ProviderError("all fundamental providers failed: [('sec-edgar', 'ProviderUnavailable: http error: ProxyError')]")) == "BLOCKED_BY_NETWORK"
+    # a configured provider that answered wrongly is a failure
+    assert _classify(ProviderError("all price providers failed: [('polygon', 'ProviderDataError: not found (404)')]")) == "FAILED"
+
+
+def test_provider_refusal_is_a_credential_block_and_the_reason_is_kept():
+    """First real run (GitHub runner): SEC answered 403 to a User-Agent without a contact e-mail. That is the
+    provider refusing the requester, not an unreachable network; and the provider's message is kept (redacted)."""
+    import httpx
+
+    from marketlens.application.live_verify import _classify
+    from marketlens.providers.contracts import ProviderDataError, ProviderUnavailable
+    from marketlens.providers.live.http import HttpClient
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/sec":
+            return httpx.Response(403, text="<html><body>Your Request Originates from an Undeclared Automated Tool</body></html>")
+        return httpx.Response(400, json={"message": "Invalid compareType 'equal'", "apikey": "SECRETSECRETSECRETSECRETSECRETSECRET12"})
+
+    c = HttpClient("https://x.test", transport=httpx.MockTransport(handler))
+    try:
+        c.get_json("/sec")
+        raise AssertionError("no error")
+    except ProviderUnavailable as e:
+        assert "Undeclared Automated Tool" in str(e) and _classify(e) == "BLOCKED_BY_CREDENTIAL"
+    try:
+        c.get_json("/finra")
+        raise AssertionError("no error")
+    except ProviderDataError as e:
+        assert "Invalid compareType" in str(e) and "SECRETSECRET" not in str(e)
+    assert _classify(ProviderUnavailable("http error: ProxyError")) == "BLOCKED_BY_NETWORK"
+
+
+def test_finra_request_follows_the_real_partition_key_rule():
+    """First live contact with FINRA (2026-09-26) answered 400: sorting needs settlementDate in an EQUAL filter.
+    The provider now filters a settlement-date range, sorts locally and still gets the latest two settlements."""
+    from datetime import date
+
+    from marketlens.providers.live.finra import FinraShortInterestProvider
+    from tests.live_fixtures import live_transport
+
+    seen: list[str] = []
+    snap = FinraShortInterestProvider(transport=live_transport(seen)).get_short_interest("NVDA", date(2026, 9, 25))
+    assert snap.short_interest_settlement == date(2026, 8, 29)  # newest first although the rows came unordered
+    assert snap.short_interest_change is not None and snap.short_interest_change > 0

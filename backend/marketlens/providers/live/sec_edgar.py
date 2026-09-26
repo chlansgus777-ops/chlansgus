@@ -124,6 +124,26 @@ class SecEdgarProvider:
         sub = self._data.get_json(f"/submissions/CIK{cik:010d}.json")
         return parse_submissions_profile(sub)
 
+    def earnings_release_times(self, ticker: str, since: date) -> list[datetime]:
+        """Acceptance times (UTC) of the 8-K filings with Item 2.02 (results of operations) since ``since``,
+        oldest first — the real announcement times of the earnings releases (one submissions request)."""
+        self._require()
+        cik = self.cik_for(ticker)
+        recent = self._data.get_json(f"/submissions/CIK{cik:010d}.json").get("filings", {}).get("recent", {})
+        out: list[datetime] = []
+        for i, form in enumerate(recent.get("form", [])):
+            if form != "8-K" or "2.02" not in str((recent.get("items") or [""] * (i + 1))[i]):
+                continue
+            try:
+                fdate = date.fromisoformat(recent["filingDate"][i])
+                if fdate < since:
+                    break  # newest first
+                acc = (recent.get("acceptanceDateTime") or [None] * (i + 1))[i]
+                out.append(datetime.fromisoformat(str(acc).replace("Z", "+00:00")) if acc else datetime.combine(fdate, datetime.min.time(), tzinfo=timezone.utc))
+            except (KeyError, IndexError, ValueError):
+                continue
+        return sorted(out)
+
     def earnings_releases(self, ticker: str, since: date, max_n: int = 2) -> list[dict[str, Any]]:
         """Recent 8-K filings with Item 2.02 (results of operations) and their Exhibit 99 press release.
         Returns [{accession, filed_at (acceptance time, UTC), url, text}] newest first."""
@@ -142,7 +162,14 @@ class SecEdgarProvider:
             acc = (recent.get("acceptanceDateTime") or [None] * (i + 1))[i]
             try:
                 filed_at = datetime.fromisoformat(str(acc).replace("Z", "+00:00")) if acc else datetime.combine(fdate, datetime.min.time(), tzinfo=timezone.utc)
-                doc = pick_press_release(self._www.get_json(f"{path}/index.json"))
+                # the filing index page names each document's TYPE (EX-99.1); file names are free-form
+                # (NVIDIA: "q2fy26pr.htm"), so the name patterns are only a fallback
+                try:
+                    doc = pick_exhibit_99(self._www.get_text(f"{path}/{accn}-index.htm"))
+                except ProviderDataError:
+                    doc = None
+                if doc is None:
+                    doc = pick_press_release(self._www.get_json(f"{path}/index.json"))
                 text = self._www.get_text(f"{path}/{doc}") if doc else ""
             except (ProviderDataError, ValueError):
                 continue
@@ -178,12 +205,12 @@ class SecEdgarProvider:
         self._require()
         cik = self.cik_for(ticker)
         facts = self._data.get_json(f"/api/xbrl/companyfacts/CIK{cik:010d}.json")
-        return parse_company_facts(facts, ticker)
+        return _guarded(parse_company_facts, facts, ticker)
 
     def get_annual_ifrs(self, ticker: str) -> list[Any]:
         self._require()
         cik = self.cik_for(ticker)
-        return parse_ifrs_annual(self._data.get_json(f"/api/xbrl/companyfacts/CIK{cik:010d}.json"), ticker)
+        return _guarded(parse_ifrs_annual, self._data.get_json(f"/api/xbrl/companyfacts/CIK{cik:010d}.json"), ticker)
 
     def get_extras(self, ticker: str) -> CompanyProfileExtras:
         raise NotSupported("SEC XBRL은 업종 KPI(CET1, 점유율 등)를 표준 형태로 제공하지 않음")
@@ -279,6 +306,30 @@ def parse_ifrs_annual(facts: dict[str, Any], ticker: str) -> list["AnnualFinanci
     return out[-6:]
 
 
+_INDEX_ROW = re.compile(r"<tr[^>]*>(.*?)</tr>", re.I | re.S)
+_INDEX_CELL = re.compile(r"<td[^>]*>(.*?)</td>", re.I | re.S)
+_INDEX_HREF = re.compile(r"""href\s*=\s*["']([^"']+)["']""", re.I)
+
+
+def pick_exhibit_99(index_html: str) -> str | None:
+    """The earnings press release from an EDGAR filing index page (``…-index.htm``): the document whose Type
+    column is EX-99.1 (else the first EX-99.x). Returns the file name inside the filing folder."""
+    found: list[tuple[int, str]] = []
+    for row in _INDEX_ROW.findall(index_html or ""):
+        cells = _INDEX_CELL.findall(row)
+        href = _INDEX_HREF.search(row)
+        if not href or not cells:
+            continue
+        types = [re.sub(r"<[^>]+>|\s+", "", c).upper() for c in cells]
+        m = next((re.fullmatch(r"EX-99(?:\.(\d+))?", t) for t in types if re.fullmatch(r"EX-99(?:\.\d+)?", t)), None)
+        if m is None:
+            continue
+        name = href.group(1).split("?doc=")[-1].rsplit("/", 1)[-1]
+        if name.lower().endswith((".htm", ".html", ".txt")):
+            found.append((0 if (m.group(1) or "1").lstrip("0") == "1" else 1, name))
+    return min(found)[1] if found else None
+
+
 def pick_press_release(index: Any) -> str | None:
     """The earnings press release inside an 8-K filing index: Exhibit 99.x (by file name)."""
     items = ((index or {}).get("directory") or {}).get("item") or []
@@ -341,15 +392,28 @@ def parse_form4(xml: str) -> list[tuple[str, str, float, str]]:
 
 
 def _pick_concept(gaap: dict[str, Any], names: tuple[str, ...], unit_pref: tuple[str, ...]) -> list[dict[str, Any]]:
+    """The facts of one line item, choosing among alternative concepts PER PERIOD (preference order wins).
+
+    Companies switch concepts over the years (e.g. ``Revenues`` → ``RevenueFromContractWithCustomer…`` after
+    ASC 606, or back). Taking the first concept that exists at all would leave every period it does not cover
+    empty — on real data the latest quarter's revenue of a company whose preferred concept only holds old
+    periods. A period (start, end) is taken from the first concept that reports it; one period is never mixed
+    from two concepts, so its vintages stay comparable."""
+    out: list[dict[str, Any]] = []
+    covered: set[tuple[Any, Any]] = set()
     for n in names:
         c = gaap.get(n)
         if not c:
             continue
         units = c.get("units", {})
-        for u in unit_pref:
-            if u in units:
-                return list(units[u])
-    return []
+        u = next((u for u in unit_pref if u in units), None)
+        if u is None:
+            continue
+        mine = [it for it in units[u] if (it.get("start"), it.get("end")) not in covered]
+        # only 10-Q/10-K facts claim a period (a value seen only in an 8-K or S-4 is dropped later anyway)
+        covered |= {(it.get("start"), it.get("end")) for it in mine if it.get("form") in QUARTERLY_FORMS}
+        out += mine
+    return out
 
 
 QUARTERLY_FORMS = ("10-Q", "10-K", "10-Q/A", "10-K/A")
@@ -397,6 +461,17 @@ def _ytd_to_quarters(items: list[dict[str, Any]]) -> dict[date, list[tuple[float
     return dict(out)
 
 
+def _guarded(parse: Any, facts: Any, ticker: str) -> Any:
+    """One company's unusual filing must never stop a whole sync or scan: a parser crash becomes a per-ticker
+    ProviderDataError (recorded in the ingestion manifest as FAILED) instead of an unhandled exception."""
+    try:
+        return parse(facts, ticker)
+    except (NotSupported, ProviderDataError):
+        raise
+    except (ValueError, KeyError, TypeError, AttributeError, IndexError, ZeroDivisionError) as e:
+        raise ProviderDataError(f"{ticker}: XBRL 해석 실패 ({type(e).__name__}: {e})") from e
+
+
 def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFinancials]:
     gaap = facts.get("facts", {}).get("us-gaap")
     if not gaap:
@@ -429,6 +504,22 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
         # amendments (10-Q/A, 10-K/A) are later vintages of the same period: recorded as revisions, never overwriting
         return sorted((it for it in items if it.get("form") in QUARTERLY_FORMS), key=lambda it: it.get("filed", ""))
 
+    def q4_from_annual(field_name: str, annual: Mapping[date, tuple[date, float, date]], annual_vintages: Mapping[date, list[tuple[date, float]]]) -> None:
+        """Q4 is only reported inside the annual 10-K: Q4 = FY − (Q1 + Q2 + Q3); published at the 10-K date."""
+        for end, (st, fy_val, fdate) in annual.items():
+            if field_name in per_period.get(end, {}):
+                continue
+            qs = [e for e in per_period if st < e < end and field_name in per_period[e]]
+            if len(qs) == 3:
+                # Q1–Q3 as known on the 10-K date (a comparative restated before the 10-K counts)
+                put(end, field_name, fy_val - sum(known_at(e, field_name, fdate) for e in qs), fdate)
+                # later vintages: a restated annual total or a restated Q1–Q3 changes the derived Q4
+                later = sorted({fd for fd, _ in annual_vintages[end]} | {fd for e in qs for fd, _ in revisions[e].get(field_name, [])})
+                for F in (x for x in later if x > fdate):
+                    fy_known = max((o for o in annual_vintages[end] if o[0] <= F), key=lambda o: o[0])[1]
+                    put(end, field_name, fy_known - sum(known_at(e, field_name, F) for e in qs), F)
+
+    eps_annual: tuple[dict[date, tuple[date, float, date]], dict[date, list[tuple[date, float]]]] = ({}, {})
     for field_name, concepts in CONCEPTS.items():
         unit_pref = ("USD/shares",) if field_name == "eps_diluted" else ("shares",) if field_name == "shares_diluted" else ("USD",)
         items = _pick_concept(gaap, concepts, unit_pref)
@@ -452,20 +543,18 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
                 if days > QUARTER_MAX_DAYS:
                     continue  # half-year / nine-month YTD figures
             put(end, field_name, float(item["val"]), date.fromisoformat(item["filed"]))
-        if field_name in FLOW_FIELDS and field_name not in ("eps_diluted", "shares_diluted"):
-            # Q4 is only reported inside the annual 10-K: Q4 = FY − (Q1 + Q2 + Q3); published at the 10-K date
-            for end, (st, fy_val, fdate) in annual.items():
-                if field_name in per_period.get(end, {}):
-                    continue
-                qs = [e for e in per_period if st < e < end and field_name in per_period[e]]
-                if len(qs) == 3:
-                    # Q1–Q3 as known on the 10-K date (a comparative restated before the 10-K counts)
-                    put(end, field_name, fy_val - sum(known_at(e, field_name, fdate) for e in qs), fdate)
-                    # later vintages: a restated annual total or a restated Q1–Q3 changes the derived Q4
-                    later = sorted({fd for fd, _ in annual_vintages[end]} | {fd for e in qs for fd, _ in revisions[e].get(field_name, [])})
-                    for F in (x for x in later if x > fdate):
-                        fy_known = max((o for o in annual_vintages[end] if o[0] <= F), key=lambda o: o[0])[1]
-                        put(end, field_name, fy_known - sum(known_at(e, field_name, F) for e in qs), F)
+        if field_name == "eps_diluted":
+            eps_annual = (annual, annual_vintages)  # Q4 EPS is decided once the diluted share counts are known
+        elif field_name in FLOW_FIELDS and field_name != "shares_diluted":
+            q4_from_annual(field_name, annual, annual_vintages)
+
+    # Q4 diluted EPS. Preferred: Q4 net income / Q4 diluted shares (below, when the 10-K tags the Q4 share
+    # count). Most 10-Ks tag only the full-year weighted shares, which would leave Q4 EPS — and with it TTM EPS
+    # and P/E — empty for most companies (seen on the real SEC data for NVDA, AAPL and MSFT). Then
+    # Q4 EPS = FY EPS − (Q1 + Q2 + Q3 EPS), the usual approximation: exact when the share count is stable,
+    # a few cents off when it changed a lot during the year (EPS is not additive over periods).
+    q4_from_annual("eps_diluted", {end: v for end, v in eps_annual[0].items()
+                                   if not ("net_income" in per_period.get(end, {}) and "shares_diluted" in per_period.get(end, {}))}, eps_annual[1])
 
     # total debt from its components (instant values), first filing per period
     comp_vals: dict[date, dict[str, tuple[float, date]]] = defaultdict(dict)
@@ -495,7 +584,9 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
         put(end, "total_debt", *first)
         # restated components (a later 10-Q/10-K comparative) → later vintages of the total, same components
         for F in sorted({fd for vs in comp_vintages[end].values() for fd, _ in vs if fd > first[1]}):
-            at_f = {k: (max((o for o in vs if o[0] <= F), key=lambda o: o[0])[1], F) for k, vs in comp_vintages[end].items() if k in comps}
+            # only components already filed on F (a component first filed later is unknown on F)
+            at_f = {k: (max(known, key=lambda o: o[0])[1], F) for k, vs in comp_vintages[end].items()
+                    if k in comps and (known := [o for o in vs if o[0] <= F])}
             again = debt_total(at_f)
             if again is not None:
                 put(end, "total_debt", again[0], F)

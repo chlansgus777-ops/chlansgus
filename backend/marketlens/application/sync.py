@@ -1,8 +1,9 @@
 """Market data synchronisation into the local point-in-time store (free sources only).
 
-1. Universe: SEC listings → store (new names get ``first_seen``, vanished names get ``delisted_at``).
-2. Daily bars: Polygon *grouped daily* — ONE request returns every US stock for a date — for each missing
+1. Daily bars: Polygon *grouped daily* — ONE request returns every US stock for a date — for each missing
    trading day in the backfill window (bounded per run to respect the free rate limit).
+2. Universe: SEC listings → store (new names get ``first_seen``, vanished names get ``delisted_at``;
+   renames / reuses / relists through the security master, judged with the bars just stored).
 3. Shares outstanding: SEC XBRL frames (one request per quarter for all filers) → market cap.
 4. Sector/industry: SEC submissions (SIC code) for liquid, large-enough names lacking a fresh profile.
 """
@@ -64,13 +65,7 @@ class MarketSync:
             fundamentals_refresh: timedelta = FUNDAMENTALS_REFRESH) -> SyncReport:
         rep = SyncReport()
         today = last_completed_session(now)
-        # 1) universe
-        try:
-            secs = self.reg.chain("universe").call("list_securities", None).value
-            rep.universe = self.store.sync_universe(secs, today)
-        except ProviderError as e:
-            rep.errors.append(f"universe: {e}")
-        # 2) bars via grouped daily
+        # 1) bars via grouped daily (before the universe step, see 2a)
         grouped = _find(self.reg, "price", "get_grouped_daily")
         if grouped is not None:
             empty_s = self.store.get_setting("grouped_empty_days") or ""
@@ -97,6 +92,13 @@ class MarketSync:
                     rep.bar_days_empty += 1
             if rep.bar_days_empty:
                 self.store.set_setting("grouped_empty_days", ",".join(sorted(x.isoformat() for x in empty)))
+        # 2a) universe — after the day's bars are stored (a name missing from the SEC file while its bars keep
+        #     arriving is a data gap, not a delisting) and before splits (rename links decide which bars a split rescales)
+        try:
+            secs = self.reg.chain("universe").call("list_securities", None).value
+            rep.universe = self.store.sync_universe(secs, today)
+        except ProviderError as e:
+            rep.errors.append(f"universe: {e}")
         # 2b) stock splits (one bulk request) → rescale stored bars fetched before the split
         # Only splits that have already executed (New York date) are fetched and applied: an announced
         # future split must not rescale today's prices.

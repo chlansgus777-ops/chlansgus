@@ -298,13 +298,22 @@ def alphavantage(q: dict[str, list[str]]) -> Any:
     ]}
 
 
+FINRA_SORT_ERROR = ("Sorting is allowed only if all partitions keys are specified in EQUAL CompareFilter."
+                    "Partition keys missing or not using EQUAL CompareFilter: settlementDate")
+
+
 def finra(body: dict[str, Any]) -> Any:
-    sym = body["compareFilters"][0]["fieldValue"]
+    """Shape and rules of the real FINRA Query API as observed on 2026-09-26 (GitHub runner, public access): a
+    sort needs every partition key (settlementDate) in an EQUAL filter, otherwise 400; rows come unordered."""
+    equal = {f["fieldName"] for f in body.get("compareFilters", []) if str(f.get("compareType", "")).upper() == "EQUAL"}
+    if body.get("sortFields") and "settlementDate" not in equal:
+        return (400, {"statusCode": 400, "statusDescription": "Bad Request", "message": FINRA_SORT_ERROR})
+    sym = next(f["fieldValue"] for f in body["compareFilters"] if f["fieldName"] == "symbolCode")
     c = COMPANIES.get(sym)
     if c is None:
         return []
-    return [{"symbolCode": sym, "settlementDate": "2026-08-29", "currentShortPositionQuantity": c["shares"] * 0.012, "previousShortPositionQuantity": c["shares"] * 0.011, "daysToCoverQuantity": 1.4},
-            {"symbolCode": sym, "settlementDate": "2026-08-15", "currentShortPositionQuantity": c["shares"] * 0.011, "daysToCoverQuantity": 1.3}]
+    return [{"symbolCode": sym, "settlementDate": "2026-08-15", "currentShortPositionQuantity": c["shares"] * 0.011, "daysToCoverQuantity": 1.3},
+            {"symbolCode": sym, "settlementDate": "2026-08-29", "currentShortPositionQuantity": c["shares"] * 0.012, "previousShortPositionQuantity": c["shares"] * 0.011, "daysToCoverQuantity": 1.4}]
 
 
 def live_transport(seen: list[str] | None = None) -> httpx.MockTransport:
@@ -330,6 +339,16 @@ def live_transport(seen: list[str] | None = None) -> httpx.MockTransport:
                 return httpx.Response(200, json=submissions(by_cik[path.split("CIK")[1][:10]]))
             if "/companyfacts/CIK" in path:
                 return httpx.Response(200, json=companyfacts(by_cik[path.split("CIK")[1][:10]]))
+            if "/Archives/edgar/data/" in path and path.endswith("-index.htm"):
+                # EDGAR's filing index page: the exhibit's TYPE is in a column (the file name is free-form)
+                folder = path.rsplit("/", 1)[0]
+                return httpx.Response(200, text=(
+                    '<table class="tableFile" summary="Document Format Files"><tr><th scope="col">Seq</th><th scope="col">Description</th>'
+                    '<th scope="col">Document</th><th scope="col">Type</th><th scope="col">Size</th></tr>'
+                    f'<tr><td scope="row">1</td><td scope="row">8-K</td><td scope="row"><a href="/ix?doc={folder}/d8k.htm">d8k.htm</a> iXBRL</td>'
+                    '<td scope="row">8-K</td><td scope="row">39011</td></tr>'
+                    f'<tr class="evenRow"><td scope="row">2</td><td scope="row">PRESS RELEASE</td><td scope="row"><a href="{folder}/nvda-ex991.htm">nvda-ex991.htm</a></td>'
+                    '<td scope="row">EX-99.1</td><td scope="row">81234</td></tr></table>'))
             if "/Archives/edgar/data/" in path and path.endswith("/index.json"):
                 return httpx.Response(200, json={"directory": {"item": [{"name": "0000000000-26-000004-index.htm"}, {"name": "d8k.htm"}, {"name": "nvda-ex991.htm"}]}})
             if "/Archives/edgar/data/" in path and path.endswith("ex991.htm"):
@@ -356,7 +375,10 @@ def live_transport(seen: list[str] | None = None) -> httpx.MockTransport:
         if "finra.org" in u.netloc and req.method == "POST":
             if req.headers.get("authorization", "").startswith("Basic "):
                 return httpx.Response(401)  # client credentials are never valid on the data endpoint
-            return httpx.Response(200, json=finra(json.loads(req.content)))
+            out = finra(json.loads(req.content))
+            if isinstance(out, tuple):
+                return httpx.Response(out[0], json=out[1])
+            return httpx.Response(200, json=out)
         return httpx.Response(404)
 
     return httpx.MockTransport(handler)

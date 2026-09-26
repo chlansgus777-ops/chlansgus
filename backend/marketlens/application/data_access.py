@@ -272,7 +272,33 @@ class DataAccess:
         return out
 
     def earnings(self, t: str) -> Fetched:
-        return self._get("analyst", "analyst", "get_earnings_history", t, t)
+        """LIVE free path: Finnhub ``/stock/earnings`` (actual vs consensus EPS per fiscal period, no date) paired
+        with the SEC 8-K Item 2.02 acceptance times (the real announcement). The provider chain's earnings
+        history (a calendar with real report dates) is used when that path is not available or finds nothing."""
+        fh = next((p for p in self.reg.chain("analyst").providers if hasattr(p, "get_earnings_surprises") and getattr(p, "configured", False)), None)
+        sec = next((p for p in self.reg.chain("fundamental").providers if hasattr(p, "earnings_release_times") and getattr(p, "configured", True)), None)
+        if fh is None or sec is None:
+            return self._get("analyst", "analyst", "get_earnings_history", t, t)
+        hit = self.cache.get("analyst.earnings_paired", t, self.ttl.get("analyst", timedelta(minutes=5)))
+        if hit is not None:
+            return hit
+        from marketlens.domain.earnings import RELEASE_MAX_DAYS, pair_with_releases
+
+        try:
+            rows = fh.get_earnings_surprises(t)
+            times = sec.earnings_release_times(t, rows[0]["period"])
+            reps = pair_with_releases(rows, times, f"{fh.name}+sec-8k")
+            why = "" if reps else f"{t}: 실적 {len(rows)}건 중 {RELEASE_MAX_DAYS}일 안의 8-K 발표(Item 2.02)와 짝지어진 것 없음"
+        except ProviderError as e:
+            reps, why = [], str(e)
+        if reps:
+            f = Fetched(reps, f"{fh.name}+sec-8k")
+        else:
+            f = self._get("analyst", "analyst", "get_earnings_history", t, t)
+            if f.error or not f.value:
+                f = Fetched(None, None, f"{why}; {f.error or '실적 캘린더 빈 응답'}")
+        self.cache.put("analyst.earnings_paired", t, f)
+        return f
 
     def valuation_history(self, t: str, multiple: str) -> Fetched:
         return self._get("analyst", "analyst", "get_valuation_history", f"{t}:{multiple}", t, multiple)

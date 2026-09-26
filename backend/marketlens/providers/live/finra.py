@@ -6,9 +6,11 @@ Auth:  FINRA API uses OAuth 2.0 client credentials. With FINRA_API_KEY / FINRA_A
        credentials, and the data request carries ``Authorization: Bearer <token>`` — the client
        credentials are never sent to the data endpoint. Without credentials the public (rate-limited)
        access is used.
-Coverage: the dataset is published under FINRA's "otcMarket" group. Whether it covers a given
-       exchange-listed symbol must be confirmed by the live smoke test (NVDA/AAPL rows present); until
-       then this provider is IMPLEMENTED_NOT_LIVE_VERIFIED and a symbol without rows is MISSING.
+Coverage: the dataset is published under FINRA's "otcMarket" group and covers exchange-listed symbols:
+       live-verify on 2026-09-26 (GitHub Actions run 36249539188, public access without credentials) returned
+       NVDA rows and passed the value/date/source checks. A symbol without rows is MISSING.
+Contract: sorting requires every partition key (settlementDate) in an EQUAL filter (observed 400 otherwise),
+       so the request filters a settlement-date range and the rows are ordered locally.
 """
 
 from __future__ import annotations
@@ -56,15 +58,20 @@ class FinraShortInterestProvider:
             self._token = (str(tok), now + max(60.0, ttl - 60.0))
         return {"Authorization": f"Bearer {self._token[0]}"}
 
-    def get_short_interest(self, ticker: str) -> OwnershipSnapshot:
+    def get_short_interest(self, ticker: str, today: date | None = None) -> OwnershipSnapshot:
+        # Real FINRA contract (first live run, 2026-09-26): "Sorting is allowed only if all partition keys are specified
+        # in EQUAL CompareFilter … missing: settlementDate". So no server-side sort: the last ~100 days of settlement
+        # dates are requested with a date-range filter and ordered here.
+        end = today or date.today()
         body = {
-            "limit": 2,
-            "compareFilters": [{"compareType": "equal", "fieldName": "symbolCode", "fieldValue": ticker.upper()}],
-            "sortFields": ["-settlementDate"],
+            "limit": 12,
+            "compareFilters": [{"compareType": "EQUAL", "fieldName": "symbolCode", "fieldValue": ticker.upper()}],
+            "dateRangeFilters": [{"fieldName": "settlementDate", "startDate": date.fromordinal(end.toordinal() - 100).isoformat(), "endDate": end.isoformat()}],
         }
         rows = self._http.post_json(DATASET, body, headers=self._bearer())
         if not isinstance(rows, list):
             raise ProviderDataError("FINRA: malformed payload")
+        rows = sorted((r for r in rows if isinstance(r, dict) and r.get("settlementDate")), key=lambda r: str(r["settlementDate"]), reverse=True)
         if not rows:
             raise NotSupported(f"{ticker}: FINRA 공매도 데이터 없음")
         cur = rows[0]

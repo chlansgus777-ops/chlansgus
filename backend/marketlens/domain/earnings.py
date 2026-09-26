@@ -7,10 +7,11 @@ Key distinction: a *good* number (absolute growth) is not the same as a *better-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
-from typing import Mapping
+from datetime import date, datetime, timedelta
+from typing import Any, Mapping, Sequence
 
 from marketlens.domain.enums import StrEnum
+from marketlens.domain.market_calendar import to_ny
 
 
 class ExpectationBar(StrEnum):
@@ -272,3 +273,26 @@ def assess_revisions(
         low_coverage=(a.analyst_count or 0) < min_analysts,
         high_dispersion=(a.estimate_dispersion or 0) > high_dispersion,
     )
+
+
+RELEASE_MAX_DAYS = 75  # 10-Q deadline is 40–45 days; an earnings release more than 75 days after the period is not its release
+
+
+def pair_with_releases(rows: Sequence[Mapping[str, Any]], release_times: Sequence[datetime], source: str) -> list[EarningsReport]:
+    """Fiscal-period EPS results (period end, actual, consensus) + the real announcement times (SEC 8-K Item
+    2.02 acceptance times) → reports dated by their announcement. Each period takes the FIRST release after its
+    end within ``RELEASE_MAX_DAYS``; one release belongs to one period. A period without a release is dropped —
+    the period end is never used as a report date (it would make results visible weeks before they were public)."""
+    times = sorted(release_times)
+    used: set[datetime] = set()
+    out: list[EarningsReport] = []
+    for r in sorted(rows, key=lambda x: x["period"]):
+        end: date = r["period"]
+        t = next((x for x in times if x not in used and end < to_ny(x).date() <= end + timedelta(days=RELEASE_MAX_DAYS)), None)
+        if t is None:
+            continue
+        used.add(t)
+        q, y = r.get("quarter"), r.get("year")
+        out.append(EarningsReport(report_date=to_ny(t).date(), fiscal_label=f"Q{q} {y}" if q and y else end.isoformat(), source=source,
+                                  eps_actual=r.get("actual"), eps_consensus=r.get("estimate")))
+    return out

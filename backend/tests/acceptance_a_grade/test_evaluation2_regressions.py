@@ -279,3 +279,35 @@ def test_two_measures_listed_respectively_are_not_a_range():
     assert (lo, hi, st) == (None, None, "GUIDANCE_UNCLEAR")
     (m, lo, hi, st), = _g("For fiscal 2027, we expect GAAP EPS of $1.00 to $1.10 and non-GAAP EPS of $1.30 to $1.40.")
     assert (lo, hi, st) == (None, None, "GUIDANCE_UNCLEAR")
+
+
+def test_total_debt_vintages_only_use_components_known_at_that_date():
+    """Found by live-verify on real SEC data (2026-09-26, NVDA): 'max() arg is an empty sequence'. A later
+    vintage date was evaluated with a debt component that was first filed even later."""
+    from marketlens.domain.fundamentals import as_of
+    from marketlens.providers.live.sec_edgar import parse_company_facts
+
+    rev = [_cf(100.0, "2023-12-31", "2023-10-01", "2024-02-01")]
+    facts = {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": rev}},
+        "LongTermDebt": {"units": {"USD": [{"val": 40.0, "end": "2023-12-31", "filed": "2024-02-01", "form": "10-K"},
+                                           {"val": 35.0, "end": "2023-12-31", "filed": "2024-08-01", "form": "10-Q"}]}},
+        "LongTermDebtNoncurrent": {"units": {"USD": [{"val": 30.0, "end": "2023-12-31", "filed": "2024-10-01", "form": "10-K/A"}]}},
+    }}}
+    qs = parse_company_facts(facts, "T")  # must not raise
+    q = {x.period_end: x for x in as_of(qs, date(2024, 9, 1))}[date(2023, 12, 31)]
+    assert q.total_debt == 35.0  # the restated LongTermDebt, known on 2024-08-01
+
+
+def test_a_parser_crash_on_one_company_is_a_provider_error_not_a_sync_stopper(monkeypatch):
+    from marketlens.providers.contracts import ProviderDataError
+    from marketlens.providers.live import sec_edgar
+
+    def boom(facts, ticker):  # noqa: ANN001, ANN202
+        raise ValueError("max() arg is an empty sequence")
+
+    try:
+        sec_edgar._guarded(boom, {}, "XYZ")
+        raise AssertionError("no error")
+    except ProviderDataError as e:
+        assert "XYZ" in str(e) and "max()" in str(e)

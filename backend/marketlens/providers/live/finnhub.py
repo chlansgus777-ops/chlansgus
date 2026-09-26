@@ -126,11 +126,18 @@ class FinnhubProvider:
     def get_earnings_history(self, ticker: str) -> list[EarningsReport]:
         """Uses the earnings calendar so ``report_date`` is the real announcement date (the /stock/earnings
         endpoint only has the fiscal period end, which must never be treated as the report date)."""
+        return self.earnings_window(ticker, 800)
+
+    def earnings_window(self, ticker: str, days: int) -> list[EarningsReport]:
         today = datetime.now(tz=timezone.utc).date()
-        d = self._get("/calendar/earnings", symbol=ticker, **{"from": (today - timedelta(days=800)).isoformat(), "to": today.isoformat()})
+        start = today - timedelta(days=days)
+        d = self._get("/calendar/earnings", symbol=ticker, **{"from": start.isoformat(), "to": today.isoformat()})
         rows = d.get("earningsCalendar")
         if not isinstance(rows, list):
             raise ProviderDataError("earnings history: malformed payload")
+        if not rows:
+            # a listed company always reported within ~2 years: an empty answer is missing data, never "no earnings"
+            raise ProviderDataError(f"earnings history: {ticker} 응답 0건 ({start}~{today})")
         out = []
         for r in rows:
             if not r.get("date") or r.get("epsActual") is None and r.get("revenueActual") is None:
@@ -139,6 +146,27 @@ class FinnhubProvider:
                                       eps_actual=r.get("epsActual"), eps_consensus=r.get("epsEstimate"),
                                       revenue_actual=r.get("revenueActual"), revenue_consensus=r.get("revenueEstimate")))
         return sorted(out, key=lambda x: x.report_date)
+
+    def get_earnings_surprises(self, ticker: str) -> list[dict[str, Any]]:
+        """``/stock/earnings`` (free: the last four quarters): fiscal period end, actual and consensus EPS. It has
+        NO announcement date — the caller pairs each period with the SEC 8-K release time; the period end is
+        never used as a report date. (The free earnings calendar returned nothing for a symbol, even for the
+        last 35 days — live-verify run 36252886492.)"""
+        d = self._get("/stock/earnings", symbol=ticker)
+        if not isinstance(d, list):
+            raise ProviderDataError("earnings surprises: malformed payload")
+        out = []
+        for r in d:
+            try:
+                period = date.fromisoformat(str(r["period"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if r.get("actual") is None:
+                continue
+            out.append({"period": period, "actual": _num(r.get("actual")), "estimate": _num(r.get("estimate")), "quarter": r.get("quarter"), "year": r.get("year")})
+        if not out:
+            raise ProviderDataError(f"earnings surprises: {ticker} 응답 0건")
+        return sorted(out, key=lambda x: x["period"])
 
     def get_estimates(self, ticker: str, as_of: date) -> Any:
         raise NotSupported("추정치 리비전은 유료 데이터 → 미제공(MISSING)")

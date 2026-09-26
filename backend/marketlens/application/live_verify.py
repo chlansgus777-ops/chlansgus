@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
@@ -22,15 +23,24 @@ from marketlens.domain.market_calendar import last_completed_session, to_ny
 from marketlens.providers.contracts import ProviderError, ProviderUnavailable
 
 TICKERS = ("NVDA", "AAPL", "MSFT", "JPM", "XOM", "AMZN", "TSM")
-NETWORK_HINTS = ("http error", "ConnectError", "ProxyError", "timeout", "CONNECT", "403")
+NETWORK_HINTS = ("http error", "ConnectError", "ProxyError", "timeout", "CONNECT")  # the host could not be reached
 
 
 def _classify(err: Exception) -> str:
+    """BLOCKED_BY_NETWORK when a configured provider could not be reached; BLOCKED_BY_CREDENTIAL when no provider
+    of the category is configured (no key / no SEC User-Agent); FAILED for everything else (a real answer that was
+    wrong, a contract mismatch, a circuit opened by earlier failures of the same provider in this run)."""
     msg = str(err)
-    if isinstance(err, ProviderUnavailable) and ("미설정" in msg or "not set" in msg or "API_KEY" in msg or "USER_AGENT" in msg.upper()):
-        return "BLOCKED_BY_CREDENTIAL"
-    if any(h.lower() in msg.lower() for h in NETWORK_HINTS):
+    low = msg.lower()
+    if any(h.lower() in low for h in NETWORK_HINTS):
         return "BLOCKED_BY_NETWORK"
+    entries = re.findall(r"\('([^']+)', '([^']*)'\)", msg)  # AllProvidersFailed: [(provider, outcome), ...]
+    if entries and all(o.startswith("not configured") for _, o in entries):
+        return "BLOCKED_BY_CREDENTIAL"
+    if "unauthorized (401)" in low or "unauthorized (403)" in low:
+        return "BLOCKED_BY_CREDENTIAL"  # the provider answered and refused: key / licence / SEC User-Agent
+    if "미설정" in msg or "not set" in low or "api_key" in low or "user_agent" in low or "blocked_by_credential" in low:
+        return "BLOCKED_BY_CREDENTIAL"
     return "FAILED"
 
 
@@ -84,19 +94,24 @@ def verify(svc: Any, tickers: tuple[str, ...] = TICKERS, record: bool = True) ->
     report: dict[str, Any] = {"as_of": now.isoformat(), "tickers": list(tickers), "categories": {}}
 
     def check(cat: str, fn: Callable[[], list[dict[str, Any]]]) -> None:
+        # every category is judged by its own requests: a circuit opened by an earlier category's failure would
+        # otherwise turn "not tried" into "failed"
+        for ch in getattr(store_data.reg, "chains", {}).values():
+            for br in getattr(ch, "breakers", {}).values():
+                br.reset()
         try:
             samples = fn()
             problems = [f"{x.get('ticker')}: {p}" for x in samples if (p := sample_problem(x, now))] if samples else ["표본 없음"]
             ok = not problems
             report["categories"][cat] = {"status": "VERIFIED" if ok else "FAILED", "samples": samples[:7], "note": "; ".join(problems[:3])}
         except ProviderError as e:
-            report["categories"][cat] = {"status": _classify(e), "samples": [], "note": str(e)[:200]}
+            report["categories"][cat] = {"status": _classify(e), "samples": [], "note": str(e)[:600]}
         except Exception as e:  # noqa: BLE001 - a smoke test must report every failure, not crash
             report["categories"][cat] = {"status": "FAILED", "samples": [], "note": f"{type(e).__name__}: {str(e)[:180]}"}
 
     def fetched(f: Any, t: str, value: Callable[[Any], Any], ts: Callable[[Any], Any], positive: bool = False) -> dict[str, Any]:
-        if f.error or f.value is None:
-            raise ProviderError(f"{t}: {f.error or '값 없음'}")
+        if f.error or f.value is None or (isinstance(f.value, (list, tuple)) and not f.value):
+            raise ProviderError(f"{t}: {f.error or ('값 없음' if f.value is None else '값 없음(빈 목록)')}")
         return {"ticker": t, "value": value(f.value), "provider": f.provider, "timestamp": str(ts(f.value)), "source": f.provider, "positive": positive}
 
     check("price", lambda: [fetched(data.quote(t), t, lambda q: q.price, lambda q: q.timestamp.isoformat(), positive=True) for t in tickers])
@@ -135,7 +150,24 @@ def verify(svc: Any, tickers: tuple[str, ...] = TICKERS, record: bool = True) ->
         check("ifrs", lambda: [fetched(data.annuals("TSM"), "TSM", lambda a: a[-1].revenue, lambda a: a[-1].filed_date, positive=True)])
     if "JPM" in tickers:  # a bank: us-gaap bank concepts
         check("bank", lambda: [fetched(data.quarters("JPM"), "JPM", lambda q: sorted(q[-1].extras) or None, lambda q: q[-1].filed_date)])
-    check("earnings", lambda: [fetched(data.earnings(t), t, lambda e: e[-1].eps_actual, lambda e: e[-1].report_date) for t in tickers[:2]])
+    def earnings() -> list[dict[str, Any]]:
+        out = []
+        for t in tickers[:2]:
+            f = data.earnings(t)
+            if f.error or not f.value:
+                # diagnostics: does a short recent window answer when the long one did not (a plan's history limit)?
+                fh = next((p for p in data.reg.chain("analyst").providers if hasattr(p, "earnings_window") and getattr(p, "configured", True)), None)
+                probe = ""
+                if fh is not None:
+                    try:
+                        probe = f"; 최근 35일 창: {len(fh.earnings_window(t, 35))}건"
+                    except ProviderError as e:
+                        probe = f"; 최근 35일 창: {str(e)[:160]}"
+                raise ProviderError(f"{t}: {f.error or '값 없음(빈 목록)'}{probe}")
+            out.append(fetched(f, t, lambda e: e[-1].eps_actual, lambda e: e[-1].report_date))
+        return out
+
+    check("earnings", earnings)
     check("news", lambda: [fetched(data.news(now.replace(hour=0), [t]), t, lambda n: len(n), lambda n: n[0].published_at.isoformat() if n else "", positive=True) for t in tickers[:1]])
 
     def macro() -> list[dict[str, Any]]:
@@ -170,11 +202,18 @@ def verify(svc: Any, tickers: tuple[str, ...] = TICKERS, record: bool = True) ->
         if sec is None:
             raise ProviderUnavailable("sec-8k: SEC 공급자 미설정")
         rel = sec.earnings_releases("NVDA", date.fromordinal(obs_day.toordinal() - 200))  # a real request, never "checked today"
-        items = [i for r in rel for i in extract(html_to_text(r["text"])) if i.status == "EXTRACTED"]
+        every = [i for r in rel for i in extract(html_to_text(r["text"]))]
+        items = [i for i in every if i.status == "EXTRACTED"]
         if not rel:
             raise ProviderError("sec-8k: 최근 200일 실적 보도자료(8-K Item 2.02) 없음")
         if not items:
-            raise ProviderError(f"sec-8k: 보도자료 {len(rel)}건에서 가이던스 수치를 하나도 추출하지 못함")
+            # diagnostics: which documents, how long, what the extractor saw — so a real-data miss can be fixed
+            from collections import Counter
+
+            counts = Counter(i.status for i in every)
+            seen = " | ".join(f"[{i.status} {i.metric}] {i.sentence[:140]}" for i in every[:3])
+            docs = "; ".join(f"{r['url'].rsplit('/', 1)[-1]} ({len(r['text'])} chars)" for r in rel)
+            raise ProviderError(f"sec-8k: 보도자료 {len(rel)}건에서 가이던스 수치를 하나도 추출하지 못함 — 문서: {docs}; 문장 상태: {dict(counts) or '후보 문장 없음'}; 예: {seen or '-'}")
         last = max(rel, key=lambda r: r["filed_at"])
         return [{"ticker": "NVDA", "value": len(items), "provider": "sec-8k", "timestamp": last["filed_at"].isoformat(), "source": last["url"], "positive": True}]
 

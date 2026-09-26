@@ -56,7 +56,7 @@ class MarketStore:
         cur = list(current)
         listed_now = {c.ticker for c in cur}
         seen: set[str] = set()
-        n = {"added": 0, "updated": 0, "delisted": 0, "renamed": 0, "relisted": 0, "reused": 0}
+        n = {"added": 0, "updated": 0, "delisted": 0, "renamed": 0, "relisted": 0, "reused": 0, "unresolved": 0}
         with self.sf() as s:
             existing = {r.ticker: r for r in s.scalars(select(SecurityRow).where(SecurityRow.mode == self.mode))}
             reset: set[str] = set()
@@ -70,9 +70,9 @@ class MarketStore:
                     n["reused"] += 1
                 elif not row.active and "~" not in row.ticker and (
                         row.successor is not None  # renamed away earlier, now back (AAA → BBB → AAA)
-                        or (row.delisted_at is not None and (today - row.delisted_at).days > RELIST_GAP_DAYS)):  # relisted after a delisting
+                        or (row.delisted_at is not None and self._really_delisted(s, row.ticker, row.delisted_at, today))):
                     # the same company, a new listing interval: the old interval (with its delisting or rename)
-                    # is kept as an archive row; a few days' absence from the SEC file is a data gap, not a delisting
+                    # is kept as an archive row
                     arch = self._archive_reused(s, row, sec, today, existing, "RETURN")
                 else:
                     continue
@@ -84,13 +84,16 @@ class MarketStore:
                 if sec.cik is not None and (sec.ticker not in existing or sec.ticker in reset):
                     pending_by_cik.setdefault(sec.cik, []).append(sec.ticker)
             used: set[str] = set()
+            unresolved_ciks: set[int] = set()  # a new ticker of this CIK could not be paired with the name(s) that vanished
             for sec in cur:
                 seen.add(sec.ticker)
                 row = existing.get(sec.ticker)
                 if row is None or sec.ticker in reset:
-                    src = self._link_source(existing, sec, listed_now, pending_by_cik.get(sec.cik or -1, []), used)
+                    src, ambiguous = self._link_source(existing, sec, listed_now, pending_by_cik.get(sec.cik or -1, []), used, today)
                     if src is not None:
                         used.add(src.ticker)
+                    elif ambiguous and sec.cik is not None:
+                        unresolved_ciks.add(sec.cik)
                     if row is None:
                         row = SecurityRow(ticker=sec.ticker, company_name=sec.company_name, exchange=sec.exchange.value, sector=sec.sector,
                                           industry=sec.industry, market_cap=sec.market_cap, is_etf=sec.is_etf, is_adr=sec.is_adr,
@@ -126,30 +129,66 @@ class MarketStore:
                 if sec.market_cap is not None:
                     row.market_cap = sec.market_cap
                 if not row.active:
-                    row.active, row.delisted_at = True, None  # relisted under the same ticker (same company)
+                    # back after an absence that was a data gap (kept trading, or only a few days): the recorded
+                    # "delisting" was wrong and is withdrawn — audited in the ticker history
+                    s.add(TickerHistoryRow(mode=self.mode, event="GAP", ticker=sec.ticker, cik=sec.cik, effective=row.delisted_at or today, observed_at=_now()))
+                    row.active, row.delisted_at = True, None
                     row.successor = row.renamed_on = None
                 row.updated_at = _now()
                 n["updated"] += 1
             for t, row in existing.items():
                 if t not in seen and row.active and "~" not in t:
+                    if row.cik is not None and row.cik in unresolved_ciks:
+                        # the company is still listed under a new ticker we could not pair with this one: the name ended
+                        # here, but this is NOT a delisting (outcomes stay pending instead of taking a final last price)
+                        row.active, row.renamed_on = False, today
+                        s.add(TickerHistoryRow(mode=self.mode, event="UNRESOLVED", ticker=t, cik=row.cik, effective=today, observed_at=_now()))
+                        n["unresolved"] += 1
+                        continue
                     row.active, row.delisted_at = False, today
                     n["delisted"] += 1
             s.commit()
         return n
 
     @staticmethod
-    def _link_source(existing: Mapping[str, SecurityRow], sec: Security, listed_now: set[str], new_of_cik: list[str], used: set[str]) -> SecurityRow | None:
-        """The unlisted row of the same CIK this listing continues. With several old and new tickers of one CIK
+    def _really_delisted(s: Session, ticker: str, absent_since: date, today: date) -> bool:
+        """Was the name really off the market, or only missing from the SEC file? Decided by evidence, not by
+        the time between two syncs (a desktop app may not sync for weeks):
+        - it kept trading: grouped-daily bars exist for (almost) every session of the absence → a data gap;
+        - no bars during the absence and more than ``RELIST_GAP_DAYS`` passed → a real delisting (relist);
+        - otherwise (a short absence, no evidence either way) → a data gap."""
+        from marketlens.domain.market_calendar import is_trading_day
+
+        sessions, d = [], absent_since
+        while d < today:
+            if is_trading_day(d):
+                sessions.append(d)
+            d += timedelta(days=1)
+        if sessions:
+            have = {r for (r,) in s.execute(select(PriceBarRow.day).where(PriceBarRow.ticker == ticker, PriceBarRow.day >= sessions[0], PriceBarRow.day <= sessions[-1]))}
+            missing = sum(1 for x in sessions if x not in have)
+            if have and missing <= max(1, len(sessions) // 10):
+                return False  # it traded through the "absence"
+        return (today - absent_since).days > RELIST_GAP_DAYS
+
+    @staticmethod
+    def _link_source(existing: Mapping[str, SecurityRow], sec: Security, listed_now: set[str], new_of_cik: list[str], used: set[str],
+                     today: date) -> tuple[SecurityRow | None, bool]:
+        """(row this listing continues, ambiguous). Candidates are unlisted rows of the same CIK. Names that were
+        listed until now (still active, or archived today) come first; a class retired long ago is only a candidate
+        when nothing was listed until now (a relist). With several candidates or several new tickers of one CIK
         (share classes renamed together) the pair must be decidable from the class suffix (XA→YA, BRK-B→…-B);
-        otherwise nothing is linked — a wrong link would hand one class the other class's history."""
+        otherwise nothing is linked (``ambiguous``) — a wrong link would hand one class the other's history."""
         if sec.cik is None:
-            return None
+            return None, False
         cands = [r for r in existing.values()
                  if r.cik == sec.cik and r.ticker != sec.ticker and r.ticker not in listed_now and r.successor is None and r.ticker not in used]
+        recent = [r for r in cands if r.active or r.delisted_at == today]
+        cands = recent or cands
         if not cands:
-            return None
+            return None, False
         if len(cands) == 1 and len(new_of_cik) <= 1:
-            return cands[0]
+            return cands[0], False
 
         def cls(t: str) -> str:
             t = t.split("~", 1)[0]
@@ -158,8 +197,8 @@ class MarketStore:
         mine = [r for r in cands if cls(r.ticker) == cls(sec.ticker)]
         rivals = [t for t in new_of_cik if t != sec.ticker and cls(t) == cls(sec.ticker)]
         if len(mine) == 1 and not rivals and len({cls(r.ticker) for r in cands}) == len(cands):
-            return mine[0]
-        return None  # undecidable pairing: left unlinked (NEW) rather than guessed
+            return mine[0], False
+        return None, True  # undecidable pairing: left unlinked rather than guessed
 
     def _archive_reused(self, s: Session, row: SecurityRow, sec: Security, today: date, existing: Mapping[str, SecurityRow], event: str) -> SecurityRow:
         """The ticker now names another company: move the old company's rows to an archive key (``TICKER~CIK``,
@@ -197,6 +236,38 @@ class MarketStore:
         row.predecessor = row.successor = row.renamed_on = None
         s.flush()
         return a
+
+    def audit_history(self) -> list[dict[str, Any]]:
+        """Read-only check of the stored security history for records an earlier version may have written wrong
+        (evaluation 5, R7). Nothing is changed; each finding says what to review.
+
+        - NO_CIK: rows stored before the security master (identity cannot be checked).
+        - TRADED_AFTER_DELISTING: a delisted name whose bars continue after the delisting date (likely a data gap
+          recorded as a delisting).
+        - DELISTING_LOOKS_LIKE_RENAME: a delisted name whose CIK appears under another, unlinked ticker within
+          7 days (likely a rename recorded as a delisting).
+        - UNRESOLVED: a name that ended while its company continued under a ticker that could not be paired."""
+        out: list[dict[str, Any]] = []
+        with self.sf() as s:
+            rows = list(s.scalars(select(SecurityRow).where(SecurityRow.mode == self.mode)))
+            unresolved = {t for (t,) in s.execute(select(TickerHistoryRow.ticker).where(TickerHistoryRow.mode == self.mode, TickerHistoryRow.event == "UNRESOLVED"))}
+            for r in rows:
+                if r.cik is None and "~" not in r.ticker:
+                    out.append({"kind": "NO_CIK", "ticker": r.ticker, "detail": "CIK 없음 — 종목 마스터 이전 저장분, 티커 재사용 여부를 확인할 수 없음"})
+                if r.delisted_at is not None:
+                    after = s.execute(select(func.count(), func.max(PriceBarRow.day)).where(PriceBarRow.ticker == r.ticker, PriceBarRow.day > r.delisted_at)).one()
+                    if after[0]:
+                        out.append({"kind": "TRADED_AFTER_DELISTING", "ticker": r.ticker,
+                                    "detail": f"상장폐지일 {r.delisted_at.isoformat()} 이후 일봉 {after[0]}개(마지막 {after[1].isoformat()}) — 데이터 누락을 상장폐지로 기록했을 가능성"})
+                    if r.cik is not None and r.successor is None:
+                        near = [o for o in rows if o is not r and o.cik == r.cik and o.predecessor is None and o.first_seen is not None
+                                and 0 <= (o.first_seen - r.delisted_at).days <= RELIST_GAP_DAYS and "~" not in o.ticker]
+                        for o in near:
+                            out.append({"kind": "DELISTING_LOOKS_LIKE_RENAME", "ticker": r.ticker,
+                                        "detail": f"같은 CIK {r.cik}가 {o.first_seen.isoformat()}에 {o.ticker}로 나타남(연결 없음) — 개명을 상장폐지로 기록했을 가능성"})
+                if r.ticker in unresolved:
+                    out.append({"kind": "UNRESOLVED", "ticker": r.ticker, "detail": "같은 회사의 새 티커와 짝을 정하지 못함 — 성과는 확정하지 않고 보류 중, 사람이 확인 필요"})
+        return out
 
     def is_active(self, ticker: str) -> bool | None:
         """True / False for a known security, None when the ticker is not in the security master."""
