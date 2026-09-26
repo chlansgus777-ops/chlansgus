@@ -12,8 +12,8 @@ All return canonical domain types; failures raise `ProviderUnavailable`, `RateLi
 ## LIVE implementations (free, official sources only)
 
 Status words: **IMPLEMENTED** (code path + fixture/contract tests), **LIVE VERIFIED** (only after
-`marketlens live-verify` succeeded against the real API — not yet run: this development environment has
-no network access to the providers and no keys), **PARTIAL**, **ACCUMULATING** (own history growing),
+`marketlens live-verify` succeeded against the real API — all 13 categories passed together in GitHub Actions
+run 36253710550 on 2026-09-26 with free keys; the smoke test checks a few tickers per category, not every company), **PARTIAL**, **ACCUMULATING** (own history growing),
 **UNAVAILABLE**. No scraping, no unofficial endpoints, no multiple free accounts, no rate-limit evasion.
 
 | Data | Provider (free) | Key | Status | Notes |
@@ -78,6 +78,7 @@ manual). Results so far:
 | 2026-09-26 | 36251788168 | With `FINNHUB_API_KEY`: price (NVDA 225.07, AAPL 341.07, MSFT 516.17), news (NVDA 56 items), ifrs (TSM revenue 2,894,307,700,000), bank, short interest, insider VERIFIED. Real-data bugs found, all fixed in the next commit with regression tests (`tests/regression/test_real_data_run2.py`): (1) NVDA latest quarter revenue None — one XBRL concept was chosen for all periods; now chosen per period; (2) TTM EPS None for NVDA/AAPL/MSFT — 10-Ks tag no Q4 diluted share count, so Q4 EPS is now FY EPS − (Q1+Q2+Q3) (approximation, net income / Q4 shares preferred when tagged); (3) earnings: Finnhub returned an empty list and the check crashed (IndexError) — an empty history is now reported as missing data with a 35-day-window probe; (4) guidance: the Exhibit 99.1 of NVIDIA is named `q2fy26pr.htm` — now found by its TYPE on the filing index page. Polygon, FRED, Alpha Vantage: BLOCKED_BY_CREDENTIAL (no key) |
 | 2026-09-26 | 36252886492 | All keys configured. **11 of 13 VERIFIED**: price, bars (Polygon grouped daily, NVDA 225.07 on 2026-09-25), fundamentals (NVDA revenue 96,221,000,000), eps_ttm (NVDA 7.91, AAPL 8.71, MSFT 17.95), ifrs, bank, news, macro (FRED: fed funds 3.88, 2Y 4.87, 10Y 5.18), guidance (NVDA `q2fy27pr.htm`, 2 values), short interest, insider. FAILED: earnings (Finnhub calendar 0 rows for NVDA, 800-day and 35-day windows) → replaced by `/stock/earnings` + SEC 8-K release times; estimates (Alpha Vantage answered but no row was stored — rows silently skipped) → now an error naming the horizons seen |
 | 2026-09-26 | 36253463681 | **12 of 13 VERIFIED** — earnings now VERIFIED through `/stock/earnings` + SEC 8-K release times (NVDA EPS 1.87 released 2026-08-26, AAPL 1.91 released 2026-07-30). estimates: the real Alpha Vantage answer has one row per fiscal period (41 rows for NVDA, past and future) with horizon "fiscal year" / "fiscal quarter" only — not the documented "current/next fiscal year". Fixed: such rows are labelled current / next / +k by their period end; periods ended more than 120 days ago are dropped |
+| 2026-09-26 | 36253710550 | **All 13 categories VERIFIED (exit code 0)** on commit 9fdab63: price, bars, fundamentals, eps_ttm, ifrs, bank, earnings, news, macro, estimates (Alpha Vantage NVDA forward EPS 13.46, observed 2026-09-26), guidance, short interest, insider. This proves each free provider answers and is parsed on the sampled tickers; it does not prove every company parses (the ingestion manifest records per-company failures) |
 
 To verify the rest: add the repository secrets `SEC_USER_AGENT` ("Your Name your@email"), `FINNHUB_API_KEY`,
 `POLYGON_API_KEY`, `FRED_API_KEY`, `ALPHAVANTAGE_API_KEY` (all free tiers) and run the workflow.
