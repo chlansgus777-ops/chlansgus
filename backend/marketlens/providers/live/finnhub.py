@@ -126,11 +126,18 @@ class FinnhubProvider:
     def get_earnings_history(self, ticker: str) -> list[EarningsReport]:
         """Uses the earnings calendar so ``report_date`` is the real announcement date (the /stock/earnings
         endpoint only has the fiscal period end, which must never be treated as the report date)."""
+        return self.earnings_window(ticker, 800)
+
+    def earnings_window(self, ticker: str, days: int) -> list[EarningsReport]:
         today = datetime.now(tz=timezone.utc).date()
-        d = self._get("/calendar/earnings", symbol=ticker, **{"from": (today - timedelta(days=800)).isoformat(), "to": today.isoformat()})
+        start = today - timedelta(days=days)
+        d = self._get("/calendar/earnings", symbol=ticker, **{"from": start.isoformat(), "to": today.isoformat()})
         rows = d.get("earningsCalendar")
         if not isinstance(rows, list):
             raise ProviderDataError("earnings history: malformed payload")
+        if not rows:
+            # a listed company always reported within ~2 years: an empty answer is missing data, never "no earnings"
+            raise ProviderDataError(f"earnings history: {ticker} 응답 0건 ({start}~{today})")
         out = []
         for r in rows:
             if not r.get("date") or r.get("epsActual") is None and r.get("revenueActual") is None:

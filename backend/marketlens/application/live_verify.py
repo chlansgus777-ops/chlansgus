@@ -110,8 +110,8 @@ def verify(svc: Any, tickers: tuple[str, ...] = TICKERS, record: bool = True) ->
             report["categories"][cat] = {"status": "FAILED", "samples": [], "note": f"{type(e).__name__}: {str(e)[:180]}"}
 
     def fetched(f: Any, t: str, value: Callable[[Any], Any], ts: Callable[[Any], Any], positive: bool = False) -> dict[str, Any]:
-        if f.error or f.value is None:
-            raise ProviderError(f"{t}: {f.error or '값 없음'}")
+        if f.error or f.value is None or (isinstance(f.value, (list, tuple)) and not f.value):
+            raise ProviderError(f"{t}: {f.error or ('값 없음' if f.value is None else '값 없음(빈 목록)')}")
         return {"ticker": t, "value": value(f.value), "provider": f.provider, "timestamp": str(ts(f.value)), "source": f.provider, "positive": positive}
 
     check("price", lambda: [fetched(data.quote(t), t, lambda q: q.price, lambda q: q.timestamp.isoformat(), positive=True) for t in tickers])
@@ -150,7 +150,24 @@ def verify(svc: Any, tickers: tuple[str, ...] = TICKERS, record: bool = True) ->
         check("ifrs", lambda: [fetched(data.annuals("TSM"), "TSM", lambda a: a[-1].revenue, lambda a: a[-1].filed_date, positive=True)])
     if "JPM" in tickers:  # a bank: us-gaap bank concepts
         check("bank", lambda: [fetched(data.quarters("JPM"), "JPM", lambda q: sorted(q[-1].extras) or None, lambda q: q[-1].filed_date)])
-    check("earnings", lambda: [fetched(data.earnings(t), t, lambda e: e[-1].eps_actual, lambda e: e[-1].report_date) for t in tickers[:2]])
+    def earnings() -> list[dict[str, Any]]:
+        out = []
+        for t in tickers[:2]:
+            f = data.earnings(t)
+            if f.error or not f.value:
+                # diagnostics: does a short recent window answer when the long one did not (a plan's history limit)?
+                fh = next((p for p in data.reg.chain("analyst").providers if hasattr(p, "earnings_window") and getattr(p, "configured", True)), None)
+                probe = ""
+                if fh is not None:
+                    try:
+                        probe = f"; 최근 35일 창: {len(fh.earnings_window(t, 35))}건"
+                    except ProviderError as e:
+                        probe = f"; 최근 35일 창: {str(e)[:160]}"
+                raise ProviderError(f"{t}: {f.error or '값 없음(빈 목록)'}{probe}")
+            out.append(fetched(f, t, lambda e: e[-1].eps_actual, lambda e: e[-1].report_date))
+        return out
+
+    check("earnings", earnings)
     check("news", lambda: [fetched(data.news(now.replace(hour=0), [t]), t, lambda n: len(n), lambda n: n[0].published_at.isoformat() if n else "", positive=True) for t in tickers[:1]])
 
     def macro() -> list[dict[str, Any]]:

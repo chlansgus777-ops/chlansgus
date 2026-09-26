@@ -339,6 +339,16 @@ def live_transport(seen: list[str] | None = None) -> httpx.MockTransport:
                 return httpx.Response(200, json=submissions(by_cik[path.split("CIK")[1][:10]]))
             if "/companyfacts/CIK" in path:
                 return httpx.Response(200, json=companyfacts(by_cik[path.split("CIK")[1][:10]]))
+            if "/Archives/edgar/data/" in path and path.endswith("-index.htm"):
+                # EDGAR's filing index page: the exhibit's TYPE is in a column (the file name is free-form)
+                folder = path.rsplit("/", 1)[0]
+                return httpx.Response(200, text=(
+                    '<table class="tableFile" summary="Document Format Files"><tr><th scope="col">Seq</th><th scope="col">Description</th>'
+                    '<th scope="col">Document</th><th scope="col">Type</th><th scope="col">Size</th></tr>'
+                    f'<tr><td scope="row">1</td><td scope="row">8-K</td><td scope="row"><a href="/ix?doc={folder}/d8k.htm">d8k.htm</a> iXBRL</td>'
+                    '<td scope="row">8-K</td><td scope="row">39011</td></tr>'
+                    f'<tr class="evenRow"><td scope="row">2</td><td scope="row">PRESS RELEASE</td><td scope="row"><a href="{folder}/nvda-ex991.htm">nvda-ex991.htm</a></td>'
+                    '<td scope="row">EX-99.1</td><td scope="row">81234</td></tr></table>'))
             if "/Archives/edgar/data/" in path and path.endswith("/index.json"):
                 return httpx.Response(200, json={"directory": {"item": [{"name": "0000000000-26-000004-index.htm"}, {"name": "d8k.htm"}, {"name": "nvda-ex991.htm"}]}})
             if "/Archives/edgar/data/" in path and path.endswith("ex991.htm"):
