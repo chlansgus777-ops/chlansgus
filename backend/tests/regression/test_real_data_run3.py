@@ -144,3 +144,35 @@ def test_alpha_vantage_horizon_spelling_variants_are_normalised_not_guessed():
     obs, issues = parse_estimates({"estimates": rows}, "NVDA", date(2026, 9, 26))
     assert sorted(o.horizon for o in obs) == ["current fiscal quarter", "current fiscal year"]
     assert any("next 12 months" in i for i in issues)  # reported, and live-verify fails on any contract issue
+
+
+def _av_row(end: str, kind: str, eps: str) -> dict[str, Any]:
+    return {"date": end, "horizon": kind, "eps_estimate_average": eps, "eps_estimate_high": eps, "eps_estimate_low": eps,
+            "eps_estimate_analyst_count": "40", "eps_estimate_average_7_days_ago": eps, "eps_estimate_average_30_days_ago": eps,
+            "eps_estimate_average_60_days_ago": eps, "eps_estimate_average_90_days_ago": eps, "eps_estimate_revision_up_trailing_7_days": "1",
+            "eps_estimate_revision_down_trailing_7_days": "0", "eps_estimate_revision_up_trailing_30_days": "2",
+            "eps_estimate_revision_down_trailing_30_days": "0", "revenue_estimate_average": "1e11", "revenue_estimate_high": "1.1e11",
+            "revenue_estimate_low": "0.9e11", "revenue_estimate_analyst_count": "38"}
+
+
+def test_the_real_alpha_vantage_shape_per_period_rows_labelled_by_date():
+    """Run 36253463681: NVDA answered 41 rows, horizon only 'fiscal year' / 'fiscal quarter' plus the period end."""
+    from marketlens.application.estimate_book import build
+    from marketlens.providers.live.alphavantage import parse_estimates
+
+    day = date(2026, 9, 26)
+    rows = [_av_row("2019-01-27", "fiscal year", "1.0"), _av_row("2026-01-25", "fiscal year", "4.5"), _av_row("2027-01-31", "fiscal year", "7.10"),
+            _av_row("2028-01-30", "fiscal year", "9.20"), _av_row("2029-01-28", "fiscal year", "11.0"),
+            _av_row("2026-04-26", "fiscal quarter", "1.75"), _av_row("2026-07-26", "fiscal quarter", "1.98"),
+            _av_row("2026-10-25", "fiscal quarter", "2.20"), _av_row("2027-01-31", "fiscal quarter", "2.45")]
+    obs, issues = parse_estimates({"symbol": "NVDA", "estimates": rows}, "NVDA", day)
+    assert issues == []
+    by = {(o.period_type, o.period_end): o.horizon for o in obs}
+    assert by[("annual", date(2027, 1, 31))] == "current fiscal year" and by[("annual", date(2028, 1, 30))] == "next fiscal year"
+    assert by[("annual", date(2029, 1, 28))] == "fiscal year +2"
+    assert by[("quarter", date(2026, 10, 25))] == "current fiscal quarter" and by[("quarter", date(2027, 1, 31))] == "next fiscal quarter"
+    assert by[("quarter", date(2026, 7, 26))] == "recent fiscal quarter"  # ended 62 days ago: may still await its report
+    assert ("annual", date(2019, 1, 27)) not in by and ("annual", date(2026, 1, 25)) not in by and ("quarter", date(2026, 4, 26)) not in by
+    rep = build("NVDA", obs, day)  # the estimate book reads it: FY1 = the year ending 2027-01-31
+    assert rep.snapshot is not None and rep.snapshot.analyst_count == 40 and rep.snapshot.forward_eps is not None
+    assert 7.10 <= rep.snapshot.forward_eps <= 9.20
