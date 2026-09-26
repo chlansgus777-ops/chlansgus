@@ -56,7 +56,8 @@ jobs:
           $env:MARKETLENS_DATA_DIR = "$env:RUNNER_TEMP\ml-smoke-2"
           $busy = Start-Process -FilePath $exe -ArgumentList "serve","--port","8799" -PassThru -Wait
           if ($busy.ExitCode -ne 3) { throw "busy-port exit $($busy.ExitCode), expected 3" }
-          Stop-Process -Id $p.Id -Force
+          taskkill /PID $p.Id /T /F | Out-Null  # the one-file exe is a bootloader + server: stop the whole tree
+          Get-Process marketlens-backend* -ErrorAction SilentlyContinue | Stop-Process -Force
           Write-Host "sidecar smoke test passed"
       - name: Place sidecar
         run: Copy-Item backend/dist/marketlens-backend.exe frontend/src-tauri/binaries/marketlens-backend-x86_64-pc-windows-msvc.exe
@@ -76,6 +77,9 @@ jobs:
           $app = Get-ChildItem "$env:LOCALAPPDATA\MarketLens", "$env:LOCALAPPDATA\Programs\MarketLens", "$env:ProgramFiles\MarketLens" -Recurse -Include "MarketLens.exe","marketlens.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $app) { throw "installed MarketLens.exe not found" }
           Write-Host "installed at $($app.FullName)"
+          # start clean: no backend from an earlier step may be mistaken for the app's own
+          Get-Process marketlens-backend* -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 2
+          if (Get-Process marketlens-backend* -ErrorAction SilentlyContinue) { throw "could not clear earlier backend processes" }
           $ui = Start-Process $app.FullName -PassThru
           function Dump { Get-CimInstance Win32_Process -Filter "Name like 'marketlens%'" | Select-Object ProcessId, ParentProcessId, Name, CommandLine | Format-Table -AutoSize | Out-String -Width 300 | Write-Host
                           Get-ChildItem "$env:LOCALAPPDATA\MarketLensData" -Recurse -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 40 } }
