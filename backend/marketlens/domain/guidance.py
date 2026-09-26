@@ -8,12 +8,12 @@ Rules (no LLM, no inference):
   "73.5%, plus or minus 50 basis points", "in the range of 45% to 46%", a single "$X billion".
 - Anything else about a metric in a forward-looking sentence → GUIDANCE_UNCLEAR (kept, value None).
 - "does not provide guidance", "withdraw(s/n) … guidance" → NO_GUIDANCE.
-- Sign: only wording attached to the guided number decides it. "loss per diluted share of $1.10 to $1.20"
-  and "net loss of $0.30 to $0.40" are stored negative (low = -1.20, high = -1.10). A loss mentioned
-  elsewhere in the sentence ("excluding the loss on the sale …", "compared with a net loss last year",
-  "credit losses") leaves the guided number positive. An explicit negative number ("-$0.10", "$(0.10)"),
-  the word "negative", a range from a loss to a profit, or a loss attached to revenue / gross margin /
-  capex → GUIDANCE_UNCLEAR, because the sign cannot be read deterministically.
+- Sign (conservative — a wrong sign is worse than no value): without any loss word the number is positive;
+  with a loss word it is negative only in the clear form, EPS guidance governed by "net loss" / "loss per
+  (diluted) share" in the same clause ("Net loss per share for fiscal 2027 is expected to be $1.10 to
+  $1.20" → -1.20..-1.10). Every other sentence with a loss word, an explicit negative number, the word
+  "negative", profit wording next to a loss, or two amounts of the same metric (GAAP and non-GAAP, an
+  excluded item, last year's figure) → GUIDANCE_UNCLEAR.
 """
 
 from __future__ import annotations
@@ -114,12 +114,6 @@ def _parse(metric: str, s: str) -> tuple[float | None, float | None, str, bool, 
     return None, None, unit, False, -1
 
 
-# A loss phrase that ends right where the guided number starts ("loss per diluted share of $1.10 to …",
-# "net loss of $0.30 to $0.40", "a loss in the range of $0.10 to $0.15"). Only then is the number a loss.
-_LOSS_ATTACHED = re.compile(
-    r"(?<![a-z])(loss|losses)(\s+per\s+(diluted\s+|basic\s+)?(common\s+)?share)?"
-    r"(\s+(is\s+|are\s+)?(expected\s+|projected\s+)?(to\s+be\s+|will\s+be\s+)?)?"
-    r"(\s*,\s*|\s+)?(of\s+|between\s+|in\s+the\s+range\s+of\s+|ranging\s+from\s+|from\s+|approximately\s+|about\s+|of\s+approximately\s+)*$")
 _PROFIT = re.compile(r"(?<![a-z])(profit|profitable|profitability|net income|income|earnings|break-?\s?even|positive)(?![a-z])")
 _NEG_MARK = re.compile(r"(?:^|(?<=[\s(]))[-−](?=\s?\$?\s?\d)|\$\s?\(\s?\d|\(\s?\$\s?\d|(?<!or )minus\s+\$?\s?\d")
 _RANGE_LEFT = re.compile(r"(\d|%|billion|million|thousand|\bb|\bm)\s*$")
@@ -135,25 +129,64 @@ def _has_negative_number(low: str) -> bool:
     return False
 
 
-def _sign(metric: str, s: str, start: int) -> str:
-    """POS | NEG | UNCLEAR for the guided number that starts at ``start``.
+_LOSS_WORD = re.compile(r"(?<![a-z])(loss|losses|deficit)(?![a-z])")
+# the clear forms of loss guidance: "net loss (per share)", "loss per (diluted) share"
+_LOSS_EPS_FORM = re.compile(r"(?<![a-z])(net\s+loss|loss\s+per\s+(diluted\s+|basic\s+)?(common\s+)?share)(?![a-z])")
+# words that put a loss into another clause than the guided number
+_OTHER_CLAUSE = re.compile(r"(?<![a-z])(excluding|excludes|exclude|compared|versus|vs\.?|despite|reflecting|including|includes|which|related to|on the sale|from the sale|charge|charges|impairment|credit)(?![a-z])")
+_AMOUNT = {"usd": re.compile(r"\$\s?\(?\d"), "pct": re.compile(r"\d(?:\.\d+)?\s*%")}
+_JOIN = re.compile(r"^\s*(?:to|and|-|–|or)\s*$")
 
-    A loss word elsewhere in the sentence ("excluding the loss on the sale …", "compared with a net loss of
-    $0.50 last year", "credit losses") says nothing about the guided number, which stays positive. Only a
-    loss phrase attached to the guided number makes it negative. An explicit negative sign, the word
-    "negative", or a range that runs from a loss to a profit cannot be read deterministically → UNCLEAR."""
+
+def _number_groups(low: str, metric: str) -> int:
+    """How many separate numeric expressions of the metric's unit the sentence holds. "$1.10 to $1.20" is one;
+    "a loss of $0.10 to $0.15 … EPS of $2.40 to $2.50" is two. "plus or minus 2%" belongs to its amount."""
+    kind = "pct" if metric in ("gross_margin", "operating_margin") else "usd"
+    text = re.sub(r"plus or minus\s*\d+(?:\.\d+)?\s*(%|percent|basis points)", " ", low) if kind == "usd" else re.sub(r"plus or minus\s*\d+(?:\.\d+)?\s*basis points", " ", low)
+    hits = [m.start() for m in _AMOUNT[kind].finditer(text)]
+    groups, prev_end = 0, None
+    for pos in hits:
+        if prev_end is not None:
+            between = re.sub(r"(billion|million|thousand|\bb\b|\bm\b|per\s+(diluted\s+)?share|[\d.,$%()\s])", " ", text[prev_end:pos])
+            if _JOIN.match(between) or not between.strip():
+                prev_end = pos + 1
+                continue
+        groups += 1
+        prev_end = pos + 1
+    return groups
+
+
+def _sign(metric: str, s: str, start: int) -> str:
+    """POS | NEG | UNCLEAR for the guided number that starts at ``start``. Conservative by construction —
+    a wrong sign is worse than no value:
+
+    - no loss word in the sentence → POS (and one numeric expression only; two ranges of the same metric,
+      e.g. GAAP and non-GAAP EPS, cannot be told apart → UNCLEAR);
+    - a loss word present → NEG only in the clear form: EPS guidance whose one numeric expression is governed by
+      "net loss" / "loss per (diluted) share" written before it in the same clause, and no profit wording;
+    - anything else with a loss word, an explicit negative sign or the word "negative" → UNCLEAR."""
     low = s.lower()
     if _has_negative_number(low) or re.search(r"(?<![a-z])negative(?![a-z])", low):
         return "UNCLEAR"
-    if metric not in ("eps", "operating_margin"):
-        # revenue / gross margin / capex cannot be a loss: a loss word in the same sentence means something
-        # else is being discussed next to the number — kept as UNCLEAR rather than guessed (conservative)
-        return "UNCLEAR" if re.search(r"(?<![a-z])(loss|losses|deficit)(?![a-z])", low) else "POS"
-    if start < 0 or not _LOSS_ATTACHED.search(low[max(0, start - 80): start]):
+    if _number_groups(low, metric) > 1:
+        return "UNCLEAR"  # two amounts of the same unit (GAAP and non-GAAP, an excluded item, last year's value)
+    if re.search(r"(?<![a-z])respectively(?![a-z])|gaap and non-gaap|gaap and adjusted|non-gaap and gaap", low):
+        return "UNCLEAR"  # "GAAP and non-GAAP margins of 73.3% and 73.5%, respectively" is two measures, not a range
+    if not _LOSS_WORD.search(low):
         return "POS"
-    tail = re.split(r"[,;]\s+(compared|versus|vs\.?|excluding|including|which|reflecting)\b", low[start:])[0]
-    if _PROFIT.search(tail):
-        return "UNCLEAR"  # "a loss of $0.05 to earnings of $0.02": the range crosses zero
+    if metric != "eps" or start < 0:
+        return "UNCLEAR"  # revenue / margins / capex next to a loss word: something else is being discussed
+    form = None
+    for m in _LOSS_EPS_FORM.finditer(low[:start]):
+        form = m
+    if form is None:
+        return "UNCLEAR"  # a loss word that is not the clear loss-per-share form ("credit losses", "the loss on …")
+    between = low[form.end():start]
+    rest = low[start:]
+    if _OTHER_CLAUSE.search(low[: form.start()] + " " + between) or _OTHER_CLAUSE.search(rest):
+        return "UNCLEAR"
+    if _PROFIT.search(between + " " + rest) or _PROFIT.search(_LOSS_EPS_FORM.sub(" ", low[: form.start()])):
+        return "UNCLEAR"  # "a loss of $0.05 to earnings of $0.02", or profit wording elsewhere in the sentence
     return "NEG"
 
 

@@ -270,3 +270,12 @@ def test_derived_q4_and_total_debt_follow_restatements():
     q4_2026 = next(q for q in as_of(qs, date(2026, 6, 1)) if q.period_end == date(2024, 12, 31))
     assert q4_2025.revenue == 200.0 and q4_2026.revenue == 160.0
     assert q4_2025.total_debt == 40.0 and q4_2026.total_debt == 30.0
+
+
+def test_two_measures_listed_respectively_are_not_a_range():
+    """Found while fixing evaluation 4 M1: 'GAAP and non-GAAP gross margins … 73.3% and 73.5%, respectively'
+    was stored as one 73.3–73.5% range."""
+    (m, lo, hi, st), = _g("GAAP and non-GAAP gross margins are expected to be 73.3% and 73.5%, respectively, plus or minus 50 basis points.")
+    assert (lo, hi, st) == (None, None, "GUIDANCE_UNCLEAR")
+    (m, lo, hi, st), = _g("For fiscal 2027, we expect GAAP EPS of $1.00 to $1.10 and non-GAAP EPS of $1.30 to $1.40.")
+    assert (lo, hi, st) == (None, None, "GUIDANCE_UNCLEAR")

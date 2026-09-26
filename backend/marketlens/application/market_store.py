@@ -7,6 +7,7 @@ for point-in-time analysis and replay.
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Mapping
@@ -28,6 +29,9 @@ from marketlens.infrastructure.db.models import (AppSettingRow, CorporateActionR
 
 def _now() -> datetime:
     return datetime.now(tz=UTC)
+
+
+RELIST_GAP_DAYS = 7  # absent from the SEC file for up to a week and back: a data gap, not a delisting
 
 
 class MarketStore:
@@ -56,20 +60,37 @@ class MarketStore:
         with self.sf() as s:
             existing = {r.ticker: r for r in s.scalars(select(SecurityRow).where(SecurityRow.mode == self.mode))}
             reset: set[str] = set()
-            # pass 1 — a ticker that changed hands
+            # pass 1 — a ticker that changed hands, or a ticker that comes back after its listing interval ended
             for sec in cur:
                 row = existing.get(sec.ticker)
-                if row is not None and row.cik is not None and sec.cik is not None and row.cik != sec.cik:
-                    arch = self._archive_reused(s, row, sec, today, existing)
-                    existing[arch.ticker] = arch
-                    reset.add(sec.ticker)
+                if row is None:
+                    continue
+                if row.cik is not None and sec.cik is not None and row.cik != sec.cik:
+                    arch = self._archive_reused(s, row, sec, today, existing, "REUSE")
                     n["reused"] += 1
+                elif not row.active and "~" not in row.ticker and (
+                        row.successor is not None  # renamed away earlier, now back (AAA → BBB → AAA)
+                        or (row.delisted_at is not None and (today - row.delisted_at).days > RELIST_GAP_DAYS)):  # relisted after a delisting
+                    # the same company, a new listing interval: the old interval (with its delisting or rename)
+                    # is kept as an archive row; a few days' absence from the SEC file is a data gap, not a delisting
+                    arch = self._archive_reused(s, row, sec, today, existing, "RETURN")
+                else:
+                    continue
+                existing[arch.ticker] = arch
+                reset.add(sec.ticker)
             # pass 2 — links, new names, updates
+            pending_by_cik: dict[int, list[str]] = {}
+            for sec in cur:
+                if sec.cik is not None and (sec.ticker not in existing or sec.ticker in reset):
+                    pending_by_cik.setdefault(sec.cik, []).append(sec.ticker)
+            used: set[str] = set()
             for sec in cur:
                 seen.add(sec.ticker)
                 row = existing.get(sec.ticker)
                 if row is None or sec.ticker in reset:
-                    src = self._link_source(existing, sec, listed_now)
+                    src = self._link_source(existing, sec, listed_now, pending_by_cik.get(sec.cik or -1, []), used)
+                    if src is not None:
+                        used.add(src.ticker)
                     if row is None:
                         row = SecurityRow(ticker=sec.ticker, company_name=sec.company_name, exchange=sec.exchange.value, sector=sec.sector,
                                           industry=sec.industry, market_cap=sec.market_cap, is_etf=sec.is_etf, is_adr=sec.is_adr,
@@ -117,16 +138,30 @@ class MarketStore:
         return n
 
     @staticmethod
-    def _link_source(existing: Mapping[str, SecurityRow], sec: Security, listed_now: set[str]) -> SecurityRow | None:
-        """The unlisted row of the same CIK this listing continues (most recently active first)."""
+    def _link_source(existing: Mapping[str, SecurityRow], sec: Security, listed_now: set[str], new_of_cik: list[str], used: set[str]) -> SecurityRow | None:
+        """The unlisted row of the same CIK this listing continues. With several old and new tickers of one CIK
+        (share classes renamed together) the pair must be decidable from the class suffix (XA→YA, BRK-B→…-B);
+        otherwise nothing is linked — a wrong link would hand one class the other class's history."""
         if sec.cik is None:
             return None
-        cands = [r for r in existing.values() if r.cik == sec.cik and r.ticker != sec.ticker and r.ticker not in listed_now and r.successor is None]
+        cands = [r for r in existing.values()
+                 if r.cik == sec.cik and r.ticker != sec.ticker and r.ticker not in listed_now and r.successor is None and r.ticker not in used]
         if not cands:
             return None
-        return max(cands, key=lambda r: (r.active, r.delisted_at or date.max, r.updated_at))
+        if len(cands) == 1 and len(new_of_cik) <= 1:
+            return cands[0]
 
-    def _archive_reused(self, s: Session, row: SecurityRow, sec: Security, today: date, existing: Mapping[str, SecurityRow]) -> SecurityRow:
+        def cls(t: str) -> str:
+            t = t.split("~", 1)[0]
+            return re.split(r"[-./]", t)[-1] if re.search(r"[-./]", t) else t[-1:]
+
+        mine = [r for r in cands if cls(r.ticker) == cls(sec.ticker)]
+        rivals = [t for t in new_of_cik if t != sec.ticker and cls(t) == cls(sec.ticker)]
+        if len(mine) == 1 and not rivals and len({cls(r.ticker) for r in cands}) == len(cands):
+            return mine[0]
+        return None  # undecidable pairing: left unlinked (NEW) rather than guessed
+
+    def _archive_reused(self, s: Session, row: SecurityRow, sec: Security, today: date, existing: Mapping[str, SecurityRow], event: str) -> SecurityRow:
         """The ticker now names another company: move the old company's rows to an archive key (``TICKER~CIK``,
         ``TICKER~CIK.2`` … when the ticker changed hands before) and keep its rename links pointing at it."""
         from sqlalchemy import delete, update
@@ -155,7 +190,7 @@ class MarketStore:
                 other.predecessor = arch
             if other.successor == row.ticker:
                 other.successor = arch
-        s.add(TickerHistoryRow(mode=self.mode, event="REUSE", ticker=row.ticker, cik=sec.cik, other_cik=row.cik, archived_as=arch, effective=today, observed_at=_now()))
+        s.add(TickerHistoryRow(mode=self.mode, event=event, ticker=row.ticker, cik=sec.cik, other_cik=row.cik, archived_as=arch, effective=today, observed_at=_now()))
         row.company_name, row.cik, row.first_seen, row.listed_at, row.delisted_at, row.active = sec.company_name, sec.cik, today, sec.listed_at, None, True
         row.sector, row.industry, row.sic, row.profile_updated_at = "Unknown", "Unknown", None, None
         row.shares_outstanding = row.shares_as_of = row.market_cap = None
@@ -179,7 +214,7 @@ class MarketStore:
             return self._resolve(s, ticker, on)
 
     def _resolve(self, s: Session, ticker: str, on: date) -> str:
-        ev = s.scalars(select(TickerHistoryRow).where(TickerHistoryRow.mode == self.mode, TickerHistoryRow.ticker == ticker, TickerHistoryRow.event == "REUSE",
+        ev = s.scalars(select(TickerHistoryRow).where(TickerHistoryRow.mode == self.mode, TickerHistoryRow.ticker == ticker, TickerHistoryRow.archived_as.is_not(None),
                                                      TickerHistoryRow.effective > on).order_by(TickerHistoryRow.effective).limit(1)).first()
         return ev.archived_as if ev is not None and ev.archived_as else ticker
 

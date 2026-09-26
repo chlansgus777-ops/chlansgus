@@ -1,0 +1,317 @@
+<title>MarketLens 4차 평가</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f3f4f7; --paper:#ffffff; --ink:#18202c; --muted:#596272; --line:#dadfe7; --soft:#eef0f5;
+  --accent:#34468a; --accent-soft:#e7eaf6;
+  --p0:#a3261d; --p0-bg:#f9e4e1; --p1:#a4531b; --p1-bg:#fbeadb; --p2:#7f6400; --p2-bg:#f7efcf; --p3:#4f5968; --p3-bg:#e8ebef;
+  --ok:#2b774a; --ok-bg:#e1f1e7; --code:#eceff4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#10141b; --paper:#171d26; --ink:#e4e8ef; --muted:#9aa3b1; --line:#2a323e; --soft:#1d2430;
+    --accent:#9daef0; --accent-soft:#232c45;
+    --p0:#f1958b; --p0-bg:#3b1c1a; --p1:#f0ae78; --p1-bg:#38261a; --p2:#e2c65e; --p2-bg:#332c14; --p3:#b3bcc9; --p3-bg:#262d38;
+    --ok:#7fcf9e; --ok-bg:#1a3124; --code:#212834;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#10141b; --paper:#171d26; --ink:#e4e8ef; --muted:#9aa3b1; --line:#2a323e; --soft:#1d2430;
+  --accent:#9daef0; --accent-soft:#232c45;
+  --p0:#f1958b; --p0-bg:#3b1c1a; --p1:#f0ae78; --p1-bg:#38261a; --p2:#e2c65e; --p2-bg:#332c14; --p3:#b3bcc9; --p3-bg:#262d38;
+  --ok:#7fcf9e; --ok-bg:#1a3124; --code:#212834;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;font-size:15px;line-height:1.7;margin:0;padding-inline:16px;padding-block:28px 72px}
+main{max-width:940px;margin:0 auto;display:grid;gap:24px}
+h1,h2,h3{text-wrap:balance;margin:0}
+h1{font-size:28px;line-height:1.3}
+h2{font-size:19px;line-height:1.4}
+h3{font-size:15.5px;line-height:1.45}
+p{margin:0;max-width:70ch}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-size:12.5px}
+code{background:var(--code);padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}
+pre{background:var(--code);padding:12px 14px;border-radius:4px;overflow-x:auto;margin:0;font-size:12.5px;line-height:1.6}
+pre code{background:none;padding:0}
+a{color:var(--accent)}
+header{display:grid;gap:10px;padding-bottom:18px;border-bottom:2px solid var(--ink)}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+section{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:20px 22px;display:grid;gap:14px}
+.lede{color:var(--muted)}
+/* verdict */
+.verdict{display:grid;grid-template-columns:auto 1fr;gap:18px 26px;align-items:start}
+.stamp{border:2px solid var(--accent);border-radius:6px;padding:12px 18px;display:grid;gap:2px;text-align:center;min-width:150px;background:var(--accent-soft)}
+.stamp .score{font-size:40px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums;color:var(--accent)}
+.stamp .score small{font-size:16px;font-weight:500;color:var(--muted)}
+.stamp .grade{font-size:15px;font-weight:700}
+.stamp .gate{font-size:12.5px;color:var(--p0);font-weight:500}
+.verdict ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px 22px;margin:0}
+.meta div{display:grid;gap:1px}
+.meta dt{font-size:12px;color:var(--muted);letter-spacing:.03em}
+.meta dd{margin:0;font-weight:500;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+/* tables */
+.tbl{overflow-x:auto;margin:0 -4px;padding:0 4px}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:13.5px}
+th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.03em;white-space:nowrap}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+th.num{text-align:right}
+tfoot td{font-weight:700;border-bottom:none}
+.pill{display:inline-block;font-size:12px;font-weight:500;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.ok{color:var(--ok);background:var(--ok-bg)}
+.part{color:var(--p2);background:var(--p2-bg)}
+.reg{color:var(--p0);background:var(--p0-bg)}
+.no{color:var(--p1);background:var(--p1-bg)}
+.sev{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:500;font-size:12px;padding:1px 7px;border-radius:3px;white-space:nowrap}
+.P0{color:var(--p0);background:var(--p0-bg)} .P1{color:var(--p1);background:var(--p1-bg)} .P2{color:var(--p2);background:var(--p2-bg)} .P3{color:var(--p3);background:var(--p3-bg)}
+/* findings */
+.counts{display:flex;flex-wrap:wrap;gap:8px}
+.findings{display:grid;gap:12px}
+.finding{border:1px solid var(--line);border-left:4px solid var(--p3);border-radius:4px;padding:12px 14px;display:grid;gap:8px;background:var(--paper)}
+.finding.s0{border-left-color:var(--p0)} .finding.s1{border-left-color:var(--p1)} .finding.s2{border-left-color:var(--p2)}
+.fhead{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline}
+.fid{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:500;font-size:13px}
+.finding dl{display:grid;grid-template-columns:52px 1fr;gap:4px 12px;margin:0;font-size:14px}
+.finding dt{color:var(--muted);font-size:12.5px;padding-top:2px}
+.finding dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.where{font-size:12.5px;color:var(--muted)}
+.note{border-left:3px solid var(--accent);padding:4px 0 4px 12px;color:var(--muted);max-width:none}
+ol.prio{margin:0;padding-left:22px;display:grid;gap:6px}
+ol.prio li{max-width:78ch}
+@media (max-width:560px){
+  .verdict{grid-template-columns:1fr}
+  .stamp{justify-self:start}
+  .finding dl{grid-template-columns:1fr}
+  .finding dt{padding-top:6px}
+  section{padding:16px 14px}
+}
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">독립 평가 · 4차 결과</div>
+    <h1>MarketLens 4차 평가</h1>
+    <p class="lede">4차 재평가 신청서(대상 커밋 <span class="mono">4182468</span>)의 주장을 다시 재현하고, 3차 반례 N1~N14와 위험 R1~R4의 처리를 확인했습니다. 신청서가 요청한 대로 두 단계 종목 동기화와 새 가이던스 부호 규칙을 우회하는 입력을 시도했고, 새 반례는 이번에도 입력·기대값·실제값과 실행 가능한 테스트로 남겼습니다.</p>
+  </header>
+
+  <section aria-labelledby="h-verdict">
+    <h2 id="h-verdict">판정</h2>
+    <div class="verdict">
+      <div class="stamp" role="img" aria-label="73점, C등급, A등급 Gate 5개 중 3개 통과">
+        <div class="score">73<small>/100</small></div>
+        <div class="grade">C 등급</div>
+        <div class="gate">A Gate 실패 (5개 중 3개 통과)</div>
+      </div>
+      <ul>
+        <li>신청서의 수치(백엔드 457, 원본 반례 19, 프런트 50, E2E 13, Linux·Windows CI)는 <strong>모두 그대로 재현</strong>됐습니다. 소스 zip은 커밋 <span class="mono">4182468</span>과 파일 279개가 모두 같고, 3차 반례 테스트는 첫 줄 설명만 추가된 채 본문 그대로 들어갔습니다.</li>
+        <li>3차 반례 14건 중 <strong>12건 해결</strong>, 1건 부분(N10), 1건 회귀(N1)입니다. P1은 모두 사라져 <strong>G2를 통과</strong>했습니다.</li>
+        <li>새 반례는 <strong>P0 1건, P2 3건, P3 1건</strong>입니다. P0은 이번에도 가이던스 부호입니다. 새 규칙이 테스트 문장에는 맞지만, 손실 표현과 숫자 사이에 기간·기준 표현이 끼면 손실 가이던스를 이익으로 저장합니다. 2차 P0와 같은 방향입니다.</li>
+        <li>자체 등급 B+는 인정하지 않습니다. 열린 P0가 있고 점수가 B 구간(75점)에 못 미칩니다. 다만 3차(63점)보다 분명히 나아졌습니다.</li>
+      </ul>
+    </div>
+    <dl class="meta">
+      <div><dt>저장소 · 평가 대상</dt><dd class="mono">chlansgus777-ops/chlansgus @ 4182468</dd></div>
+      <div><dt>평가일</dt><dd>2026-09-26</dd></div>
+      <div><dt>반례 테스트 위치</dt><dd class="mono">claude/new-session-ir1fdw : evaluations/eval4/</dd></div>
+      <div><dt>반례 실행 결과(4182468)</dt><dd>백엔드 13건 실패 + 프런트 1건 실패 (모두 의도한 실패)</dd></div>
+    </dl>
+  </section>
+
+  <section aria-labelledby="h-trend">
+    <h2 id="h-trend">라운드별 변화</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>평가</th><th>대상</th><th class="num">점수</th><th class="num">Gate 통과</th><th class="num">열린 P0</th><th class="num">열린 P1</th><th class="num">P2</th><th class="num">P3</th></tr></thead>
+      <tbody>
+        <tr><td>2차</td><td class="mono">430c66a</td><td class="num">64</td><td class="num">실패</td><td colspan="4">2차 평가서 기준(항목 수 비교 불가)</td></tr>
+        <tr><td>3차</td><td class="mono">445221f</td><td class="num">63</td><td class="num">2 / 5</td><td class="num">1</td><td class="num">4</td><td class="num">8</td><td class="num">1</td></tr>
+        <tr><td>4차</td><td class="mono">4182468</td><td class="num">73</td><td class="num">3 / 5</td><td class="num">1</td><td class="num">0</td><td class="num">3</td><td class="num">1</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-gate">
+    <h2 id="h-gate">A 등급 Gate</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>기준</th><th>내용</th><th>결과</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td class="n">G1</td><td>열린 P0 없음</td><td><span class="pill reg">실패</span></td><td>M1 가이던스 부호 (손실 → 이익)</td></tr>
+        <tr><td class="n">G2</td><td>시점 정확성·종목 동일성 P1 없음</td><td><span class="pill ok">통과</span></td><td>N2~N5 해결. 남은 종목 마스터 결함(M2~M4)은 드문 경우라 P2</td></tr>
+        <tr><td class="n">G3</td><td>실제 공급자 검증 기록</td><td><span class="pill reg">실패</span></td><td>미실행 (신청서도 인정). live-verify 자체는 이제 저장소 없이 공급자를 직접 부름(N13 해결)</td></tr>
+        <tr><td class="n">G4</td><td>대상 커밋 CI 통과</td><td><span class="pill ok">통과</span></td><td>ci #21 run 36235186763, windows-build #7 run 36235189422 모두 success</td></tr>
+        <tr><td class="n">G5</td><td>직전 평가 반례가 원문 그대로 재현되지 않음</td><td><span class="pill ok">통과</span></td><td>3차 반례 20건(백엔드 19 + 프런트 1) 모두 통과</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-claims">
+    <h2 id="h-claims">신청서 주장 확인</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>주장</th><th>확인 결과</th><th>방법</th></tr></thead>
+      <tbody>
+        <tr><td>Backend 457 passed (E2E 포함)</td><td><span class="pill ok">일치</span></td><td>잠금 파일 설치, 프런트 빌드와 Playwright를 갖춘 뒤 <code>pytest -o addopts=""</code> → 457 passed, skip 없음. CI와 같은 명령도 종료 코드 0</td></tr>
+        <tr><td>평가자 원본 반례 19 passed</td><td><span class="pill ok">일치</span></td><td>저장소 루트에서 <code>pytest evaluations/eval3</code> → 19 passed. 폴더 내용은 평가자 커밋 f930edd와 바이트 단위로 같음</td></tr>
+        <tr><td>반례를 한 글자도 바꾸지 않고 편입</td><td><span class="pill ok">일치</span></td><td><code>test_evaluation3_counterexamples.py</code>는 첫 줄 설명만 추가, 본문 동일. 프런트 N12 테스트는 원본과 동일</td></tr>
+        <tr><td>Frontend 50 passed, 타입 오류 0</td><td><span class="pill ok">일치</span></td><td><code>tsc -b</code> 종료 코드 0, vitest 11파일 50 passed, 빌드 성공</td></tr>
+        <tr><td>CI · Windows 빌드 success</td><td><span class="pill ok">일치</span></td><td>두 실행 모두 <span class="mono">4182468</span>에서 success</td></tr>
+        <tr><td>기존 테스트 변경 3곳 공개</td><td><span class="pill ok">일치</span></td><td>변경 내용이 공개한 그대로임. 신선도 두 곳은 더 엄격한 방향이고, live-verify 한 곳은 모의 객체만 바뀌었으며 단언은 그대로</td></tr>
+        <tr><td>ruff(pyflakes) 3건 그대로</td><td><span class="pill ok">일치</span></td><td>3건 동일(모두 이전부터 있던 것)</td></tr>
+        <tr><td>종목 동기화가 목록 순서와 무관</td><td><span class="pill part">일부만 일치</span></td><td>티커 맞교환은 순서와 무관. 한 회사의 여러 클래스가 함께 개명되면 순서에 따라 결과가 달라짐(M4)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-items">
+    <h2 id="h-items">3차 반례 처리 확인</h2>
+    <p>평가자 테스트가 모두 통과하는 것을 확인한 뒤, 같은 규칙을 우회하는 입력을 다시 넣었습니다.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>#</th><th>3차 반례</th><th>결과</th><th>확인 내용 · 남은 문제</th></tr></thead>
+      <tbody>
+        <tr><td class="n">N1</td><td>이익 가이던스가 음수로 저장</td><td><span class="pill reg">회귀</span></td><td>3차 문장 6건은 해결. 새 규칙이 반대 방향으로 틀림: 손실 가이던스가 이익으로 저장됨(M1, P0)</td></tr>
+        <tr><td class="n">N2</td><td>알려진 티커로 개명 → 상장폐지 기록</td><td><span class="pill ok">해결</span></td><td>SBC→T, 같은 날 맞교환 모두 두 회사 이력 유지. 여러 클래스 동시 개명은 M4</td></tr>
+        <tr><td class="n">N3</td><td>개명 후 옛 티커 재사용</td><td><span class="pill ok">해결</span></td><td>보관 행이 개명 연결을 유지하고, 다른 회사의 분할·봉이 섞이지 않음</td></tr>
+        <tr><td class="n">N4</td><td>개명 후 분할</td><td><span class="pill ok">해결</span></td><td>개명 전 티커의 봉도 조정. 공급자 표기에 따른 중복 적용 가능성은 위험 R5</td></tr>
+        <tr><td class="n">N5</td><td>재사용 뒤 모의투자 재계산</td><td><span class="pill ok">해결</span></td><td>봉·신호·청산 신호를 회사 식별 키로 묶음. 보관·상장폐지 종목은 공급자에 요청하지 않음</td></tr>
+        <tr><td class="n">N6</td><td>게이트 분모에서 파서 누락 제외</td><td><span class="pill ok">해결</span></td><td>분모 제외는 SEC 프로필로 확인된 해외 발행사만. 국내 해석 실패는 PARSE_GAP</td></tr>
+        <tr><td class="n">N7</td><td>백오프 재시도가 캐시에 가로채임</td><td><span class="pill ok">해결</span></td><td>수집 기록이 추적하는 호출은 TTL 캐시를 거치지 않음</td></tr>
+        <tr><td class="n">N8</td><td>정정 공시 무시</td><td><span class="pill ok">해결</span></td><td>10-Q/A·10-K/A를 이후 빈티지로 읽음</td></tr>
+        <tr><td class="n">N9</td><td>파생 4분기 첫 값</td><td><span class="pill ok">해결</span></td><td>10-K 공시일에 알려진 1~3분기 값 사용</td></tr>
+        <tr><td class="n">N10</td><td>재상장이 상장폐지 이력을 지움</td><td><span class="pill part">부분</span></td><td>새 티커로 재상장하면 해결. 같은 티커로 재상장하면 여전히 지워짐(M2)</td></tr>
+        <tr><td class="n">N11</td><td>목록 화면 60분 CURRENT</td><td><span class="pill ok">해결</span></td><td>새 시세 없이는 20분까지만 CURRENT. 20분 규칙 의견은 아래</td></tr>
+        <tr><td class="n">N12</td><td>새 추천 뒤 상태 고착</td><td><span class="pill ok">해결</span></td><td>SUPERSEDED("새 분석 있음")와 최신 분석 버튼. 폴링 실패 시 고착은 M5</td></tr>
+        <tr><td class="n">N13</td><td>live-verify 저장소 통과</td><td><span class="pill ok">해결</span></td><td>저장소·캐시 없이 공급자를 직접 호출하고, store·cache·fixture·mock 표본은 불인정</td></tr>
+        <tr><td class="n">N14</td><td>세 번째 재사용에서 동기화 중단</td><td><span class="pill ok">해결</span></td><td>보관 키에 순번(<code>TICKER~CIK.2</code>)</td></tr>
+        <tr><td class="n">R1</td><td>실제 10-K의 4분기 EPS 누락</td><td><span class="pill part">점검만 추가</span></td><td>live-verify에 <code>eps_ttm</code> 점검 추가. 실제 결과는 미확인</td></tr>
+        <tr><td class="n">R2 · R3</td><td>클래스주 표기, 재사용 판정 지연</td><td><span class="pill no">미처리</span></td><td>신청서가 한계로 인정</td></tr>
+        <tr><td class="n">R4</td><td>실행 중 .db 복사 손상</td><td><span class="pill ok">해결</span></td><td><code>marketlens backup</code>: 3차 재현 조건(한 번에 3,000행씩 쓰는 중)에서 백업 74회 모두 무결성 ok, 오류 0, 가장 느린 백업 0.81초</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-new">
+    <h2 id="h-new">새 반례</h2>
+    <div class="counts"><span class="sev P0">P0 × 1</span><span class="sev P1">P1 × 0</span><span class="sev P2">P2 × 3</span><span class="sev P3">P3 × 1</span></div>
+    <p class="note">등급 기준은 3차와 같습니다. P0: 흔한 입력에서 추천 근거가 조용히 틀어지는 오류. P1: 시점 정확성·종목 동일성·성과 기록을 깨는 흔한 경우. P2: 조건이 필요하거나 드문 경우, 또는 표시·기록만 틀리는 오류. P3: 아주 드문 경우.</p>
+    <div class="findings">
+
+      <article class="finding s0">
+        <div class="fhead"><span class="fid">M1</span><span class="sev P0">P0</span><h3>손실 가이던스가 이익으로 저장됨 (새 부호 규칙 우회)</h3></div>
+        <dl>
+          <dt>입력</dt><dd>"Net loss per share for the fourth quarter of fiscal 2026 is expected to be $1.10 to $1.20." · 발표 전 컨센서스 −1.15. 같은 형태 7문장(기간 표현, "on a GAAP basis", "to range from", "now", "widen to"가 손실 표현과 숫자 사이에 있음)</dd>
+          <dt>기대</dt><dd>−1.20~−1.10 (또는 GUIDANCE_UNCLEAR). 컨센서스에 부합하므로 결과 품질 INLINE</dd>
+          <dt>실제</dt><dd>7문장 모두 +1.10~+1.20, 상태 EXTRACTED → <code>guide_eps_vs_cons</code> +200% → GUIDE_UP(실적 품질 0.5→0.7). 2차 P0와 같은 방향(손실→이익)입니다. 반대 방향도 남아 있습니다. "Excluding the expected loss of $0.10 to $0.15 per share on the divestiture, we expect diluted EPS of $2.40 to $2.50"는 제외 항목 금액을 EPS 가이던스로 저장해 −0.15~−0.10이 되고, GAAP 손실과 non-GAAP EPS가 한 문장에 있으면 첫 범위(GAAP 손실 −0.40~−0.30)를 가져옵니다</dd>
+        </dl>
+        <div class="where">위치 <code>backend/marketlens/domain/guidance.py</code> <code>_LOSS_ATTACHED</code>(손실 표현이 숫자 바로 앞에서 끝나야 함), <code>_sign()</code>(그 밖에는 POS), <code>_parse()</code>(문장의 첫 범위 채택) · 테스트 <code>test_M1_*</code> (10건)</div>
+      </article>
+
+      <article class="finding s2">
+        <div class="fhead"><span class="fid">M2</span><span class="sev P2">P2</span><h3>같은 티커로 재상장하면 상장폐지 이력이 지워짐</h3></div>
+        <dl>
+          <dt>입력</dt><dd>OLDT(CIK 5) 2026-06-02 상장폐지 → 08-03 같은 티커 OLDT로 재상장(예: 장외에서 복귀)</dd>
+          <dt>기대</dt><dd>상장폐지일 유지, 2026-06-10 과거 유니버스에 OLDT 없음</dd>
+          <dt>실제</dt><dd><code>delisted_on</code> 2026-06-02 → None으로 지워지고, 06-10에 상장 상태로 나옴. N10은 새 티커 경우만 고쳐짐</dd>
+        </dl>
+        <div class="where">위치 <code>application/market_store.py</code> <code>sync_universe()</code> 기존 행 갱신 분기(<code>row.active, row.delisted_at = True, None</code>) · 테스트 <code>test_M2_*</code></div>
+      </article>
+
+      <article class="finding s2">
+        <div class="fhead"><span class="fid">M3</span><span class="sev P2">P2</span><h3>옛 티커로 되돌아가는 개명이 상장폐지로 기록됨</h3></div>
+        <dl>
+          <dt>입력</dt><dd>AAA → BBB(2026-06-10) → 다시 AAA(08-03), 같은 CIK</dd>
+          <dt>기대</dt><dd>BBB→AAA 개명. BBB는 상장폐지가 아니고, AAA 이력 25개 봉이 이어짐</dd>
+          <dt>실제</dt><dd>BBB가 08-03 상장폐지로 기록되어 BBB 추천 성과가 DELISTED_LAST_PRICE로 계산될 수 있음. <code>bars('AAA')</code>는 15개(BBB 기간 10개 누락)</dd>
+        </dl>
+        <div class="where">위치 <code>market_store.py</code> 같은 갱신 분기(<code>successor</code>·<code>renamed_on</code>을 지움)와 마지막 상장폐지 처리 · 테스트 <code>test_M3_*</code></div>
+      </article>
+
+      <article class="finding s2">
+        <div class="fhead"><span class="fid">M4</span><span class="sev P2">P2</span><h3>여러 주식 클래스가 함께 개명되면 클래스 이력이 서로 바뀜</h3></div>
+        <dl>
+          <dt>입력</dt><dd>CIK 9의 클래스 A(XA, ~600)와 B(XB, ~400)가 한 동기화에서 YA, YB로 개명. SEC 목록 순서는 매일 A, B</dd>
+          <dt>기대</dt><dd>YA←XA, YB←XB. 짝을 정할 수 없으면 연결하지 않음</dd>
+          <dt>실제</dt><dd>YA가 클래스 B 이력(400), YB가 클래스 A 이력(600)을 받음. 개명 당일 순서만 뒤집으면 우연히 맞아, 결과가 목록 순서에 따라 달라짐. 연결할 때 주식수·시가총액도 그 행에서 옮겨 오므로 함께 뒤바뀜</dd>
+        </dl>
+        <div class="where">위치 <code>market_store.py</code> <code>_link_source()</code>: 같은 CIK의 후보를 <code>updated_at</code>으로 고름 · 테스트 <code>test_M4_*</code></div>
+      </article>
+
+      <article class="finding">
+        <div class="fhead"><span class="fid">M5</span><span class="sev P3">P3</span><h3>폴링이 실패하면 상세 화면이 마지막 CURRENT를 유지함</h3></div>
+        <dl>
+          <dt>입력</dt><dd>상세 화면의 첫 폴링은 CURRENT, 이후 서버가 응답하지 않음(사이드카 재시작, 500 등)</dd>
+          <dt>기대</dt><dd>몇 번 실패하면 "상태 확인 불가"를 표시하고 CURRENT로 두지 않음</dd>
+          <dt>실제</dt><dd>3시간(폴링 180회) 뒤에도 "분석 5분 경과 · CURRENT"</dd>
+        </dl>
+        <div class="where">위치 <code>frontend/src/pages/StockDetail.tsx</code> <code>useLiveStatus</code>의 <code>.catch(() =&gt; undefined)</code> · 테스트 <code>frontend/live_status_poll_failure.test.tsx</code></div>
+      </article>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-opinion">
+    <h2 id="h-opinion">20분 규칙에 대한 의견 (신청서 요청)</h2>
+    <p>20분은 이 시스템이 시세 재확인에 허용하는 나이(<code>max_quote_age</code> 20분)와 같아 일관되고, 60분보다 낫습니다. 이보다 짧게 하면 목록 대부분이 "재확인 필요"가 되어 목록의 쓸모가 줄어듭니다. 결함으로 보지 않습니다.</p>
+    <p>다만 이 20분 동안의 CURRENT는 "분석 시점 가격 기준"이라는 뜻입니다. 경계는 10분·19분 CURRENT, 21분 NEEDS_REVALIDATION으로 확인했습니다. 2차 반례(10분 뒤 현재가 90이 손절 95 아래)는 상세 화면에서는 새 시세로 막히지만, 목록에서는 여전히 CURRENT로 보입니다. 목록 행에 "분석 가격 기준 · n분 전"을 붙이거나 상위 몇 행만 시세를 받아 확인하기를 권합니다. 장 마감 뒤에는 AGING("재분석 필요")으로 바뀌어 저녁 내내 CURRENT로 남지는 않습니다.</p>
+  </section>
+
+  <section aria-labelledby="h-risk">
+    <h2 id="h-risk">실데이터로 확인해야 할 위험 (점수 미반영)</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>#</th><th>위험</th><th>확인 방법</th></tr></thead>
+      <tbody>
+        <tr><td class="n">R2</td><td>SEC 클래스주 표기(BRK-B)와 Polygon 표기(BRK.B) 불일치 (3차에서 이어짐)</td><td>동기화 후 BRK-B의 저장 봉 개수</td></tr>
+        <tr><td class="n">R3</td><td>재사용 판정이 SEC 목록 갱신을 기다림 (3차에서 이어짐)</td><td>최근 재사용 사례로 두 출처의 전환일 비교</td></tr>
+        <tr><td class="n">R5</td><td>분할 중복 확인이 티커 단위입니다. 옛 티커로 반영된 분할을 공급자가 겹침 구간(7일) 재조회에서 새 티커로 다시 보고하면 봉이 두 번 조정될 수 있습니다. 새 티커로 저장된 개명 이전 분할은 <code>splits()</code>에서 빠져 EPS 조정만 누락될 수도 있습니다</td><td>Polygon이 개명 회사의 과거 분할을 어느 티커로 보고하는지 확인</td></tr>
+        <tr><td class="n">R6</td><td>옛 티커가 사라진 동기화와 새 티커가 나타난 동기화가 다르면(또는 둘 다 한동안 목록에 있으면) 개명이 RELIST나 NEW로 처리됩니다</td><td>개명 사례에서 SEC 파일이 두 티커를 같은 날 바꾸는지 확인</td></tr>
+        <tr><td class="n">R7</td><td>이전 버전이 이미 잘못 기록한 자료(예: 445221f에서 상장폐지로 기록된 개명)는 이번 수정으로 복구되지 않습니다</td><td>기존 DB를 쓰는 경우 재구성 또는 복구 스크립트 필요 여부 판단</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-score">
+    <h2 id="h-score">점수 기준표</h2>
+    <p class="note">3차와 같은 기준표입니다. 등급 구간: A는 85점 이상이면서 Gate 5개 모두 통과, B 75~84, C 60~74, D 60 미만.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>영역</th><th class="num">배점</th><th class="num">3차</th><th class="num">4차</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td>데이터 무결성·시점 정확성</td><td class="num">25</td><td class="num">16</td><td class="num">20</td><td>N2~N4·N8·N9·N14 해결. 같은 티커 재상장(M2), 되돌아가는 개명(M3), 클래스 동시 개명(M4)</td></tr>
+        <tr><td>결정 안전성</td><td class="num">20</td><td class="num">12</td><td class="num">12</td><td>목록 신선도(N11) 해결. 가이던스 부호 P0가 더 위험한 방향(손실→이익)으로 남음(M1)</td></tr>
+        <tr><td>성과 평가·모의투자</td><td class="num">15</td><td class="num">10</td><td class="num">13</td><td>재사용 뒤 계좌 재계산(N5)과 개명 후 분할(N4) 해결. M3·M4가 성과 기록을 흐릴 수 있음</td></tr>
+        <tr><td>실데이터 검증</td><td class="num">15</td><td class="num">5</td><td class="num">6</td><td>live-verify가 공급자를 직접 부르고 R1 점검이 추가됨. 실행 기록은 여전히 없음</td></tr>
+        <tr><td>테스트·CI·재현성</td><td class="num">10</td><td class="num">9</td><td class="num">9</td><td>수치가 모두 재현되고 반례를 원문 그대로 편입. 가이던스 규칙은 테스트 문장에 맞춰져 변형에서 무너짐</td></tr>
+        <tr><td>UI 정확성</td><td class="num">10</td><td class="num">7</td><td class="num">9</td><td>N11·N12 해결. 폴링 실패 시 고착(M5)</td></tr>
+        <tr><td>신청서·문서의 정확성</td><td class="num">5</td><td class="num">4</td><td class="num">4</td><td>수치와 테스트 변경 공개가 정확함. "목록 순서와 무관" 주장은 여러 클래스 개명에서 성립하지 않음</td></tr>
+      </tbody>
+      <tfoot><tr><td>합계</td><td class="num">100</td><td class="num">63</td><td class="num">73</td><td>C 등급 (B까지 2점) · A Gate 3/5</td></tr></tfoot>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-next">
+    <h2 id="h-next">다음 라운드 우선순위</h2>
+    <ol class="prio">
+      <li><strong>M1 가이던스 부호.</strong> 손실 단어가 붙은 위치로 부호를 정하는 방식은 한쪽 테스트를 고치면 다른 쪽이 깨집니다. 문장에 손실 단어가 있으면 기본값을 GUIDANCE_UNCLEAR로 두고, 확실한 형태("loss per (diluted) share", "net loss"가 그 숫자를 지배하는 절)에서만 NEG로 저장하십시오. POS는 문장에 손실 단어가 없을 때만 저장하십시오. 한 문장에 같은 지표의 범위가 둘 이상이면(GAAP·non-GAAP, 제외 항목) UNCLEAR로 두십시오. 2·3·4차 문장 전부를 회귀 테스트로 두십시오.</li>
+      <li><strong>M2·M3 재상장과 되돌아가는 개명.</strong> 같은 티커의 재상장은 <code>delisted_at</code>을 지우지 말고 상장 구간을 새로 남기십시오. 같은 CIK의 다른 티커가 사라지는 동기화에서 옛 티커가 돌아오면 개명(BBB→AAA)으로 연결하십시오.</li>
+      <li><strong>M4 여러 클래스.</strong> 같은 CIK에서 사라진 행과 새 티커가 둘 이상이면 <code>updated_at</code>으로 고르지 말고, 클래스 접미사나 이름으로 짝을 짓거나 연결하지 말고 검토 대상으로 남기십시오.</li>
+      <li><strong>M5.</strong> 폴링이 연속으로 실패하면 "상태 확인 불가"를 표시하십시오.</li>
+      <li><strong>실제 공급자 검증(G3).</strong> 실행하면서 R1·R2·R3·R5·R6 점검 결과를 함께 기록하십시오. 이것 없이는 A Gate를 통과할 수 없습니다.</li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="h-repro">
+    <h2 id="h-repro">재현 방법</h2>
+    <pre><code># 반례 모음 가져오기 (평가 브랜치 = 4182468 + evaluations/eval4)
+git fetch origin claude/new-session-ir1fdw
+git checkout origin/claude/new-session-ir1fdw -- evaluations/eval4
+
+pip install -r backend/requirements.lock &amp;&amp; pip install --no-deps -e ./backend
+python -m pytest -q -o addopts="" evaluations/eval4        # 4182468: 13 failed (의도한 실패)
+
+# M5 (프런트)
+cp evaluations/eval4/frontend/live_status_poll_failure.test.tsx frontend/src/pages/
+cd frontend &amp;&amp; npx vitest run src/pages/live_status_poll_failure.test.tsx   # 4182468: 1 failed</code></pre>
+    <p class="note">반례 테스트는 <code>backend/tests</code> 밖에 있어 CI가 수집하지 않습니다. 고친 뒤에는 모두 통과해야 하며, 통과한 테스트는 회귀 테스트로 <code>backend/tests</code>에 옮기면 됩니다.</p>
+  </section>
+</main>

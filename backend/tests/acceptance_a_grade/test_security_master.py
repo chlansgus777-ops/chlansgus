@@ -66,7 +66,21 @@ def test_relisting_of_the_same_company_is_not_a_reuse(tmp_path):
     _bars(st, "XYZ", D1 - timedelta(days=10), 10, 20.0)
     st.sync_universe([], D1 + timedelta(days=1))
     out = st.sync_universe([_sec("XYZ", 9)], D2)
-    assert out["reused"] == 0 and len(st.bars("XYZ", D1 - timedelta(days=20), D2)) == 10
+    assert out["reused"] == 0 and out["relisted"] == 1
+    # since evaluation 4 (M2) a relist is a new listing interval: the delisting stays in history, the old bars stay
+    # with the old interval (reached through resolve() for a recommendation made then), no price bridge over the gap
+    old = st.resolve("XYZ", D1)
+    assert old != "XYZ" and len(st.bars(old, D1 - timedelta(days=20), D2)) == 10
+    assert {s.ticker for s in st.securities(D1 + timedelta(days=3))} == set()
+
+
+def test_a_few_days_missing_from_the_listing_is_a_data_gap_not_a_relist(tmp_path):
+    st = _store(tmp_path)
+    st.sync_universe([_sec("XYZ", 9)], D1)
+    _bars(st, "XYZ", D1 - timedelta(days=10), 10, 20.0)
+    st.sync_universe([], D1 + timedelta(days=1))
+    out = st.sync_universe([_sec("XYZ", 9)], D1 + timedelta(days=3))
+    assert out["relisted"] == 0 and len(st.bars("XYZ", D1 - timedelta(days=20), D2)) == 10
 
 
 def test_rows_stored_before_the_security_master_adopt_the_cik(tmp_path):
