@@ -34,7 +34,7 @@ no network access to the providers and no keys), **PARTIAL**, **ACCUMULATING** (
 | Earnings history | Finnhub calendar (actual vs estimate) | `FINNHUB_API_KEY` | IMPLEMENTED | Real report dates. |
 | News | Finnhub market + company news | `FINNHUB_API_KEY` | IMPLEMENTED | Entity discovery without tags (names + `config/entity_aliases.toml`), negation/denial discount. |
 | Macro | FRED / ALFRED | `FRED_API_KEY` | IMPLEMENTED | Vintage requests; SOX, breadth, Fed futures not available. |
-| Short interest | FINRA consolidated short interest | optional `FINRA_API_KEY/SECRET` (OAuth) | IMPLEMENTED (coverage not live verified) | OAuth client credentials → Bearer. Whether exchange-listed symbols are covered must be confirmed by live-verify. |
+| Short interest | FINRA consolidated short interest | optional `FINRA_API_KEY/SECRET` (OAuth) | **LIVE VERIFIED** (public access, 2026-09-26, GitHub Actions run 36249539188) | NVDA rows returned by the real API. The first live run found a contract error (a sort needs the partition key `settlementDate` in an EQUAL filter → 400); fixed by a date-range filter and local ordering. OAuth client credentials → Bearer when keys are set. |
 | Insider | SEC Form 4 | `SEC_USER_AGENT` | PARTIAL | Recent filings only. |
 | Options (IV, expected move) | — | — | UNAVAILABLE | No free official source. Priced-In is "Lite" (price/volume/news/revisions). |
 | Institutional (13F) | — | — | UNAVAILABLE | |
@@ -62,3 +62,17 @@ lets `marketlens simulate` replay past weeks without look-ahead.
 ## Licensing
 No scraping. Only APIs/feeds the user is licensed for. Respect provider terms and rate limits
 (token-bucket limiters per provider). Without a key/licence the feature is MISSING.
+
+
+## Live verification log
+
+`marketlens live-verify` runs against the real providers from GitHub Actions (`.github/workflows/live-verify.yml`,
+manual). Results so far (no API keys configured in the repository):
+
+| Date | Run | Result |
+|---|---|---|
+| 2026-09-26 | 36248705111 | FINRA 400 (sort without partition key — contract error found); SEC 403 (User-Agent without contact e-mail); others: no key |
+| 2026-09-26 | 36249539188 | **FINRA short interest VERIFIED** after the fix; SEC 403 (needs `SEC_USER_AGENT` = "name e-mail"); Finnhub, Polygon, FRED, Alpha Vantage: BLOCKED_BY_CREDENTIAL (no key) |
+
+To verify the rest: add the repository secrets `SEC_USER_AGENT` ("Your Name your@email"), `FINNHUB_API_KEY`,
+`POLYGON_API_KEY`, `FRED_API_KEY`, `ALPHAVANTAGE_API_KEY` (all free tiers) and run the workflow.

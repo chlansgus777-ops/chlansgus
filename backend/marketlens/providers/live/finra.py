@@ -6,9 +6,11 @@ Auth:  FINRA API uses OAuth 2.0 client credentials. With FINRA_API_KEY / FINRA_A
        credentials, and the data request carries ``Authorization: Bearer <token>`` — the client
        credentials are never sent to the data endpoint. Without credentials the public (rate-limited)
        access is used.
-Coverage: the dataset is published under FINRA's "otcMarket" group. Whether it covers a given
-       exchange-listed symbol must be confirmed by the live smoke test (NVDA/AAPL rows present); until
-       then this provider is IMPLEMENTED_NOT_LIVE_VERIFIED and a symbol without rows is MISSING.
+Coverage: the dataset is published under FINRA's "otcMarket" group and covers exchange-listed symbols:
+       live-verify on 2026-09-26 (GitHub Actions run 36249539188, public access without credentials) returned
+       NVDA rows and passed the value/date/source checks. A symbol without rows is MISSING.
+Contract: sorting requires every partition key (settlementDate) in an EQUAL filter (observed 400 otherwise),
+       so the request filters a settlement-date range and the rows are ordered locally.
 """
 
 from __future__ import annotations

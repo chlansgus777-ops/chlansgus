@@ -45,6 +45,8 @@ jobs:
           print("as_of:", rep.get("as_of"))
           for cat, v in rep["categories"].items():
               print(f"{cat:16} {v['status']:22} {v.get('note', '')[:600]}")
+              for smp in v.get("samples", [])[:3]:  # the evidence: real values with their date and source
+                  print(f"{'':16}   sample {smp.get('ticker')}: value={smp.get('value')} as_of={smp.get('timestamp')} provider={smp.get('provider')} source={str(smp.get('source'))[:80]}")
           EOF
           exit 0
       - uses: actions/upload-artifact@v4
