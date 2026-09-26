@@ -6,7 +6,13 @@ export interface Entry { name: string; short: string; why?: string; dir?: Dir }
 
 export const GLOSSARY: Record<string, Entry> = {
   score: { name: "점수", short: "펀더멘털·밸류에이션·실적·이슈·거시·위험·진입가를 합친 0~100점 종합 평가", why: "80점 이상이면 매수, 72점 이상이면 소액 매수 후보", dir: "high_good" },
-  confidence: { name: "신뢰도", short: "데이터가 얼마나 충분하고, 판정이 기준선에서 얼마나 떨어져 있는지", why: "성공 확률이 아니라 ‘이 판단이 흔들리지 않을 정도’입니다", dir: "high_good" },
+  confidence: { name: "분석 신뢰도(0~100)", short: "데이터 완성도·데이터 간 일치도·기준선과의 거리·AI 위원회 합의로 계산한 점수", why: "주가가 오를 확률이 아닙니다. ‘이 판단이 데이터로 얼마나 잘 뒷받침되는지’입니다", dir: "high_good" },
+  eps_revision: { name: "EPS 추정치 변화(리비전)", short: "애널리스트들의 향후 이익 예상치가 최근 올라가고 있는지 보여줍니다", why: "무료 데이터에서는 일부 기간만 공급자가 제공하고, 나머지는 MarketLens가 매일 저장해 직접 계산합니다(누적 중이면 ‘누적 중 42/90일’)", dir: "high_good" },
+  fcf: { name: "FCF(잉여현금흐름)", short: "영업으로 번 현금에서 설비투자를 뺀 돈. 배당·자사주·부채 상환에 쓸 수 있는 현금", dir: "high_good" },
+  close_exit: { name: "종가 기준 이탈", short: "하루 거래가 끝난 종가가 손절 기준가 아래면 매도(보유 중)·매수 중단으로 판단하는 규칙", why: "장중 일시적 하락에 흔들리지 않도록 추천 판단은 종가로 합니다. 장중에만 내려가면 신규 매수만 멈춥니다", dir: "neutral" },
+  paper_stop: { name: "모의투자 손절", short: "모의투자는 손절 기준가에 미리 손절 주문을 걸어 둔 것으로 계산(가격 도달 시 체결, 갭 하락은 시가)", why: "추천 판단(종가 기준)보다 보수적입니다. 같은 날 목표가와 손절가가 모두 닿으면 손절을 먼저 처리합니다", dir: "neutral" },
+  readiness: { name: "추천 준비도", short: "지금 데이터 상태로 추천을 얼마나 믿을 수 있는지(실전 참고 가능·제한적 참고·연습용·준비 안 됨)", dir: "neutral" },
+  priced_in_lite: { name: "Priced-In Lite", short: "옵션 데이터 없이 가격·거래량·뉴스 반복만으로 추정한 반영 정도. 정밀한 숫자 대신 낮음/중간/높음으로만 표시", dir: "low_good" },
   ideal_entry: { name: "이상적 진입가", short: "지지선 근처의 가장 유리한 매수 가격", dir: "neutral" },
   max_buy: { name: "최대 매수가", short: "이 가격을 넘으면 목표가 대비 위험이 커져 추격 매수가 됩니다", why: "손익비 2가 되는 가격에서 거꾸로 계산", dir: "neutral" },
   add_zone: { name: "추가매수 구간", short: "이미 보유했다면 더 사도 되는 가격대", dir: "neutral" },

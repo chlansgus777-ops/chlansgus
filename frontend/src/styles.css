@@ -178,3 +178,20 @@ details[open] > summary { margin-bottom: 8px; }
   .main { padding: 16px; }
   .topbar { padding: 10px 16px; }
 }
+
+/* ---------- readiness, advanced nav, statuses added for the A-grade pass ---------- */
+.badge.pos { background: var(--pos-soft); color: var(--pos); } .badge.warn { background: var(--warn-soft); color: var(--warn); }
+.badge.neg { background: var(--neg-soft); color: var(--neg); } .badge.info { background: var(--info-soft); color: var(--info); }
+a.badge:hover { text-decoration: none; filter: brightness(1.1); }
+.nav-more { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.nav-more summary { cursor: pointer; padding: 7px 12px; color: var(--muted); font-size: 12.5px; font-weight: 650; list-style: none; }
+.nav-more summary::before { content: "▸ "; } .nav-more[open] summary::before { content: "▾ "; }
+.status.s-NEEDS_REVALIDATION { color: var(--warn); border-color: rgba(242, 180, 71, .4); }
+.status.s-PLAN_INVALIDATED { color: var(--neg); border-color: rgba(240, 97, 109, .4); }
+.conf-note { font-size: 12px; color: var(--text-2); margin-top: 4px; }
+.progress { display: grid; grid-template-columns: 140px 1fr 48px; gap: 10px; align-items: center; margin: 6px 0; font-size: 13px; }
+.progress .track { height: 8px; background: var(--surface-3); border-radius: 999px; overflow: hidden; border: 1px solid var(--line); }
+.progress .track > div { height: 100%; background: var(--accent); }
+.progress .track > div.ok { background: var(--pos); } .progress .track > div.low { background: var(--warn); }
+.matrix td:first-child { font-weight: 600; }
+.missing-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }

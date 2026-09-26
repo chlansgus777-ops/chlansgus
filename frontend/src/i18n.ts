@@ -75,3 +75,11 @@ export function ko(map: Record<string, string>, key: string | null | undefined, 
   if (!key) return fallback;
   return map[key] ?? key;
 }
+
+/** Recommendation readiness gate (backend: application/readiness.py). */
+export const READINESS_KO: Record<string, { label: string; tone: string; help: string }> = {
+  FULL: { label: "실전 참고 가능", tone: "pos", help: "모든 판단 재료가 실데이터로 연결되어 있습니다." },
+  LIMITED: { label: "제한적 참고", tone: "warn", help: "핵심 데이터는 준비됐지만 일부 재료(옵션·기관 보유·추정치 이력 등)가 없거나 부분적입니다. 추천을 그대로 따르지 말고 참고용으로 쓰세요." },
+  "PAPER ONLY": { label: "연습용(모의)", tone: "info", help: "모의 데이터입니다. 실제 투자 판단에 쓰면 안 됩니다." },
+  "NOT READY": { label: "준비 안 됨", tone: "neg", help: "데이터 준비가 끝나지 않았습니다. 지금의 추천(또는 빈 목록)은 판단 근거가 될 수 없습니다." },
+};

@@ -4,6 +4,7 @@ import { advise } from "../advice";
 import { api } from "../api";
 import { OppTable } from "../components/OppTable";
 import { Action, Card, Empty, Err, LineChart, Loading, Notice, Term } from "../components/ui";
+import { NotReady, ReadinessBanner, type ReadinessInfo } from "../components/Readiness";
 import { useApi } from "../components/useApi";
 import { day, pct, price, stamp } from "../format";
 import { REGIME_KO, VETO_KO, ko } from "../i18n";
@@ -21,6 +22,7 @@ interface Dash {
   performance: { equity: number; starting_capital: number; return: number | null; max_drawdown: number | null; as_of: string; curve: number[] } | null;
   recommendation_changes: { ticker: string; text: string; action: string }[];
   watchlist_alerts: { ticker: string; level: string; text: string }[];
+  readiness?: ReadinessInfo;
 }
 
 const REGIME_HELP: Record<string, string> = {
@@ -77,6 +79,7 @@ export default function Dashboard() {
         </div>
         <button className="primary" disabled={busy} onClick={scan}>{busy ? "스캔 중…" : "전체 시장 스캔"}</button>
       </div>
+      <ReadinessBanner r={x.readiness} />
       {busy && <Loading what="전체 시장 스캔" steps={SCAN_STEPS} />}
       <Err error={scanErr} />
       {expired > 0 && <Notice tone="warn">상위 후보 중 {expired}개는 추천 이후 거래일이 지나 지금은 유효하지 않습니다. ‘전체 시장 스캔’으로 새로 분석하세요.</Notice>}
@@ -88,7 +91,9 @@ export default function Dashboard() {
           {x.regime.readings.length > 1 && <div className="row" style={{ marginTop: 10 }}>{x.regime.readings.slice(0, 4).map((r) => <span key={r.regime} className="tag info" title={r.evidence.join("\n")}>{ko(REGIME_KO, r.regime)}</span>)}</div>}
         </Card>
         <Card title="지금 가장 유망한 종목" icon="◎" right={<Link to="/opportunities">전체 보기 →</Link>} className="span2">
-          {shown.length ? <div className="g2">{shown.map((r) => <OppCard key={r.id} r={r} />)}</div> : <Empty hint="오른쪽 위 ‘전체 시장 스캔’을 누르면 약 1~3분 안에 후보가 만들어집니다.">아직 스캔 결과가 없습니다.</Empty>}
+          {shown.length ? <div className="g2">{shown.map((r) => <OppCard key={r.id} r={r} />)}</div>
+            : x.readiness?.scanner_status === "SCANNER_NOT_READY" ? <NotReady r={x.readiness} />
+            : <Empty hint="오른쪽 위 ‘전체 시장 스캔’을 누르면 약 1~3분 안에 후보가 만들어집니다.">아직 스캔 결과가 없습니다.</Empty>}
           {shown.length > 0 && !bullish.length && <div className="explain">지금은 매수 조건을 충족한 종목이 없어 점수 상위 종목을 보여줍니다.</div>}
         </Card>
       </div>

@@ -13,7 +13,7 @@ export interface FreshnessCheck { data_type: string; quality: string; effective:
 
 export interface Stage { stage: string; input_count: number; output_count: number; note: string }
 export interface ScanInfo { id: number; as_of: string; mode: string; stages: Stage[]; excluded: number; scoring_model_version: string }
-export interface Opportunities { scan: ScanInfo | null; rows: OppRow[] }
+export interface Opportunities { scan: ScanInfo | null; rows: OppRow[]; readiness?: import("./components/Readiness").ReadinessInfo }
 
 export interface SystemInfo {
   mode: "MOCK" | "LIVE"; mock_banner: boolean; now: string; versions: Record<string, string>;
@@ -27,6 +27,8 @@ export interface Evidence { evidence_id: string; category: string; label: string
 export interface HorizonImpact { horizon: string; direction: number; impact_score: number; confidence: number; mechanism: string[] }
 export interface CompanyIssueImpact { issue_id: string; ticker: string; hops: number; exposure_path: string[]; horizons: HorizonImpact[]; priced_in: number | null }
 
+export interface RuleScoreT { subscore: number | null; coverage: number; critical_missing?: string[]; items: { metric: string; label: string; value: number | null; subscore: number | null; weight: number }[] }
+
 export interface Analysis {
   ticker: string; as_of: string; mode: string; price: number | null; price_quality: string; price_timestamp: string | null; session: string | null; price_source: string | null;
   security: { ticker: string; company_name: string; exchange: string; sector: string; industry: string; market_cap: number | null; is_adr: boolean; country_of_incorporation: string };
@@ -35,8 +37,8 @@ export interface Analysis {
   decision: { action: string; confidence: number; vetoes: string[]; reasons: string[]; raw_action: string; suppressed_change: boolean; size_limit: string | null; notes: string[] };
   entry: { current_price: number; ideal_entry: number; acceptable_low: number; acceptable_high: number; max_buy: number; add_zone_low: number; add_zone_high: number; stop: number; target1: number; target2: number; rr_at_current: number | null; rr_at_ideal: number | null; downside_pct: number; upside_t1_pct: number; rationale: string[] } | null;
   features: Record<string, number | null>;
-  fundamental_rules: { subscore: number | null; coverage: number; items: { metric: string; label: string; value: number | null; subscore: number | null; weight: number }[] } | null;
-  valuation_rules: { subscore: number | null; coverage: number; items: { metric: string; label: string; value: number | null; subscore: number | null; weight: number }[] } | null;
+  fundamental_rules: RuleScoreT | null;
+  valuation_rules: RuleScoreT | null;
   multiples: Record<string, number | null> | null;
   relative_valuation: { primary_multiple: string; primary_value: number | null; history_percentile: number | null; peer_median: number | null; premium_to_peers: number | null; growth_adjusted: number | null; equity_risk_spread: number | null; notes: string[] } | null;
   earnings: { revenue_surprise: number | null; eps_surprise: number | null; guide_rev_vs_cons: number | null; guide_eps_vs_cons: number | null; result_quality: string; expectation_bar: string; beat_streak: number; notes: string[] } | null;
@@ -46,7 +48,7 @@ export interface Analysis {
   primary_regime: string;
   macro_impact: { net: number; contributions: [string, number, string][] } | null;
   issue_impacts: CompanyIssueImpact[];
-  priced_in: Record<string, { value: number | null; confidence: number; components: [string, number][]; label: string }>;
+  priced_in: Record<string, { value: number | null; confidence: number; components: [string, number][]; label: string; model?: string; confidence_level?: string; band?: string | null }>;
   horizon_view: Record<string, number>;
   event_risk: { level: string; days_until: number | null; reasons: string[]; nearest: { title: string; event_date: string } | null };
   upcoming_events: { event_id: string; event_type: string; event_date: string; title: string; importance: number }[];
@@ -56,7 +58,7 @@ export interface Analysis {
   thesis_conditions: { condition_id: string; description: string }[];
   thesis_invalidated: boolean; thesis_breaches: string[];
   data_quality: { fields: [string, string][]; core_missing: string[]; conflicts: string[]; stale: string[]; checks: FreshnessCheck[] };
-  sector_known: boolean; short_interest_pct: number | null; valuation_price_basis: string;
+  sector_known: boolean; short_interest_pct: number | null; valuation_price_basis: string; fundamental_adjustments?: string[];
   changes: { kind: string; text: string; material: boolean; magnitude: number | null }[];
   scenarios: { name: string; trigger: string; mechanism: string; price_low: number; price_high: number; invalidation: string; probability: number | null }[];
   evidence: Evidence[];

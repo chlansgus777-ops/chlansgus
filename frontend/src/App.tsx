@@ -2,6 +2,7 @@ import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { Err, ModeBanner } from "./components/ui";
 import { useApi } from "./components/useApi";
 import { ModeSwitch } from "./mode";
+import { READINESS_KO } from "./i18n";
 import type { SystemInfo } from "./types";
 import Dashboard from "./pages/Dashboard";
 import Opportunities from "./pages/Opportunities";
@@ -16,16 +17,22 @@ import Health from "./pages/Health";
 import Settings from "./pages/Settings";
 import Guide from "./pages/Guide";
 
+/** Beginners see five destinations; research tools sit under "고급 기능". */
 const NAV: [string, string, string][] = [
-  ["/", "◉", "대시보드"], ["/opportunities", "◎", "기회 찾기"], ["/stocks", "⌕", "종목 분석"], ["/portfolio", "◔", "포트폴리오"],
-  ["/macro", "∿", "시장·거시"], ["/issues", "▤", "이슈·캘린더"], ["/committee", "◈", "AI 위원회"], ["/performance", "↗", "성과 분석"],
-  ["/health", "●", "시스템 상태"], ["/settings", "⚙", "설정"],
+  ["/", "◉", "홈"], ["/opportunities", "◎", "기회 찾기"], ["/stocks", "⌕", "종목 분석"], ["/portfolio", "◔", "내 포트폴리오"], ["/issues", "▤", "시장 이슈"],
 ];
+const ADVANCED: [string, string, string][] = [
+  ["/committee", "◈", "AI 위원회"], ["/performance", "↗", "성과 분석"], ["/macro", "∿", "시장·거시 지표"], ["/health", "●", "시스템 상태"], ["/settings", "⚙", "설정"],
+];
+
 
 export default function App() {
   const sys = useApi<SystemInfo>("/system");
+  const ready = useApi<{ recommendation_readiness: string }>("/readiness");
   const loc = useLocation();
   const isStock = loc.pathname.startsWith("/stocks/");
+  const inAdvanced = ADVANCED.some(([to]) => loc.pathname.startsWith(to));
+  const rr = ready.data ? READINESS_KO[ready.data.recommendation_readiness] : undefined;
   return (
     <div className="layout">
       <nav className="nav" aria-label="주 메뉴">
@@ -35,13 +42,22 @@ export default function App() {
             <span aria-hidden>{icon}</span>{label}
           </NavLink>
         ))}
+        <details className="nav-more" open={inAdvanced || undefined}>
+          <summary>고급 기능</summary>
+          {ADVANCED.map(([to, icon, label]) => (
+            <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}><span aria-hidden>{icon}</span>{label}</NavLink>
+          ))}
+        </details>
         <div className="foot">MarketLens는 주문을 넣지 않습니다. 모든 매매는 직접 판단·실행하세요. 가격은 모두 미국 달러(USD)입니다.</div>
       </nav>
       <div style={{ minWidth: 0 }}>
         {sys.data && <ModeBanner mode={sys.data.mode} />}
         <div className="topbar">
           <span className="caption">{sys.data ? `데이터: ${sys.data.mode === "MOCK" ? "모의(MOCK)" : "실데이터(LIVE)"} · AI 위원회 ${sys.data.llm.available ? "사용 가능" : "사용 불가"}` : ""}</span>
-          <div className="row"><Link to="/guide">용어·판정 설명</Link><ModeSwitch /></div>
+          <div className="row">
+            {rr && <Link to="/health" className={`badge ${rr.tone}`} title={rr.help} data-testid="readiness-badge">추천 준비도: {rr.label}</Link>}
+            <Link to="/guide">용어·판정 설명</Link><ModeSwitch />
+          </div>
         </div>
         {sys.error && <div style={{ padding: "10px 28px" }}><Err error={`백엔드 연결 실패: ${sys.error}`} retry={sys.reload} /></div>}
         <main className="main">

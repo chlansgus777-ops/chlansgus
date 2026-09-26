@@ -37,9 +37,9 @@ export function Vetoes({ v }: { v: string[] }) {
   return <span className="neg" title={v.map((x) => VETO_KO[x] ?? x).join(", ")}>⛔ {v.map((x) => VETO_KO[x] ?? x).join(", ")}</span>;
 }
 
-export function Card({ title, children, right, icon, tone, explain, className }: { title?: string; children: ReactNode; right?: ReactNode; icon?: string; tone?: "pos" | "neg" | "warn"; explain?: string; className?: string }) {
+export function Card({ title, children, right, icon, tone, explain, className, testId }: { title?: string; children: ReactNode; right?: ReactNode; icon?: string; tone?: "pos" | "neg" | "warn"; explain?: string; className?: string; testId?: string }) {
   return (
-    <section className={`card${tone ? ` tone-${tone}` : ""}${className ? ` ${className}` : ""}`}>
+    <section className={`card${tone ? ` tone-${tone}` : ""}${className ? ` ${className}` : ""}`} data-testid={testId}>
       {(title || right) && (
         <div className="card-head">
           <div>

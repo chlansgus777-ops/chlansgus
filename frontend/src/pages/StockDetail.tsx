@@ -9,7 +9,7 @@ import { day, krwAux, num, pct, price, stamp, usdWithKo } from "../format";
 import { GLOSSARY } from "../glossary";
 import { COMPONENT_KO, DATA_TYPE_KO, REGIME_KO, RISK_KO, SESSION_KO, SIZE_KO, STATUS_INFO, VETO_KO, ko } from "../i18n";
 import { More } from "../mode";
-import type { CommitteeResult, Evidence, StockDetail as SD } from "../types";
+import type { Analysis, CommitteeResult, Evidence, StockDetail as SD } from "../types";
 
 const RESULT_KO: Record<string, string> = {
   BEAT_AND_RAISE: "예상 상회 + 가이던스 상향", BEAT: "예상 상회", BEAT_WEAK_GUIDE: "예상 상회했으나 가이던스 부진", GUIDE_UP: "예상 부합 + 가이던스 상향",
@@ -21,6 +21,24 @@ const FIT_KO: Record<string, string> = { GOOD: "잘 맞음", NEUTRAL: "보통", 
 
 function Metric({ k, label }: { k: string; label: string }) {
   return GLOSSARY[k] ? <Term k={k}>{label}</Term> : <>{label}</>;
+}
+
+export function confidenceLevel(c: number | null | undefined): string {
+  if (c === null || c === undefined) return "알 수 없음";
+  return c >= 70 ? "높음" : c >= 50 ? "보통" : "낮음";
+}
+
+/** What exactly is missing when no decision is made (vetoes, sector-model gaps, stale/missing inputs). */
+export function missingData(a: Analysis): string[] {
+  const out: string[] = [];
+  for (const rs of [a.fundamental_rules, a.valuation_rules]) {
+    if (!rs) continue;
+    for (const k of rs.critical_missing ?? []) out.push(`${rs.items.find((i) => i.metric === k)?.label ?? k} (핵심)`);
+    if (rs.subscore === null) for (const i of rs.items) if (i.value === null && !(rs.critical_missing ?? []).includes(i.metric)) out.push(i.label);
+  }
+  for (const c of a.data_quality.checks ?? []) if (c.quality === "MISSING" || c.quality === "STALE" || c.quality === "CONFLICTING") out.push(`${DATA_TYPE_KO[c.data_type] ?? c.data_type} (${c.quality === "STALE" ? "오래됨" : c.quality === "CONFLICTING" ? "충돌" : "없음"})`);
+  for (const v of a.decision.vetoes) if (v !== "INSUFFICIENT_MODEL_COVERAGE") out.push(VETO_KO[v] ?? v);
+  return [...new Set(out)].slice(0, 16);
 }
 
 /** One instance per ticker: every piece of local state (busy flags, notes, pending AI runs) starts fresh
@@ -95,9 +113,11 @@ function StockDetail({ ticker }: { ticker: string }) {
             <Action a={finalAction} status={rec.current_status} quality={rec.data_quality} lg />
             <div className="row">
               <div className="stat" style={{ alignItems: "flex-end" }}><span className="label"><Term k="score">점수</Term></span><span className="value">{num(rec.score, 1)}<span className="caption">/100</span></span></div>
-              <div className="stat" style={{ alignItems: "flex-end" }}><span className="label"><Term k="confidence">신뢰도</Term></span><span className="value">{num(rec.confidence, 0)}%</span></div>
+              <div className="stat" style={{ alignItems: "flex-end" }}><span className="label"><Term k="confidence">분석 신뢰도</Term></span><span className="value">{num(rec.confidence, 0)}<span className="caption">/100 · {confidenceLevel(rec.confidence)}</span></span></div>
             </div>
+            <div className="conf-note" data-testid="confidence-note">분석 신뢰도는 주가 상승 확률이 아니라 데이터 완성도·일치도·모델 합의를 나타냅니다.</div>
             <StatusBadge s={rec.current_status} reason={rec.current_status_reason} />
+            {(rec.version ?? 1) > 1 && <span className="caption" title={`추천 #${rec.supersedes_id}을 AI 위원회가 검토한 새 버전입니다. 원래 추천은 그대로 보존됩니다.`}>AI 위원회 검토본 v{rec.version} · 발행 {stamp(rec.issued_at ?? null)}</span>}
           </div>
         </div>
         <div className="subtle" style={{ marginTop: 14 }}>
@@ -117,6 +137,14 @@ function StockDetail({ ticker }: { ticker: string }) {
       </section>
       {rec.current_status && rec.current_status !== "CURRENT" && <Notice tone="warn">{STATUS_INFO[rec.current_status]?.label}: {rec.current_status_reason}</Notice>}
       {a.mode === "MOCK" && <Notice tone="neg">모의 데이터(MOCK)로 만든 분석입니다. 실제 투자 판단에 사용하지 마세요.</Notice>}
+      {finalAction === "DATA INSUFFICIENT" && (
+        <Card title="지금은 판단하지 않습니다" icon="◌" tone="warn" testId="data-insufficient">
+          <div><b>현재 이 종목은 핵심 데이터가 부족해 신뢰할 만한 매수/매도 판단을 제공하지 않습니다.</b></div>
+          <div className="explain">데이터가 없다는 것은 ‘나쁘다’는 뜻이 아닙니다. 부족한 데이터가 채워지면 다시 분석합니다.</div>
+          <div className="caption" style={{ marginTop: 8 }}>부족한 데이터</div>
+          <div className="missing-list">{missingData(a).map((m) => <span key={m} className="tag warn">{m}</span>)}</div>
+        </Card>
+      )}
 
       {/* ---------------- key cards ---------------- */}
       <div className="g3">
@@ -128,10 +156,11 @@ function StockDetail({ ticker }: { ticker: string }) {
                 <span className="k"><Term k="ideal_entry" /></span><span>{price(e.ideal_entry)}</span>
                 <span className="k"><Term k="max_buy" /></span><span className="warn">{price(e.max_buy)}</span>
                 <span className="k"><Term k="add_zone" /></span><span>{price(e.add_zone_low)} – {price(e.add_zone_high)}</span>
-                <span className="k"><Term k="stop" /></span><span className="neg">{price(e.stop)} ({pct(e.downside_pct)})</span>
+                <span className="k"><Term k="stop">손절 기준가</Term></span><span className="neg">{price(e.stop)} ({pct(e.downside_pct)})</span>
                 <span className="k"><Term k="target" /></span><span className="pos">{price(e.target1)} ({pct(e.upside_t1_pct)}) / {price(e.target2)}</span>
                 <span className="k"><Term k="rr" /></span><span>{num(e.rr_at_current)} <span className="caption">(2 이상이 기준)</span></span>
               </div>
+              <div className="caption" style={{ marginTop: 6 }}><Term k="close_exit">종가 기준 이탈</Term>: 종가가 손절 기준가 아래로 마감하면 매도(보유 중)·매수 중단으로 판단합니다. 장중에만 내려간 경우는 신규 매수만 멈춥니다. <Term k="paper_stop">모의투자</Term>는 장중 손절 주문을 가정합니다.</div>
             </>
           ) : <Empty hint="현재가·가격 이력이 부족하거나, 손절가 < 현재가 < 목표가 순서를 만족하는 계획을 만들 수 없을 때 표시하지 않습니다.">지금은 가격 계획을 제시하지 않습니다.</Empty>}
         </Card>
@@ -154,7 +183,7 @@ function StockDetail({ ticker }: { ticker: string }) {
         </Card>
         <Card title="투자 논리가 깨지는 조건" icon="✕">
           <ul className="list">
-            {e && <li><span className="dot neg">↓</span><span>종가가 <b className="neg">{price(e.stop)}</b> 아래로 마감하면 가격 기준으로 매수 근거가 깨집니다.</span></li>}
+            {e && <li><span className="dot neg">↓</span><span><b>종가 기준 이탈</b>: 종가가 <b className="neg">{price(e.stop)}</b> 아래로 마감하면 가격 기준으로 매수 근거가 깨집니다.</span></li>}
             {a.thesis_conditions.map((c) => <li key={c.condition_id}><span className={`dot ${a.thesis_breaches.some((b) => b.startsWith(c.description)) ? "neg" : "info"}`}>•</span><span>{c.description}</span></li>)}
             {!e && !a.thesis_conditions.length && <li className="caption">등록된 조건이 없습니다.</li>}
           </ul>
@@ -242,10 +271,20 @@ function StockDetail({ ticker }: { ticker: string }) {
           </div>
           <div>
             <h2><Term k="revision">애널리스트 추정치 변화</Term></h2>
-            {a.analyst ? <div className="kv">
-              {[["eps_revision_30d", "EPS 30일 변화"], ["eps_revision_90d", "EPS 90일 변화"], ["revenue_revision_30d", "매출 30일 변화"]].map(([k, l]) => <Fragment key={k}><span className="k">{l}</span><span>{pct(a.analyst?.[k!] as number | null)}</span></Fragment>)}
-              <span className="k">애널리스트 수</span><span>{String(a.analyst["analyst_count"] ?? "N/A")}</span>
-            </div> : <Empty hint="무료 데이터에는 추정치 변화가 없어 이 항목은 점수에서 가산점 없이 보수적으로 처리됩니다.">현재 연결된 데이터 제공자에서 이 종목의 최신 추정치 변화를 받지 못했습니다.</Empty>}
+            {a.analyst ? <>
+              <div className="kv">
+                <span className="k"><Term k="forward_pe">선행 EPS</Term></span><span>{a.analyst["forward_eps"] == null ? "없음" : price(a.analyst["forward_eps"] as number)} <span className="caption">{String(a.analyst["forward_eps_basis"] ?? "")}</span></span>
+                {["7d", "30d", "60d", "90d"].map((w) => {
+                  const st = ((a.analyst?.["revision_status"] ?? {}) as Record<string, string>)[w] ?? "UNKNOWN";
+                  const v = a.analyst?.[`eps_revision_${w}`] as number | null | undefined;
+                  const basis = ((a.analyst?.["revision_basis"] ?? {}) as Record<string, string>)[w];
+                  return <Fragment key={w}><span className="k">EPS {w.replace("d", "일")} 변화</span><span>{st === "READY" ? pct(v ?? null) : st.startsWith("ACCUMULATING") ? <span className="warn">누적 중 {st.split(" ")[1] ?? ""}</span> : <span className="muted">알 수 없음</span>} {basis && basis !== "NONE" && <span className="caption">({basis === "PROVIDER" ? "공급자 제공" : "자체 누적"})</span>}</span></Fragment>;
+                })}
+                <span className="k">애널리스트 수</span><span>{String(a.analyst["analyst_count"] ?? "N/A")}</span>
+                <span className="k">출처</span><span className="caption">{String(a.analyst["source"] ?? "")}</span>
+              </div>
+              {typeof a.analyst["cross_check"] === "string" && !(a.analyst["cross_check"] as string).startsWith("SINGLE") && <div className={`caption ${(a.analyst["cross_check"] as string).startsWith("CONSISTENT") ? "" : "warn"}`}>공급자 비교: {a.analyst["cross_check"] as string}</div>}
+            </> : <Empty hint="무료 추정치는 최종 후보에만 조회합니다(하루 호출 한도). 없는 값은 점수에서 가산점 없이 보수적으로 처리됩니다.">현재 연결된 데이터 제공자에서 이 종목의 최신 추정치를 받지 못했습니다.</Empty>}
           </div>
         </div>
       </More>
@@ -271,13 +310,15 @@ function StockDetail({ ticker }: { ticker: string }) {
       </More>
       <More title="이슈 상세 · 선반영 정도 · 시나리오">
         {a.issue_impacts.length ? <table><thead><tr><th>이슈</th><th>전달 경로</th><th>2~6주 영향</th><th><Term k="priced_in" /></th></tr></thead><tbody>
-          {a.issue_impacts.map((i) => { const sw = i.horizons.find((h) => h.horizon === "SWING"); const pi = a.priced_in[i.issue_id]; return <tr key={i.issue_id}><td>{i.issue_id}</td><td>{i.exposure_path.join(" → ")}</td><td className={(sw?.impact_score ?? 0) > 0 ? "pos" : "neg"}>{num(sw?.impact_score ?? null, 1)}</td><td>{pi?.value ?? "N/A"} <span className="caption">(신뢰 {num(pi?.confidence ?? null)})</span></td></tr>; })}
+          {a.issue_impacts.map((i) => { const sw = i.horizons.find((h) => h.horizon === "SWING"); const pi = a.priced_in[i.issue_id]; return <tr key={i.issue_id}><td>{i.issue_id}</td><td>{i.exposure_path.join(" → ")}</td><td className={(sw?.impact_score ?? 0) > 0 ? "pos" : "neg"}>{num(sw?.impact_score ?? null, 1)}</td><td>{pi?.band ? <>{pi.band} <span className="caption">({pi.model === "FULL" ? "옵션 포함" : "Priced-In Lite"} · 신뢰 {pi.confidence_level === "HIGH" ? "높음" : "보통"})</span></> : <span className="muted">반영 정도 추정 제한</span>}</td></tr>; })}
         </tbody></table> : <Empty>이 종목에 영향을 주는 이슈가 없습니다.</Empty>}
         <h2 style={{ marginTop: 14 }}>시나리오 <span className="caption">(확률은 보정 데이터가 쌓이기 전까지 표시하지 않음)</span></h2>
         <table><thead><tr><th>시나리오</th><th>촉발 요인</th><th>가격 범위</th><th>무효화 조건</th></tr></thead>
           <tbody>{a.scenarios.map((s) => <tr key={s.name}><td>{SCEN_KO[s.name] ?? s.name}</td><td style={{ whiteSpace: "normal" }}>{s.trigger}</td><td>{price(s.price_low)} – {price(s.price_high)}</td><td style={{ whiteSpace: "normal" }}>{s.invalidation}</td></tr>)}</tbody></table>
       </More>
       <More title="근거 원본 · 버전 · 추천 이력" hint="감사·재현용">
+        {(a.fundamental_adjustments ?? []).length > 0 && <div className="explain" style={{ marginBottom: 8 }}>재무 보정(공시 시점 기준 재작성 반영 · 주식분할 기준 통일): {(a.fundamental_adjustments ?? []).join(" · ")}</div>}
+        {a.evidence.filter((x) => x.metric === "earnings.guidance_source").map((x) => <div key={x.evidence_id} className="explain">가이던스 원문(SEC): “{String(x.value)}” {x.source.startsWith("https://www.sec.gov/") && <a href={x.source} target="_blank" rel="noreferrer">원문</a>}</div>)}
         <div className="scroll"><table><thead><tr><th>ID</th><th>항목</th><th>값</th><th>단위</th><th>출처</th><th>시점</th><th>품질</th></tr></thead>
           <tbody>{a.evidence.map((x) => <tr key={x.evidence_id}><td>{x.evidence_id}</td><td>{x.label}</td><td>{typeof x.value === "number" ? num(x.value, 4) : String(x.value)}</td><td>{x.unit ?? ""}</td><td>{x.source}</td><td>{stamp(x.source_ts)}</td><td><Quality q={x.quality} /></td></tr>)}</tbody></table></div>
         <div className="caption">{Object.entries(d.data.versions).map(([k, v]) => `${k}: ${v ?? "N/A"}`).join(" · ")}</div>
