@@ -185,11 +185,18 @@ def verify(svc: Any, tickers: tuple[str, ...] = TICKERS, record: bool = True) ->
         if sec is None:
             raise ProviderUnavailable("sec-8k: SEC 공급자 미설정")
         rel = sec.earnings_releases("NVDA", date.fromordinal(obs_day.toordinal() - 200))  # a real request, never "checked today"
-        items = [i for r in rel for i in extract(html_to_text(r["text"])) if i.status == "EXTRACTED"]
+        every = [i for r in rel for i in extract(html_to_text(r["text"]))]
+        items = [i for i in every if i.status == "EXTRACTED"]
         if not rel:
             raise ProviderError("sec-8k: 최근 200일 실적 보도자료(8-K Item 2.02) 없음")
         if not items:
-            raise ProviderError(f"sec-8k: 보도자료 {len(rel)}건에서 가이던스 수치를 하나도 추출하지 못함")
+            # diagnostics: which documents, how long, what the extractor saw — so a real-data miss can be fixed
+            from collections import Counter
+
+            counts = Counter(i.status for i in every)
+            seen = " | ".join(f"[{i.status} {i.metric}] {i.sentence[:140]}" for i in every[:3])
+            docs = "; ".join(f"{r['url'].rsplit('/', 1)[-1]} ({len(r['text'])} chars)" for r in rel)
+            raise ProviderError(f"sec-8k: 보도자료 {len(rel)}건에서 가이던스 수치를 하나도 추출하지 못함 — 문서: {docs}; 문장 상태: {dict(counts) or '후보 문장 없음'}; 예: {seen or '-'}")
         last = max(rel, key=lambda r: r["filed_at"])
         return [{"ticker": "NVDA", "value": len(items), "provider": "sec-8k", "timestamp": last["filed_at"].isoformat(), "source": last["url"], "positive": True}]
 

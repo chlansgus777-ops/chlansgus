@@ -178,12 +178,12 @@ class SecEdgarProvider:
         self._require()
         cik = self.cik_for(ticker)
         facts = self._data.get_json(f"/api/xbrl/companyfacts/CIK{cik:010d}.json")
-        return parse_company_facts(facts, ticker)
+        return _guarded(parse_company_facts, facts, ticker)
 
     def get_annual_ifrs(self, ticker: str) -> list[Any]:
         self._require()
         cik = self.cik_for(ticker)
-        return parse_ifrs_annual(self._data.get_json(f"/api/xbrl/companyfacts/CIK{cik:010d}.json"), ticker)
+        return _guarded(parse_ifrs_annual, self._data.get_json(f"/api/xbrl/companyfacts/CIK{cik:010d}.json"), ticker)
 
     def get_extras(self, ticker: str) -> CompanyProfileExtras:
         raise NotSupported("SEC XBRL은 업종 KPI(CET1, 점유율 등)를 표준 형태로 제공하지 않음")
@@ -397,6 +397,17 @@ def _ytd_to_quarters(items: list[dict[str, Any]]) -> dict[date, list[tuple[float
     return dict(out)
 
 
+def _guarded(parse: Any, facts: Any, ticker: str) -> Any:
+    """One company's unusual filing must never stop a whole sync or scan: a parser crash becomes a per-ticker
+    ProviderDataError (recorded in the ingestion manifest as FAILED) instead of an unhandled exception."""
+    try:
+        return parse(facts, ticker)
+    except (NotSupported, ProviderDataError):
+        raise
+    except (ValueError, KeyError, TypeError, AttributeError, IndexError, ZeroDivisionError) as e:
+        raise ProviderDataError(f"{ticker}: XBRL 해석 실패 ({type(e).__name__}: {e})") from e
+
+
 def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFinancials]:
     gaap = facts.get("facts", {}).get("us-gaap")
     if not gaap:
@@ -495,7 +506,9 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
         put(end, "total_debt", *first)
         # restated components (a later 10-Q/10-K comparative) → later vintages of the total, same components
         for F in sorted({fd for vs in comp_vintages[end].values() for fd, _ in vs if fd > first[1]}):
-            at_f = {k: (max((o for o in vs if o[0] <= F), key=lambda o: o[0])[1], F) for k, vs in comp_vintages[end].items() if k in comps}
+            # only components already filed on F (a component first filed later is unknown on F)
+            at_f = {k: (max(known, key=lambda o: o[0])[1], F) for k, vs in comp_vintages[end].items()
+                    if k in comps and (known := [o for o in vs if o[0] <= F])}
             again = debt_total(at_f)
             if again is not None:
                 put(end, "total_debt", again[0], F)
