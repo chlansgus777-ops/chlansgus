@@ -9,20 +9,39 @@ OptionsProvider, ShortInterestProvider, InsiderProvider, InstitutionalProvider, 
 All return canonical domain types; failures raise `ProviderUnavailable`, `RateLimited`,
 `ProviderDataError` or `NotSupported`.
 
-## LIVE implementations
+## LIVE implementations (free, official sources only)
 
-| Kind | Provider | Key / requirement | What is implemented | Notes |
+Status words: **IMPLEMENTED** (code path + fixture/contract tests), **LIVE VERIFIED** (only after
+`marketlens live-verify` succeeded against the real API — not yet run: this development environment has
+no network access to the providers and no keys), **PARTIAL**, **ACCUMULATING** (own history growing),
+**UNAVAILABLE**. No scraping, no unofficial endpoints, no multiple free accounts, no rate-limit evasion.
+
+| Data | Provider (free) | Key | Status | Notes |
 |---|---|---|---|---|
-| universe | SEC EDGAR `company_tickers_exchange.json` | `SEC_USER_AGENT` (contact e-mail) | NASDAQ / NYSE / NYSE American listings, CIK map | Sector, industry and market cap are **not** in this file → Unknown/None (a sector/market-cap source is a remaining gap; stage 1 excludes unknown market caps). |
-| fundamentals | SEC EDGAR XBRL companyfacts | `SEC_USER_AGENT` | Revenue, GP, OI, NI, diluted EPS, OCF, CapEx, SBC, D&A, cash, debt, equity, diluted shares, inventory | Point-in-time: first filing wins (restatements do not overwrite), `filed_date` kept; YTD cash-flow → quarterly; Q4 = FY − Q1..Q3. IFRS/20-F filers → NotSupported (ADR data needs another FundamentalProvider). |
-| price (quotes) | Finnhub `/quote` | `FINNHUB_API_KEY` | Real-time/last price with timestamp; session derived from timestamp | Cross-checked against a secondary price source when configured; disagreement > 2% → CONFLICTING. |
-| price (bars) | Polygon aggregates / grouped daily | `POLYGON_API_KEY` | Per-ticker daily bars; grouped-daily for whole-market pulls | Free tier is rate-limited (~5 req/min); a bar-sync job using grouped daily is recommended for large universes. |
-| news | Finnhub company-news | `FINNHUB_API_KEY` | Headlines/summaries per ticker | Bodies are untrusted text. |
-| calendar | Finnhub earnings calendar | `FINNHUB_API_KEY` | Earnings dates | Macro release dates (FOMC/CPI/…) are not yet sourced live. |
-| analyst | Finnhub `/stock/earnings` | `FINNHUB_API_KEY` | EPS actual vs estimate history | **Estimate revisions (7/30/90D), revenue consensus, guidance and valuation history require a licensed estimates feed — not configured → MISSING.** |
-| macro | FRED | `FRED_API_KEY` | Fed funds, 2Y/10Y/30Y, CPI/Core CPI YoY, PCE/Core PCE YoY, payrolls change, unemployment, GDP, broad USD index, WTI, Brent, VIX, HY OAS, S&P 500, NASDAQ Composite | "." values are skipped, not interpolated; staleness per series frequency. Gold, NDX, RUT, SOX and breadth are not available from FRED → MISSING in LIVE. |
-| options | — | licensed provider needed | — | `UnavailableProvider` → MISSING |
-| short interest / insider / institutional | — | licensed provider / SEC Form 4 & 13F parsers (planned) | — | `UnavailableProvider` → MISSING |
+| Universe | SEC `company_tickers_exchange.json` | `SEC_USER_AGENT` | IMPLEMENTED | NASDAQ/NYSE/NYSE American; delisting inferred from disappearance (kept in history). No ETF flag / share-class master yet. |
+| Sector/industry | SEC submissions (SIC) | `SEC_USER_AGENT` | PARTIAL | SIC → sector/industry mapping; foreign-issuer flag from 20-F/6-K forms. |
+| Market cap | SEC dei shares × stored close, split-normalised | `SEC_USER_AGENT` | PARTIAL | No ADR ratio → ADR market cap not reliable. |
+| Quotes | Finnhub `/quote` | `FINNHUB_API_KEY` | IMPLEMENTED | Marked DELAYED (no real-time guarantee on free plan). No bid/ask, no dedicated extended-hours feed. |
+| Daily bars | Polygon grouped daily (bulk) | `POLYGON_API_KEY` | IMPLEMENTED | ~5 req/min free: one request per day for the whole market; days without rows tracked; sync reports SYNC_COMPLETE / SYNC_PARTIAL. |
+| Splits | Polygon `/v3/reference/splits` (bulk) | `POLYGON_API_KEY` | IMPLEMENTED | Append-only `corporate_actions`; stored pre-split bars rescaled once; EPS/shares normalised to the price basis. |
+| Fundamentals (US GAAP) | SEC XBRL companyfacts | `SEC_USER_AGENT` | IMPLEMENTED | First-reported values kept; later different values stored as revisions; analysis uses LATEST_KNOWN_AS_OF (restatement visible only after it was filed). Cash-flow restatements: first reported only. |
+| Fundamentals (20-F / IFRS) | SEC XBRL `ifrs-full` | `SEC_USER_AGENT` | PARTIAL | ANNUAL_ONLY, reporting currency; QUARTERLY_DATA_UNAVAILABLE; per-share valuation not computed without a verified ADR ratio. |
+| Bank KPIs | SEC XBRL us-gaap | `SEC_USER_AGENT` | PARTIAL | Loans, deposits, provisions, net charge-offs, goodwill/intangibles → loan/deposit growth, provision/loans, charge-off rate, ROTCE, ROE, P/TBV. CET1 only if tagged; NIM not computed (FFIEC not connected). |
+| Consensus (next report) | Finnhub earnings calendar | `FINNHUB_API_KEY` | IMPLEMENTED + ACCUMULATING | One snapshot per day for every upcoming report (append-only `estimate_snapshots`) → MarketLens's own 7/30/60/90-day revisions; before enough history: "ACCUMULATING n/90". |
+| Consensus FY1/FY2, revisions | Alpha Vantage `EARNINGS_ESTIMATES` | `ALPHAVANTAGE_API_KEY` | IMPLEMENTED (not live verified) | ~25 requests/day: final candidates only, cached 3 days, daily budget; provider-reported 7/30/60/90-day consensus, analyst count, high/low. Field contract checked on every response. |
+| Provider disagreement | Finnhub vs Alpha Vantage | — | IMPLEMENTED | Same quarter only; CONSISTENT / DATA_CONFLICT / SEVERE_DATA_CONFLICT; never averaged. |
+| Guidance | SEC 8-K Item 2.02, Exhibit 99 | `SEC_USER_AGENT` | PARTIAL | Deterministic extraction with the source sentence and URL; GUIDANCE_UNCLEAR / NO_GUIDANCE; compared only with a consensus snapshot taken before the release. No LLM extraction. |
+| Earnings history | Finnhub calendar (actual vs estimate) | `FINNHUB_API_KEY` | IMPLEMENTED | Real report dates. |
+| News | Finnhub market + company news | `FINNHUB_API_KEY` | IMPLEMENTED | Entity discovery without tags (names + `config/entity_aliases.toml`), negation/denial discount. |
+| Macro | FRED / ALFRED | `FRED_API_KEY` | IMPLEMENTED | Vintage requests; SOX, breadth, Fed futures not available. |
+| Short interest | FINRA consolidated short interest | optional `FINRA_API_KEY/SECRET` (OAuth) | IMPLEMENTED (coverage not live verified) | OAuth client credentials → Bearer. Whether exchange-listed symbols are covered must be confirmed by live-verify. |
+| Insider | SEC Form 4 | `SEC_USER_AGENT` | PARTIAL | Recent filings only. |
+| Options (IV, expected move) | — | — | UNAVAILABLE | No free official source. Priced-In is "Lite" (price/volume/news/revisions). |
+| Institutional (13F) | — | — | UNAVAILABLE | |
+
+Run `MARKETLENS_MODE=LIVE marketlens live-verify` once keys and network access exist. It checks every
+category for NVDA, AAPL, MSFT, JPM, XOM, AMZN, TSM (value + provider + timestamp + source) and only then
+removes the "not live verified" marker in the System Status matrix.
 
 LLM providers: Anthropic (official SDK, structured outputs), OpenAI-compatible HTTP (OpenAI, Gemini's
 OpenAI endpoint, local servers such as Ollama/LM Studio). See AI_COMMITTEE.md.

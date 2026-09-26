@@ -75,17 +75,22 @@ Mock과 Live Provider는 한 체인에 섞일 수 없습니다(`ModeMixError`).
 | `FINNHUB_API_KEY` | 실시간 시세, 기업 뉴스, 실적 일정, EPS 실적 vs 추정 이력 | 시세/뉴스/일정 MISSING |
 | `POLYGON_API_KEY` | 일봉 (grouped daily로 전체 시장) | 가격 이력 MISSING |
 | `FRED_API_KEY` | 금리·물가·고용·GDP·달러·유가·VIX·HY 스프레드·지수 | 거시 MISSING |
+| `ALPHAVANTAGE_API_KEY` | 선행 EPS(FY1/FY2)·추정치 변화(7/30/60/90일)·애널리스트 수 — 무료 하루 약 25회, 최종 후보만 | 선행 EPS 없음 → 업종 밸류에이션 판단 불가(DATA INSUFFICIENT) |
+| `FINRA_API_KEY` / `FINRA_API_SECRET` (선택) | 공매도 잔고(OAuth) | 공개 접근(한도 낮음) |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` + `LLM_PROVIDER` | AI 위원회 | **AI COMMITTEE UNAVAILABLE** (결정론 기능은 정상) |
 
 키는 코드에 하드코딩하지 않습니다. `.env` 또는 OS 키체인(`pip install marketlens[keyring]`, 서비스명 `marketlens`)을 사용하며 로그에서 자동 마스킹됩니다.
 
-## 지원 데이터 / 미지원 데이터 (LIVE 기준, 자세히: `docs/DATA_SOURCES.md`)
-- **지원**: 미국 상장 유니버스(SEC), 분기 재무(SEC XBRL, point-in-time filed_date), 실시간 시세(Finnhub), 일봉(Polygon),
-  뉴스(Finnhub), 실적 일정·EPS 서프라이즈 이력(Finnhub), 거시(FRED), 모든 파생 계산(기술지표, 밸류에이션, R/R 등).
-- **라이선스 필요 → 현재 MISSING**: EPS/매출 추정치 리비전(7/30/90D), 매출 컨센서스·가이던스, 과거 밸류에이션 시계열,
-  옵션(IV/기대변동폭/OI), 공매도, 내부자, 기관 보유, 섹터 KPI(CET1, NIM, RPO, 점유율, FFO 등), 유니버스의 섹터/시가총액,
-  SOX·NDX·RUT·금·시장 폭, FOMC/CPI 등 거시 일정.
-- ADR/외국 발행사(IFRS·20-F)는 SEC 분기 데이터가 부족할 수 있어 `FundamentalProvider` 추상화로 보조 공급자 연결이 필요합니다.
+## 데이터 상태 (LIVE, 무료 공식 공급원만 — 자세히: `docs/DATA_SOURCES.md`)
+- **구현됨**: 유니버스·재무(SEC XBRL, 재작성은 공시 시점 기준 반영), 일봉·주식분할(Polygon 일괄), 시세·뉴스·실적 일정(Finnhub),
+  거시(FRED/ALFRED), 가이던스(SEC 8-K 보도자료 규칙 추출), 은행 지표(SEC XBRL), 컨센서스 스냅샷(Finnhub 매일 저장),
+  선행 EPS·추정치 변화(Alpha Vantage, 최종 후보만).
+- **부분**: 해외 20-F 기업(연간 IFRS만, ADR 비율 없음), CET1(태그된 경우만), 공매도(대상 범위 실검증 필요), 내부자(최근 공시).
+- **누적 중**: 자체 추정치 변화 이력 — 저장 시작 이전은 "알 수 없음", 90일 전까지는 "누적 중 n/90일".
+- **제공 안 함**: 옵션(IV·예상 변동폭) → Priced-In은 Lite, 기관 보유(13F), NIM, 실시간 호가·장외시간 전용 시세.
+- **실검증 전**: 이 개발 환경은 공급자 네트워크가 막혀 있어 실제 API 호출 검증을 하지 못했습니다.
+  키와 네트워크가 있으면 `MARKETLENS_MODE=LIVE marketlens live-verify` 를 실행하세요(성공한 항목만 ‘검증됨’으로 표시).
+- **추천 준비도**: 화면 상단과 시스템 상태에 FULL / LIMITED / PAPER ONLY / NOT READY 로 표시됩니다. 무료 데이터만으로는 LIMITED가 정상입니다.
 
 ## 동작 방식
 
@@ -94,7 +99,8 @@ Mock과 Live Provider는 한 체인에 섞일 수 없습니다(`ModeMixError`).
 2. **Cheap quant** — 매출/EPS 성장, EPS 리비전, 상대강도, 거래량 추세, 52주 고점 거리, Forward PE, FCF yield, 유동성, 변동성의 횡단면 퍼센타일 (펀더멘털 우선, 기술적 요소는 소비중) → ~400
 3. **Fundamental deep** — 섹터 모델 + 밸류에이션 + 실적/리비전 → ~150
 4. **Event / Issue** — 뉴스 → 이슈 → 익스포저 그래프(최대 2-hop) → 시간축별 영향 → Priced-in, 옵션·수급 → ~60
-5. **Final ranking** — 전체 결정론 분석 + 결정 → ~40, 그중 **상위 `AI_COMMITTEE_TOP_N`(20)만 AI 위원회**
+5. **Final ranking** — 전체 결정론 분석 + 결정 → ~40. AI 위원회: 상위 5개는 전체 토론(14회 호출), 6~20위는 가벼운 검토(5회),
+   중요한 변화가 없으면 직전 결과 재사용(호출 0회). 스캐너 데이터가 준비되지 않으면(SCANNER_NOT_READY) 빈 목록 대신 준비 진행률을 표시합니다.
 
 ### 결정론적 점수 (0–100, `docs/SCORING_MODEL.md`)
 Fundamental 25 · Valuation 15 · Earnings & Revision 15 · Catalyst 10 · Macro 10 · Technical 10 · Risk 10 · Entry R/R 15
@@ -154,14 +160,16 @@ cd backend && python -m pytest tests/e2e   # 빌드된 UI를 실제 백엔드(MO
 의도한 모델 변경 시: `config/scoring_model.toml`의 `scoring_model_version`을 올리고 `UPDATE_BASELINE=1 python -m pytest tests/regression`.
 
 ## Limitations (현재 한계)
-- LIVE에서 추정치 리비전·컨센서스·가이던스·옵션·공매도·내부자·기관·섹터 KPI·밸류에이션 이력은 라이선스 공급자 연결 전까지 MISSING →
-  해당 점수 요소가 보수적(0.35)으로 처리되어 LIVE 점수는 MOCK보다 낮게/불완전하게 나올 수 있습니다.
-- SEC 유니버스 파일에는 섹터/시총이 없어 LIVE Stage 1은 시총을 제공하는 공급자 연결이 필요합니다(없으면 제외됨).
-- 무료 Polygon 요율로는 수천 종목 일봉 초기 적재에 시간이 걸립니다(grouped daily 일일 동기화 권장).
-- 이슈 구조화는 규칙 기반(키워드 분류)이며, 익스포저 그래프는 큐레이션된 소수 관계 + 섹터 기본 민감도입니다.
-- Priced-in·시나리오는 추정치이며 시나리오 확률은 보정 전까지 N/A입니다.
-- Tauri 설치 파일은 Windows 빌드 환경(Actions `windows-latest` 또는 로컬 Windows)에서만 생성됩니다.
-- 투자 판단의 최종 책임은 사용자에게 있습니다.
+- **실제 API 검증 전**: 무료 공급자 연결 코드는 공식 응답 형태의 고정 데이터(fixture)로만 검증했습니다. `live-verify` 실행 전에는 "실검증 전"으로 표시됩니다.
+- 선행 EPS·추정치 변화는 Alpha Vantage 무료 한도(하루 약 25회) 때문에 최종 후보 약 20종목만 받습니다. 나머지 종목은 선행 밸류에이션이 없어
+  업종 모델이 판단하지 못하면 DATA INSUFFICIENT(매수·매도 모두 안 함)가 됩니다.
+- 자체 추정치 변화 이력은 저장을 시작한 날부터 쌓입니다. 90일 변화는 90일이 지나야 계산됩니다(과거를 만들어내지 않음).
+- 옵션·기관 보유·NIM·실시간 호가/장외시간 시세는 무료 공식 공급원이 없어 제공하지 않습니다. 해외 20-F 기업은 연간 자료만 있고 ADR 비율이 없어 주당 밸류에이션을 하지 않습니다.
+- 과거 상장 종목 전체 이력(생존 편향 없는 과거 유니버스)은 저장을 시작한 이후부터만 정확합니다.
+- 이슈 구조화는 규칙 기반(이름·별칭 인식, 부정문 처리 포함)이며 LLM 검증은 연결하지 않았습니다. 익스포저 그래프는 큐레이션된 소수 관계입니다.
+- 모의투자는 일봉 기준이라 장중 순서를 알 수 없습니다(같은 날 목표·손절 동시 도달 시 손절 우선, 화면에 명시).
+- 성과 보정(Calibration)은 자동 승격하지 않습니다(`auto_promote = false`). 조건을 모두 통과해도 사람이 승인해야 운영 모델이 바뀝니다.
+- 투자 판단의 최종 책임은 사용자에게 있습니다. MarketLens는 주문을 넣지 않습니다.
 
 ## PanWatch
 첨부된 PanWatch(MIT)는 소스 수준에서 분석했지만 코드는 복사하지 않았고 런타임 의존성도 없습니다. 흡수한 장점/버린 단점: `docs/PANWATCH_ANALYSIS.md`.
