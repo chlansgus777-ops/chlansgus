@@ -194,7 +194,7 @@ def decide(card: ScoreCard, plan: EntryPlan | None, ctx: DecisionContext, th: De
     if ctx.prior_stop_breached and raw in BULLISH_ACTIONS | {Action.HOLD}:
         raw = Action.SELL if ctx.held else Action.WAIT
         reasons.append("종가 기준 이탈: 직전 추천의 손절 기준가 아래로 마감 → " + ("매도" if ctx.held else "대기"))
-    elif ctx.intraday_stop_breach and raw in BULLISH_ACTIONS:
+    elif ctx.intraday_stop_breach and raw in BULLISH_ACTIONS | {Action.HOLD}:
         raw = Action.HOLD if ctx.held else Action.WAIT
         reasons.append("장중 손절 기준가 하회(종가 확인 전) → 신규 매수 중단" + (", 보유분은 종가 기준으로 판단" if ctx.held else ""))
     action, size_limit, notes = _apply_vetoes(raw, vetoes, ctx)
