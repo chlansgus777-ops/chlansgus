@@ -15,6 +15,23 @@ from marketlens.domain.market_calendar import is_trading_day  # noqa: E402
 NOW = datetime(2026, 9, 25, 15, 0, tzinfo=timezone.utc)  # Friday 11:00 ET, regular session
 
 
+@pytest.fixture(autouse=True)
+def _no_real_provider_calls(monkeypatch):
+    """No test may reach a real provider (evaluation 6: a LIVE test built without a mock transport could call the
+    real FINRA API from a CI runner with network). Only local servers (the E2E app) are allowed; a real request
+    fails as a network error, exactly like an offline machine."""
+    import httpx
+
+    real = httpx.HTTPTransport.handle_request
+
+    def guarded(self, request):  # noqa: ANN001, ANN202
+        if request.url.host not in ("127.0.0.1", "localhost", "::1", "testserver"):
+            raise httpx.ConnectError(f"tests never call real providers ({request.url.host})", request=request)
+        return real(self, request)
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", guarded)
+
+
 @pytest.fixture(scope="session")
 def cfg():
     return load_model_config()

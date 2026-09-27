@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import replace
 from datetime import date, datetime, timedelta
-from typing import Any, Iterable, Mapping
+from typing import AbstractSet, Any, Iterable, Mapping
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -40,7 +40,7 @@ class MarketStore:
         self.mode = mode
 
     # ------------------------------------------------------------------ universe
-    def sync_universe(self, current: Iterable[Security], today: date) -> dict[str, int]:
+    def sync_universe(self, current: Iterable[Security], today: date, unloaded: AbstractSet[date] = frozenset()) -> dict[str, int]:
         """Upsert today's listings; names that disappeared are marked delisted (kept in history).
 
         Security master (the SEC CIK is the identity, the ticker only a label). Two passes, so the result does
@@ -60,6 +60,7 @@ class MarketStore:
         with self.sf() as s:
             existing = {r.ticker: r for r in s.scalars(select(SecurityRow).where(SecurityRow.mode == self.mode))}
             reset: set[str] = set()
+            deferred: set[str] = set()
             # pass 1 — a ticker that changed hands, or a ticker that comes back after its listing interval ended
             for sec in cur:
                 row = existing.get(sec.ticker)
@@ -68,9 +69,14 @@ class MarketStore:
                 if row.cik is not None and sec.cik is not None and row.cik != sec.cik:
                     arch = self._archive_reused(s, row, sec, today, existing, "REUSE")
                     n["reused"] += 1
-                elif not row.active and "~" not in row.ticker and (
-                        row.successor is not None  # renamed away earlier, now back (AAA → BBB → AAA)
-                        or (row.delisted_at is not None and self._really_delisted(s, row.ticker, row.delisted_at, today))):
+                elif not row.active and "~" not in row.ticker and (row.successor is not None or row.delisted_at is not None):
+                    # renamed away earlier and now back (AAA → BBB → AAA), or back after a recorded delisting
+                    gone = True if row.successor is not None else self._really_delisted(s, row.ticker, row.delisted_at, today, unloaded)
+                    if gone is None:
+                        deferred.add(sec.ticker)  # not enough market data for the absence yet: decided at a later sync
+                        continue
+                    if not gone:
+                        continue  # a data gap: pass 2 withdraws the delisting
                     # the same company, a new listing interval: the old interval (with its delisting or rename)
                     # is kept as an archive row
                     arch = self._archive_reused(s, row, sec, today, existing, "RETURN")
@@ -88,6 +94,8 @@ class MarketStore:
             for sec in cur:
                 seen.add(sec.ticker)
                 row = existing.get(sec.ticker)
+                if sec.ticker in deferred:
+                    continue  # stays as it is until the evidence is there
                 if row is None or sec.ticker in reset:
                     src, ambiguous = self._link_source(existing, sec, listed_now, pending_by_cik.get(sec.cik or -1, []), used, today)
                     if src is not None:
@@ -151,19 +159,24 @@ class MarketStore:
         return n
 
     @staticmethod
-    def _really_delisted(s: Session, ticker: str, absent_since: date, today: date) -> bool:
+    def _really_delisted(s: Session, ticker: str, absent_since: date, today: date, unloaded: AbstractSet[date] = frozenset()) -> bool | None:
         """Was the name really off the market, or only missing from the SEC file? Decided by evidence, not by
         the time between two syncs (a desktop app may not sync for weeks):
-        - it kept trading: grouped-daily bars exist for (almost) every session of the absence → a data gap;
-        - no bars during the absence and more than ``RELIST_GAP_DAYS`` passed → a real delisting (relist);
-        - otherwise (a short absence, no evidence either way) → a data gap."""
+        - it kept trading: grouped-daily bars exist for (almost) every session of the absence → a data gap (False);
+        - no bars during the absence and more than ``RELIST_GAP_DAYS`` passed → a real delisting (True);
+        - otherwise (a short absence, no evidence either way) → a data gap (False).
+        Sessions the sync has not loaded yet (``unloaded``: after a long break the backfill loads the newest days
+        first) are not evidence either way. If almost none of the absence is loaded, the question is left open
+        (None) and asked again at a later sync (evaluation 6, K5)."""
         from marketlens.domain.market_calendar import is_trading_day
 
         sessions, d = [], absent_since
         while d < today:
-            if is_trading_day(d):
+            if is_trading_day(d) and d not in unloaded:
                 sessions.append(d)
             d += timedelta(days=1)
+        if unloaded and (today - absent_since).days > RELIST_GAP_DAYS and len(sessions) < 5:
+            return None
         if sessions:
             have = {r for (r,) in s.execute(select(PriceBarRow.day).where(PriceBarRow.ticker == ticker, PriceBarRow.day >= sessions[0], PriceBarRow.day <= sessions[-1]))}
             missing = sum(1 for x in sessions if x not in have)

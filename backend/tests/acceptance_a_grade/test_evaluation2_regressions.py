@@ -268,8 +268,18 @@ def test_derived_q4_and_total_debt_follow_restatements():
     qs = parse_company_facts(facts, "T")
     q4_2025 = next(q for q in as_of(qs, date(2025, 6, 1)) if q.period_end == date(2024, 12, 31))
     q4_2026 = next(q for q in as_of(qs, date(2026, 6, 1)) if q.period_end == date(2024, 12, 31))
-    assert q4_2025.revenue == 200.0 and q4_2026.revenue == 160.0
+    # CHANGED in round 6 (evaluation 6, K2), disclosed: this test used to expect 160 (= 460 − 300). A restated
+    # annual total whose quarters were not restated cannot say which quarter changed; putting the whole difference
+    # into Q4 is a guess that made a recast prior-year Q4 15 instead of 95. The derived Q4 now keeps its value
+    # until the annual total and a quarter are restated in the same filing (tested below).
+    assert q4_2025.revenue == 200.0 and q4_2026.revenue == 200.0
     assert q4_2025.total_debt == 40.0 and q4_2026.total_debt == 30.0
+
+    # annual total and Q1 restated together (a 10-K/A with restated quarterly data): the derived Q4 follows
+    rev2 = rev[:-1] + [_cf(460.0, "2024-12-31", "2024-01-01", "2026-02-15", "10-K/A"), _cf(80.0, "2024-03-31", "2024-01-01", "2026-02-15", "10-K/A")]
+    qs2 = parse_company_facts({"facts": {"us-gaap": {"Revenues": {"units": {"USD": rev2}}}}}, "T")
+    q4_later = next(q for q in as_of(qs2, date(2026, 6, 1)) if q.period_end == date(2024, 12, 31))
+    assert q4_later.revenue == 180.0  # 460 − (80 + 100 + 100)
 
 
 def test_two_measures_listed_respectively_are_not_a_range():

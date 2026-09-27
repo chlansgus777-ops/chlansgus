@@ -168,7 +168,8 @@ def verify(svc: Any, tickers: tuple[str, ...] = TICKERS, record: bool = True) ->
         return out
 
     check("earnings", earnings)
-    check("news", lambda: [fetched(data.news(now.replace(hour=0), [t]), t, lambda n: len(n), lambda n: n[0].published_at.isoformat() if n else "", positive=True) for t in tickers[:1]])
+    # the last 24 hours, not "since midnight UTC" (at 00:04 UTC that window is four minutes long — run 36281358983)
+    check("news", lambda: [fetched(data.news(now - timedelta(hours=24), [t]), t, lambda n: len(n), lambda n: n[0].published_at.isoformat() if n else "", positive=True) for t in tickers[:1]])
 
     def macro() -> list[dict[str, Any]]:
         snap, missing = data.macro_snapshot(now)

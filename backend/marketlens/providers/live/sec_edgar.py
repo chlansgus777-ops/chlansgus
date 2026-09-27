@@ -126,23 +126,31 @@ class SecEdgarProvider:
 
     def earnings_release_times(self, ticker: str, since: date) -> list[datetime]:
         """Acceptance times (UTC) of the 8-K filings with Item 2.02 (results of operations) since ``since``,
-        oldest first — the real announcement times of the earnings releases (one submissions request)."""
+        oldest first — the candidate announcement times of the earnings releases (one submissions request)."""
+        return self.filing_times(ticker, since)[0]
+
+    def filing_times(self, ticker: str, since: date) -> tuple[list[datetime], list[datetime]]:
+        """(Item 2.02 8-K acceptance times, 10-Q/10-K acceptance times) since ``since``, oldest first, from one
+        submissions request. The periodic reports bound which Item 2.02 is a period's earnings release."""
         self._require()
         cik = self.cik_for(ticker)
         recent = self._data.get_json(f"/submissions/CIK{cik:010d}.json").get("filings", {}).get("recent", {})
-        out: list[datetime] = []
+        releases: list[datetime] = []
+        periodic: list[datetime] = []
         for i, form in enumerate(recent.get("form", [])):
-            if form != "8-K" or "2.02" not in str((recent.get("items") or [""] * (i + 1))[i]):
+            is_release = form == "8-K" and "2.02" in str((recent.get("items") or [""] * (i + 1))[i])
+            if not is_release and form not in ("10-Q", "10-K"):
                 continue
             try:
                 fdate = date.fromisoformat(recent["filingDate"][i])
                 if fdate < since:
                     break  # newest first
                 acc = (recent.get("acceptanceDateTime") or [None] * (i + 1))[i]
-                out.append(datetime.fromisoformat(str(acc).replace("Z", "+00:00")) if acc else datetime.combine(fdate, datetime.min.time(), tzinfo=timezone.utc))
+                t = datetime.fromisoformat(str(acc).replace("Z", "+00:00")) if acc else datetime.combine(fdate, datetime.min.time(), tzinfo=timezone.utc)
             except (KeyError, IndexError, ValueError):
                 continue
-        return sorted(out)
+            (releases if is_release else periodic).append(t)
+        return sorted(releases), sorted(periodic)
 
     def earnings_releases(self, ticker: str, since: date, max_n: int = 2) -> list[dict[str, Any]]:
         """Recent 8-K filings with Item 2.02 (results of operations) and their Exhibit 99 press release.
@@ -392,16 +400,18 @@ def parse_form4(xml: str) -> list[tuple[str, str, float, str]]:
 
 
 def _pick_concept(gaap: dict[str, Any], names: tuple[str, ...], unit_pref: tuple[str, ...]) -> list[dict[str, Any]]:
-    """The facts of one line item, choosing among alternative concepts PER PERIOD (preference order wins).
+    """The facts of one line item, choosing among alternative concepts PER PERIOD.
 
     Companies switch concepts over the years (e.g. ``Revenues`` → ``RevenueFromContractWithCustomer…`` after
     ASC 606, or back). Taking the first concept that exists at all would leave every period it does not cover
     empty — on real data the latest quarter's revenue of a company whose preferred concept only holds old
-    periods. A period (start, end) is taken from the first concept that reports it; one period is never mixed
-    from two concepts, so its vintages stay comparable."""
-    out: list[dict[str, Any]] = []
-    covered: set[tuple[Any, Any]] = set()
-    for n in names:
+    periods. A period (start, end) takes the concept that reported it FIRST (ties: preference order), so a later
+    filing that tags the period's comparative under another concept never replaces what was public before
+    (evaluation 6, K3: a 2025 comparative under the new concept erased Q1 2024 from the view as of 2025-03-01).
+    One period is never mixed from two concepts, so its vintages stay comparable. Only 10-Q/10-K facts count
+    (the caller reads nothing else)."""
+    by_key: dict[tuple[Any, Any], tuple[str, int, list[dict[str, Any]]]] = {}
+    for rank, n in enumerate(names):
         c = gaap.get(n)
         if not c:
             continue
@@ -409,11 +419,16 @@ def _pick_concept(gaap: dict[str, Any], names: tuple[str, ...], unit_pref: tuple
         u = next((u for u in unit_pref if u in units), None)
         if u is None:
             continue
-        mine = [it for it in units[u] if (it.get("start"), it.get("end")) not in covered]
-        # only 10-Q/10-K facts claim a period (a value seen only in an 8-K or S-4 is dropped later anyway)
-        covered |= {(it.get("start"), it.get("end")) for it in mine if it.get("form") in QUARTERLY_FORMS}
-        out += mine
-    return out
+        groups: dict[tuple[Any, Any], list[dict[str, Any]]] = defaultdict(list)
+        for it in units[u]:
+            if it.get("form") in QUARTERLY_FORMS:
+                groups[(it.get("start"), it.get("end"))].append(it)
+        for key, its in groups.items():
+            first = min(str(it.get("filed", "")) for it in its)
+            cur = by_key.get(key)
+            if cur is None or (first, rank) < (cur[0], cur[1]):
+                by_key[key] = (first, rank, its)
+    return [it for _, _, its in by_key.values() for it in its]
 
 
 QUARTERLY_FORMS = ("10-Q", "10-K", "10-Q/A", "10-K/A")
@@ -504,22 +519,70 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
         # amendments (10-Q/A, 10-K/A) are later vintages of the same period: recorded as revisions, never overwriting
         return sorted((it for it in items if it.get("form") in QUARTERLY_FORMS), key=lambda it: it.get("filed", ""))
 
-    def q4_from_annual(field_name: str, annual: Mapping[date, tuple[date, float, date]], annual_vintages: Mapping[date, list[tuple[date, float]]]) -> None:
-        """Q4 is only reported inside the annual 10-K: Q4 = FY − (Q1 + Q2 + Q3); published at the 10-K date."""
+    # 10-K filings that RECAST a prior year (discontinued operations, a changed segment or accounting basis):
+    # the annual amounts of an earlier year change in that filing while the quarterly figures stay on the old
+    # basis until next year's 10-Qs. FY − (Q1 + Q2 + Q3) then mixes two bases (evaluation 6, K2: a sold segment
+    # made Q4 revenue 20 instead of 80). Per-share values and share counts are excluded (a stock split restates
+    # them legitimately); changes under 1 % are ordinary reclassifications.
+    recast_on: set[date] = set()
+    basis_changed: dict[date, date] = {}  # Q4 period end → 10-K date, where Q4 was left empty (recast)
+    for field_name in ("revenue", "gross_profit", "operating_income", "net_income"):
+        first_val: dict[tuple[str, str], tuple[str, float]] = {}
+        changed: list[tuple[str, str, str, bool]] = []  # (start, end, filed, annual?) of values that changed
+        for item in earliest(_pick_concept(gaap, CONCEPTS[field_name], ("USD",))):
+            if not item.get("start"):
+                continue
+            days = (date.fromisoformat(item["end"]) - date.fromisoformat(item["start"])).days
+            if QUARTER_MAX_DAYS < days < ANNUAL_MIN_DAYS:
+                continue
+            pk = (str(item["start"]), str(item["end"]))
+            if pk not in first_val:
+                first_val[pk] = (str(item["filed"]), float(item["val"]))
+                continue
+            v0 = first_val[pk][1]
+            if item["filed"] > first_val[pk][0] and abs(float(item["val"]) - v0) > 0.01 * max(1.0, abs(v0)):
+                changed.append((item["start"], item["end"], item["filed"], days >= ANNUAL_MIN_DAYS))
+        for st_s, end_s, f_s, is_annual in changed:
+            # a restatement that also restates the year's quarters in the same filing keeps one basis
+            if is_annual and not any(not a and f == f_s and st_s <= q_st and q_end <= end_s for q_st, q_end, f, a in changed):
+                recast_on.add(date.fromisoformat(f_s))
+
+    def q4_from_annual(field_name: str, annual: Mapping[date, tuple[date, float, date]], annual_vintages: Mapping[date, list[tuple[date, float]]],
+                       basis: Any = None) -> None:
+        """Q4 is only reported inside the annual 10-K: Q4 = FY − (Q1 + Q2 + Q3); published at the 10-K date.
+
+        Only from values on one basis:
+        - Q1–Q3 as known on the 10-K date and already filed by then (a comparative restated before the 10-K
+          counts; a value filed after it never does);
+        - not when that 10-K recast a prior year (``recast_on``): Q4 stays empty rather than mixing bases;
+        - ``basis(end, quarter_end, F)`` converts a quarter to the annual basis (a split inside the year for
+          per-share values) and returns None when that is not possible → no Q4.
+        Later vintages: only when the annual total AND a quarter were restated in the same filing. A restated
+        annual total alone cannot say which quarter changed; putting the whole difference into Q4 would be a
+        guess (it made a recast prior-year Q4 15 instead of 95)."""
         for end, (st, fy_val, fdate) in annual.items():
+            if fdate in recast_on and field_name not in per_period.get(end, {}):
+                basis_changed.setdefault(end, fdate)  # the quarter exists, its values are unknown (not "no quarter")
+                continue
             if field_name in per_period.get(end, {}):
                 continue
-            qs = [e for e in per_period if st < e < end and field_name in per_period[e]]
-            if len(qs) == 3:
-                # Q1–Q3 as known on the 10-K date (a comparative restated before the 10-K counts)
-                put(end, field_name, fy_val - sum(known_at(e, field_name, fdate) for e in qs), fdate)
-                # later vintages: a restated annual total or a restated Q1–Q3 changes the derived Q4
-                later = sorted({fd for fd, _ in annual_vintages[end]} | {fd for e in qs for fd, _ in revisions[e].get(field_name, [])})
-                for F in (x for x in later if x > fdate):
-                    fy_known = max((o for o in annual_vintages[end] if o[0] <= F), key=lambda o: o[0])[1]
-                    put(end, field_name, fy_known - sum(known_at(e, field_name, F) for e in qs), F)
+            qs = [e for e in per_period if st < e < end and field_name in per_period[e] and field_filed[e][field_name] <= fdate]
+            if len(qs) != 3:
+                continue
+            factors = [basis(end, e, fdate) if basis is not None else 1.0 for e in qs]
+            if any(f is None for f in factors):
+                continue
+            put(end, field_name, fy_val - sum(known_at(e, field_name, fdate) * f for e, f in zip(qs, factors)), fdate)
+            fy_changes = {fd for fd, _ in annual_vintages[end] if fd > fdate}
+            q_changes = {fd for e in qs for fd, _ in revisions[e].get(field_name, []) if fd > fdate}
+            for F in sorted(fy_changes & q_changes):
+                if F in recast_on:
+                    continue
+                fy_known = max((o for o in annual_vintages[end] if o[0] <= F), key=lambda o: o[0])[1]
+                put(end, field_name, fy_known - sum(known_at(e, field_name, F) * f for e, f in zip(qs, factors)), F)
 
     eps_annual: tuple[dict[date, tuple[date, float, date]], dict[date, list[tuple[date, float]]]] = ({}, {})
+    shares_annual: dict[date, tuple[date, float, date]] = {}
     for field_name, concepts in CONCEPTS.items():
         unit_pref = ("USD/shares",) if field_name == "eps_diluted" else ("shares",) if field_name == "shares_diluted" else ("USD",)
         items = _pick_concept(gaap, concepts, unit_pref)
@@ -545,16 +608,41 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
             put(end, field_name, float(item["val"]), date.fromisoformat(item["filed"]))
         if field_name == "eps_diluted":
             eps_annual = (annual, annual_vintages)  # Q4 EPS is decided once the diluted share counts are known
-        elif field_name in FLOW_FIELDS and field_name != "shares_diluted":
+        elif field_name == "shares_diluted":
+            shares_annual = annual
+        elif field_name in FLOW_FIELDS:
             q4_from_annual(field_name, annual, annual_vintages)
+
+    def share_basis(end: date, q_end: date, F: date) -> float | None:
+        """Factor that puts a quarter's EPS on the annual share basis, from the weighted diluted share counts:
+        1 when they agree (±20 %); 1/n or n for a split / reverse split inside the year (the 10-K reports on the
+        post-split basis, a 10-Q filed before the split on the old one — NVIDIA fiscal 2025: 5.98 → 0.598);
+        None when the counts are missing or the ratio is not a clean split ratio."""
+        fy = shares_annual.get(end)
+        if fy is None or "shares_diluted" not in per_period.get(q_end, {}) or field_filed[q_end]["shares_diluted"] > F:
+            return None
+        q_sh = known_at(q_end, "shares_diluted", F)
+        if q_sh <= 0 or fy[1] <= 0:
+            return None
+        r = fy[1] / q_sh
+        if 1 / 1.2 <= r <= 1.2:
+            return 1.0
+        n = round(r)
+        if n >= 2 and abs(r - n) / n <= 0.06:
+            return 1.0 / n  # the quarter was reported before an n-for-1 split: its EPS is n times the annual basis
+        m = round(1 / r)
+        if m >= 2 and abs(1 / r - m) / m <= 0.06:
+            return float(m)  # before a 1-for-m reverse split
+        return None
 
     # Q4 diluted EPS. Preferred: Q4 net income / Q4 diluted shares (below, when the 10-K tags the Q4 share
     # count). Most 10-Ks tag only the full-year weighted shares, which would leave Q4 EPS — and with it TTM EPS
     # and P/E — empty for most companies (seen on the real SEC data for NVDA, AAPL and MSFT). Then
-    # Q4 EPS = FY EPS − (Q1 + Q2 + Q3 EPS), the usual approximation: exact when the share count is stable,
-    # a few cents off when it changed a lot during the year (EPS is not additive over periods).
+    # Q4 EPS = FY EPS − (Q1 + Q2 + Q3 EPS) with every quarter on the annual share basis: exact when the share
+    # count is stable, an approximation when it moved (EPS is not additive), empty when the basis is unclear.
     q4_from_annual("eps_diluted", {end: v for end, v in eps_annual[0].items()
-                                   if not ("net_income" in per_period.get(end, {}) and "shares_diluted" in per_period.get(end, {}))}, eps_annual[1])
+                                   if not ("net_income" in per_period.get(end, {}) and "shares_diluted" in per_period.get(end, {}))},
+                   eps_annual[1], basis=share_basis)
 
     # total debt from its components (instant values), first filing per period
     comp_vals: dict[date, dict[str, tuple[float, date]]] = defaultdict(dict)
@@ -630,15 +718,15 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
             put(period, "shares_outstanding", float(it["val"]), fd)
 
     out: list[QuarterlyFinancials] = []
-    for end in sorted(per_period):
+    for end in sorted(set(per_period) | set(basis_changed)):
         vals = dict(per_period[end])
         ff = dict(field_filed[end])
-        if "revenue" not in vals and "net_income" not in vals:
+        if "revenue" not in vals and "net_income" not in vals and end not in basis_changed:
             continue
         if "eps_diluted" not in vals and vals.get("net_income") is not None and vals.get("shares_diluted"):
             vals["eps_diluted"] = vals["net_income"] / vals["shares_diluted"]  # derived Q4 EPS
             ff["eps_diluted"] = max(ff.get("net_income", date.min), ff.get("shares_diluted", date.min))
-        filed = min(ff.values())
+        filed = min(ff.values()) if ff else basis_changed[end]
         fields = {k: vals.get(k) for k in list(CONCEPTS) + ["total_debt", "shares_outstanding"]}
         rev = {k: tuple(v) for k, v in revisions.get(end, {}).items() if v}
         out.append(QuarterlyFinancials(period_end=end, filed_date=filed, fiscal_label=end.isoformat(), source="sec-edgar", field_filed=ff, revisions=rev,

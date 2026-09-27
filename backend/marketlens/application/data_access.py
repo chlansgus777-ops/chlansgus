@@ -278,7 +278,11 @@ class DataAccess:
         fh = next((p for p in self.reg.chain("analyst").providers if hasattr(p, "get_earnings_surprises") and getattr(p, "configured", False)), None)
         sec = next((p for p in self.reg.chain("fundamental").providers if hasattr(p, "earnings_release_times") and getattr(p, "configured", True)), None)
         if fh is None or sec is None:
-            return self._get("analyst", "analyst", "get_earnings_history", t, t)
+            f = self._get("analyst", "analyst", "get_earnings_history", t, t)
+            if fh is not None and sec is None and (f.error or not f.value):
+                # the free path needs the SEC release times: say so, instead of a calendar "0 rows" (evaluation 6)
+                return Fetched(None, None, f"sec-8k: SEC_USER_AGENT 미설정 → 실적 발표일(8-K)을 확인할 수 없음; {f.error or '실적 캘린더 빈 응답'}")
+            return f
         hit = self.cache.get("analyst.earnings_paired", t, self.ttl.get("analyst", timedelta(minutes=5)))
         if hit is not None:
             return hit
@@ -286,8 +290,11 @@ class DataAccess:
 
         try:
             rows = fh.get_earnings_surprises(t)
-            times = sec.earnings_release_times(t, rows[0]["period"])
-            reps = pair_with_releases(rows, times, f"{fh.name}+sec-8k")
+            if hasattr(sec, "filing_times"):
+                times, periodic = sec.filing_times(t, rows[0]["period"])
+            else:
+                times, periodic = sec.earnings_release_times(t, rows[0]["period"]), []
+            reps = pair_with_releases(rows, times, f"{fh.name}+sec-8k", periodic)
             why = "" if reps else f"{t}: 실적 {len(rows)}건 중 {RELEASE_MAX_DAYS}일 안의 8-K 발표(Item 2.02)와 짝지어진 것 없음"
         except ProviderError as e:
             reps, why = [], str(e)

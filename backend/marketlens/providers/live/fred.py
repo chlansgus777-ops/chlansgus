@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Sequence
+from zoneinfo import ZoneInfo
 
 from marketlens.domain.enums import DataMode, DataQuality
 from marketlens.domain.facts import Fact
@@ -45,6 +46,9 @@ FRED_MAP: dict[str, tuple[str, str]] = {
 DAILY = {FED_FUNDS, US2Y, US10Y, US30Y, USD_INDEX, WTI, BRENT, VIX, HY_SPREAD, SPX, NASDAQ_COMP, USDKRW}
 
 
+FRED_TZ = ZoneInfo("America/Chicago")  # St. Louis Fed
+
+
 class FredMacroProvider:
     mode = DataMode.LIVE
 
@@ -74,7 +78,10 @@ class FredMacroProvider:
     def get_series(self, series_ids: Sequence[str], as_of: datetime) -> dict[str, MacroSeries]:
         if not self.configured:
             raise ProviderUnavailable("FRED_API_KEY 미설정")
-        end = as_of.date()
+        # FRED's "today" is its own (US Central) calendar date: a vintage after it is refused with 400 — found by
+        # live-verify at 00:04 UTC, when the UTC date was already a day ahead (run 36281358983)
+        fred_today = as_of.astimezone(FRED_TZ).date()
+        end = min(as_of.date(), fred_today)
         out: dict[str, MacroSeries] = {}
         for sid in series_ids:
             if sid not in FRED_MAP:
