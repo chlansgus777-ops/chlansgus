@@ -85,7 +85,7 @@ class MarketSync:
         if grouped is not None:
             empty_s = self.store.get_setting("grouped_empty_days") or ""
             empty = {date.fromisoformat(x) for x in empty_s.split(",") if x}
-            have = self.store.stored_days(grouped.name) | empty
+            have = self.store.grouped_days() | empty  # market-wide sessions only: one ticker's own history is not one
             wanted = []
             window = 0
             d = today
@@ -98,6 +98,7 @@ class MarketSync:
             rep.bar_days_missing = len(wanted)
             unloaded = set(wanted)  # sessions without market data yet: no evidence for the universe step (2a)
             done = window - len(wanted)
+            stored_now: set[date] = set()
             _p("bars", done, window, "")
             for d in wanted[:max_bar_calls]:  # newest first; older history fills in over later runs
                 try:
@@ -115,12 +116,18 @@ class MarketSync:
                 else:
                     empty.add(d)
                     rep.bar_days_empty += 1
+                stored_now.add(d)
                 done += 1
                 _p("bars", done, window, d.isoformat())
             if rep.bar_days_empty:
                 self.store.set_setting("grouped_empty_days", ",".join(sorted(x.isoformat() for x in empty)))
             if rep.bar_days_loaded + rep.bar_days_empty + rep.bar_days_pending >= rep.bar_days_missing and not rep.errors:
                 self.store.set_setting("bars_backfill_complete", (today - timedelta(days=backfill_days)).isoformat())
+            elif self.store.get_setting("bars_backfill_complete") and any(d < today - RECENT_EMPTY and d not in stored_now for d in wanted):
+                # older sessions are still missing (the window only LOOKED loaded when one ticker's own history counted):
+                # the per-ticker reads must not be told the market history is complete. A recent session that failed or
+                # is not published yet does not clear it.
+                self.store.set_setting("bars_backfill_complete", "")
         # 2a) universe — after the day's bars are stored (a name missing from the SEC file while its bars keep
         #     arriving is a data gap, not a delisting) and before splits (rename links decide which bars a split rescales)
         try:

@@ -239,3 +239,76 @@ def test_the_preparation_reports_its_progress_while_it_runs(tmp_path, monkeypatc
     assert job["status"] == "DONE" and fin["percent"] == 100, job
     b = [(d, t) for s, d, t in seen if s == "bars"]
     assert all(d1 <= d2 for (d1, _), (d2, _) in zip(b, b[1:])) and all(d <= t for d, t in b)  # never backwards, never above the total
+
+
+# ---------------------------------------------------------------- owner report (3): "남은 가격 거래일 0" while no stock has history
+def test_one_tickers_own_history_does_not_make_a_market_day_look_loaded(tmp_path):
+    """The owner's store: the dashboard's SPY benchmark came from per-ticker Polygon aggregates, written back with the
+    source 'polygon' for a year of sessions. The sync counted a session as loaded when ANY 'polygon' bar existed, so it
+    fetched nothing ('남은 가격 거래일 0', 1 round) and no stock had history (price history 0%, market cap 0%)."""
+    from marketlens.domain.market import Bar
+    from marketlens.domain.market_calendar import last_completed_session
+    from tests.live_fixtures import trading_days_back
+
+    svc = _live(tmp_path)
+    days = trading_days_back(last_completed_session(NOW), 250)
+    svc.store.save_bars("SPY", [Bar(d, 600, 601, 599, 600, 1e7) for d in days], "polygon")  # exactly what DataAccess.bars writes back
+    svc.start_sync()
+    _join()
+    job = svc.sync_status()["job"]
+    r = svc.readiness()
+    assert r["progress"]["price_history"] >= 0.9 and r["progress"]["market_cap"] >= 0.8, (job, r["scanner_reasons"])
+    assert r["scanner_status"] == "SCANNER_READY" and job["status"] == "DONE", (job, r["scanner_reasons"])
+
+
+def test_a_market_day_is_counted_only_from_the_market_wide_download(tmp_path):
+    """Store rule behind the sync, the readiness day count and the backfill flag: the sessions of the market-wide
+    grouped download — recorded when it stores them, or (a store from before the record) a session holding a whole
+    market of rows — never a session holding only a few tickers' own histories."""
+    from datetime import date
+
+    from marketlens.domain.market import Bar
+    from marketlens.infrastructure.db.models import PriceBarRow
+
+    svc = _live(tmp_path)
+    st = svc.store
+    d1, d2, d3 = date(2026, 9, 21), date(2026, 9, 22), date(2026, 9, 23)
+    st.save_bars("SPY", [Bar(d1, 1, 1, 1, 1, 1)], "polygon")  # one ticker's own history
+    with st.sf() as s:  # a session loaded market-wide by an older version (no record of it)
+        s.add_all([PriceBarRow(ticker=f"T{i}", day=d2, source="polygon", open=1, high=1, low=1, close=1, volume=1, retrieved_at=NOW) for i in range(1500)])
+        s.commit()
+    assert st.grouped_days() == {d2}
+    st.save_grouped(d3, {"AAA": Bar(d3, 1, 1, 1, 1, 1)}, "polygon")  # the grouped download records its session
+    assert st.grouped_days() == {d2, d3}
+
+
+def test_the_backfill_flag_follows_the_market_history(tmp_path, monkeypatch):
+    """'bars_backfill_complete' tells per-ticker reads the stored market history is authoritative. Set while the
+    window only looked loaded, it is cleared once older sessions are found missing; a failure on a new recent session
+    keeps it."""
+    from datetime import timedelta
+
+    from marketlens.application.sync import MarketSync, _find
+    from marketlens.domain.market import Bar
+    from marketlens.domain.market_calendar import last_completed_session
+    from marketlens.providers.contracts import ProviderUnavailable
+    from tests.live_fixtures import trading_days_back
+
+    svc = _live(tmp_path)
+    days = trading_days_back(last_completed_session(NOW), 250)
+    svc.store.save_bars("SPY", [Bar(d, 600, 601, 599, 600, 1e7) for d in days], "polygon")
+    svc.store.set_setting("bars_backfill_complete", "2025-11-29")  # what the old count had recorded
+    svc.sync_market(max_bar_calls=5)
+    assert not svc.store.get_setting("bars_backfill_complete")
+    svc.start_sync()
+    _join()
+    flag = svc.store.get_setting("bars_backfill_complete")
+    assert flag
+    grouped = _find(svc.registry, "price", "get_grouped_daily")
+
+    def down(_d):  # noqa: ANN001, ANN202
+        raise ProviderUnavailable("server error 503")
+
+    monkeypatch.setattr(grouped, "get_grouped_daily", down)
+    MarketSync(svc.registry, svc.store).run(NOW + timedelta(days=3))  # Monday: Friday's session is new and fails
+    assert svc.store.get_setting("bars_backfill_complete") == flag

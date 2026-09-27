@@ -34,6 +34,10 @@ def _now() -> datetime:
 RELIST_GAP_DAYS = 7  # absent from the SEC file for up to a week and back: a data gap, not a delisting
 
 
+GROUPED_DAYS_KEY = "grouped_loaded_days"  # app setting: ISO dates the market-wide grouped download stored
+GROUPED_MIN_ROWS = 1000  # a US market session holds ~10,000 tickers; per-ticker write-backs hold a handful
+
+
 class MarketStore:
     def __init__(self, sf: sessionmaker[Session], mode: str) -> None:
         self.sf = sf
@@ -494,17 +498,31 @@ class MarketStore:
         return n
 
     def save_grouped(self, day: date, bars: Mapping[str, Bar], source: str) -> int:
+        """Store one session of the market-wide grouped download and record the session as loaded (grouped_days)."""
         with self.sf() as s:
             have = {t for (t,) in s.execute(select(PriceBarRow.ticker).where(PriceBarRow.day == day, PriceBarRow.source == source))}
             rows = [PriceBarRow(ticker=t, day=day, source=source, open=b.open, high=b.high, low=b.low, close=b.close, volume=b.volume, retrieved_at=_now())
                     for t, b in bars.items() if t not in have]
             s.add_all(rows)
             s.commit()
-            return len(rows)
+        if bars:
+            days = self.grouped_days() | {day}
+            self.set_setting(GROUPED_DAYS_KEY, ",".join(sorted(d.isoformat() for d in days)))
+        return len(rows)
 
-    def stored_days(self, source: str) -> set[date]:
-        with self.sf() as s:
-            return {d for (d,) in s.execute(select(PriceBarRow.day).where(PriceBarRow.source == source).distinct())}
+    def grouped_days(self) -> set[date]:
+        """THE sessions the market-wide grouped download stored — what the sync treats as loaded and the readiness
+        counts as market days. A session holding only a few tickers' own histories (a stock page, the dashboard's
+        SPY benchmark, written back by DataAccess.bars) is not one: counting those made every session of the last
+        year look loaded, so the market was never downloaded (owner report). A store from before this record counts
+        the sessions that hold a whole market of rows."""
+        raw = self.get_setting(GROUPED_DAYS_KEY)
+        if raw is None:
+            with self.sf() as s:
+                found = {d for d, n in s.execute(select(PriceBarRow.day, func.count()).group_by(PriceBarRow.day)) if n >= GROUPED_MIN_ROWS}
+            self.set_setting(GROUPED_DAYS_KEY, ",".join(sorted(d.isoformat() for d in found)))
+            return found
+        return {date.fromisoformat(x) for x in raw.split(",") if x}
 
     def bars(self, ticker: str, start: date, end: date) -> list[Bar]:
         """Daily bars of one company, across ticker renames (security master)."""
@@ -545,10 +563,11 @@ class MarketStore:
             counts = dict(s.execute(select(PriceBarRow.ticker, func.count(func.distinct(PriceBarRow.day)))
                                     .where(PriceBarRow.day >= today - timedelta(days=400), PriceBarRow.day <= today).group_by(PriceBarRow.ticker)).all())
             fund = {t for (t,) in s.execute(select(FundamentalVintageRow.ticker).distinct())}
-            days = s.execute(select(func.count(func.distinct(PriceBarRow.day))).where(PriceBarRow.day >= today - timedelta(days=400))).scalar() or 0
+            days = 0  # market-wide sessions only (grouped_days), counted below outside this session
             est_first = s.execute(select(func.min(EstimateSnapshotRow.observed_on)).where(EstimateSnapshotRow.provider == "finnhub")).scalar()
             man = dict(s.execute(select(IngestionManifestRow.ticker, IngestionManifestRow.status)
                                  .where(IngestionManifestRow.mode == self.mode, IngestionManifestRow.dataset == "fundamentals")).all())
+        days = sum(1 for d in self.grouped_days() if today - timedelta(days=400) <= d <= today)
         listed = [a for a in active if a[3] != "OTC"]
         big = [a for a in listed if a[1] is not None and a[1] >= min_market_cap]
         return {
