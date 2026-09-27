@@ -338,6 +338,10 @@ def position_plan(action: str, size_cap: str | None, nav: float | None, price: f
     weight = {"FULL": limits.full_position, "HALF": limits.half_position, "SMALL": limits.small_position}[size]
     notes: list[str] = []
     room = limits.max_single_name * nav - max(0.0, current_value)
+    if room <= 0:  # already at / above the single-name limit: say so, never a negative dollar amount (8th evaluation I6)
+        held = max(0.0, current_value) / nav
+        return PositionPlan(size, weight, 0.0, 0, price, None, None,
+                            (f"이미 한 종목 한도 {limits.max_single_name:.0%}에 도달(현재 {held:.0%}) — 더 사지 않음",))
     target = min(weight * nav, room)
     if target < weight * nav:
         notes.append(f"한 종목 한도 {limits.max_single_name:.0%}까지 남은 금액으로 줄임")

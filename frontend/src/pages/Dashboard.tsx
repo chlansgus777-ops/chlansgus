@@ -131,7 +131,7 @@ export default function Dashboard() {
         </Card>
         <Card title="지금 가장 유망한 종목" icon="◎" right={<Link to="/opportunities">전체 보기 →</Link>} className="span2">
           {shown.length ? <div className="g2">{shown.map((r) => <OppCard key={r.id} r={r} />)}</div>
-            : x.readiness?.scanner_status === "SCANNER_NOT_READY" ? <NotReady r={x.readiness} />
+            : x.readiness?.scanner_status === "SCANNER_NOT_READY" ? <NotReady r={x.readiness} onChange={d.reload} />
             : <Empty hint="오른쪽 위 ‘전체 시장 스캔’을 누르면 약 1~3분 안에 후보가 만들어집니다.">아직 스캔 결과가 없습니다.</Empty>}
           {shown.length > 0 && !bullish.length && <div className="explain">지금은 매수 조건을 충족한 종목이 없어 점수 상위 종목을 보여줍니다.</div>}
         </Card>

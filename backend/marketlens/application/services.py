@@ -28,7 +28,8 @@ from marketlens.application.theses import ThesisBook
 from marketlens.config import AGENT_PROMPT_VERSION, CONFIG_DIR, SCHEMA_VERSION, ModelConfig, Settings, code_version, load_model_config
 from marketlens.domain.enums import BULLISH_ACTIONS, Action, DataMode
 from marketlens.domain.freshness import PlanCheck, RecommendationFreshness, recommendation_freshness
-from marketlens.domain.market_calendar import UTC
+from marketlens.domain.corporate_actions import split_factor
+from marketlens.domain.market_calendar import UTC, to_ny
 from marketlens.domain.paper import position_notional
 from marketlens.domain.portfolio import Holding, Portfolio
 from marketlens.domain.what_changed import AnalysisDigest
@@ -145,6 +146,7 @@ class MarketLensService:
         self.store = MarketStore(session_factory, self.registry.mode.value) if store_on else None
         self.data = DataAccess(self.registry, self.base_cfg.cache_ttl, store=self.store, now_fn=self.now)
         self._lock = threading.Lock()
+        self._sync_lock = threading.Lock()
         self.last_scan_context: ScanContext | None = None
         self._check_db_environment()
 
@@ -210,14 +212,27 @@ class MarketLensService:
         names = sorted({p.name for ch in self.registry.chains.values() for p in ch.providers})
         return f"{self.mode.value}:{__version__}:" + ",".join(names)[:100]
 
+    def levels_now(self, row: RecommendationRow) -> dict[str, Any]:
+        """A stored recommendation's price levels on today's share basis: a split executed after the analysis
+        divides them by its ratio, as the paper trades and the next analysis do (8th evaluation I1) — the current
+        quote is on the new basis."""
+        entry = (row.result or {}).get("entry") or {}
+        f = split_factor(self.data.splits(row.ticker), to_ny(row.as_of).date(), to_ny(self.now()).date())
+
+        def adj(v: Any) -> float | None:
+            return None if v is None else float(v) / f
+
+        return {"split_factor": f, "price": adj(row.price), "ideal_entry": adj(entry.get("ideal_entry")), "max_buy": adj(entry.get("max_buy")),
+                "stop": adj(entry.get("stop")), "target1": adj(entry.get("target1"))}
+
     def recommendation_status(self, row: RecommendationRow, fetch_quote: bool = False) -> RecommendationFreshness:
         """Is this stored recommendation still current NOW (not just: was it fresh when it was made)?
 
         Same-session recommendations are re-checked against a current quote (max buy, stop, reward/risk,
         move since analysis). Listings only use an already cached quote; the stock page may fetch one."""
-        entry = (row.result or {}).get("entry") or {}
+        lv = self.levels_now(row)
         bullish = row.final_action in {a.value for a in BULLISH_ACTIONS}
-        plan = PlanCheck(row.price, entry.get("max_buy"), entry.get("stop"), entry.get("target1"), self.base_cfg.decision.min_rr, bullish)
+        plan = PlanCheck(lv["price"], lv["max_buy"], lv["stop"], lv["target1"], self.base_cfg.decision.min_rr, bullish)
         f = self.data.peek_quote(row.ticker)
         if f is None and fetch_quote:
             f = self.data.quote(row.ticker)
@@ -469,6 +484,60 @@ class MarketLensService:
         out = {"status": "SYNC_COMPLETE" if rep.complete else "SYNC_PARTIAL", "bar_days_remaining": max(0, rep.bar_days_missing - rep.bar_days_loaded - rep.bar_days_empty), **rep.__dict__}
         self.store.set_setting("last_sync", json.dumps({"status": out["status"], "at": self.now().isoformat(), "bar_days_remaining": out["bar_days_remaining"], "errors": rep.errors[:5]}))
         return out
+
+    def start_sync(self, max_rounds: int = 20) -> dict[str, Any]:
+        """LIVE: prepare the local store in the background, one bounded :meth:`sync_market` round after another,
+        until the price history window is complete and no fundamentals are waiting — or a round makes no
+        progress. Every round keeps each provider's own rate limit; nothing is fetched twice."""
+        if self.store is None:
+            return {"started": False, "reason": "MOCK 모드는 데이터 준비가 필요 없음"}
+        if not self._sync_lock.acquire(blocking=False):
+            return {"started": False, "reason": "이미 데이터를 준비하는 중", **self.sync_status()}
+        self._sync_state({"status": "RUNNING", "round": 0, "started_at": self.now().isoformat()})
+        threading.Thread(target=self._sync_rounds, args=(max_rounds,), name="marketlens-sync", daemon=True).start()
+        return {"started": True, **self.sync_status()}
+
+    def _sync_state(self, state: dict[str, Any]) -> None:
+        with self.sf() as s:
+            repo.set_setting(s, "sync_job", json.dumps(state))
+            s.commit()
+
+    def _sync_rounds(self, max_rounds: int) -> None:
+        """Runs holding ``_sync_lock`` (taken by :meth:`start_sync`)."""
+        state: dict[str, Any] = {"status": "RUNNING", "round": 0, "started_at": self.now().isoformat()}
+        try:
+            for i in range(max_rounds):
+                out = self.sync_market()
+                progressed = bool(out["bar_days_loaded"] or out["bar_days_empty"] or out["fundamentals_ingested"] or out["profiles_updated"])
+                state.update(round=i + 1, bar_days_remaining=out["bar_days_remaining"], fundamentals_pending=out["fundamentals_pending"],
+                             errors=out["errors"][:3], updated_at=self.now().isoformat())
+                # profiles have no pending count: a round that still added some may have left more (bounded per round)
+                if out["status"] == "SYNC_COMPLETE" and not out["fundamentals_pending"] and not out["profiles_updated"]:
+                    state["status"] = "DONE"
+                    break
+                if not progressed:  # the next round would repeat the same calls: stop and say why
+                    state["status"] = "FAILED" if out["errors"] else "DONE"
+                    break
+                self._sync_state(state)
+            else:
+                state["status"] = "PAUSED"  # round cap reached; pressing the button again continues where it stopped
+        except Exception as e:  # the job must end with a visible state; the error is logged with its traceback
+            log.exception("background sync failed")
+            state.update(status="FAILED", errors=[f"{type(e).__name__}: {e}"])
+        finally:
+            state["finished_at"] = self.now().isoformat()
+            self._sync_state(state)
+            self._sync_lock.release()
+
+    def sync_status(self) -> dict[str, Any]:
+        """The background data preparation's progress. RUNNING while no job holds the lock = the app was closed mid-way."""
+        if self.store is None:
+            return {"job": None}
+        with self.sf() as s:
+            job = json.loads(repo.get_setting(s, "sync_job", "") or "null")
+        if job and job.get("status") == "RUNNING" and not self._sync_lock.locked():
+            job["status"] = "INTERRUPTED"
+        return {"job": job}
 
     def readiness(self) -> dict[str, Any]:
         """Scanner readiness + recommendation readiness gate + per-category data status (see readiness.py)."""

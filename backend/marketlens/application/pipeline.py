@@ -19,7 +19,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from marketlens.application.codec import encode
 from marketlens.application.evidence import Evidence, EvidenceBuilder
@@ -34,7 +34,7 @@ from marketlens.domain.facts import DataQualityReport, Fact, build_quality_repor
 from marketlens.domain.freshness import FreshnessCheck, check_age, missing as fresh_missing, rules_from_config
 from marketlens.domain.annual import AnnualFinancials, annual_features
 from marketlens.domain.banks import bank_features
-from marketlens.domain.corporate_actions import SplitEvent, normalize_quarters
+from marketlens.domain.corporate_actions import SplitEvent, normalize_quarters, split_factor
 from marketlens.domain.fundamentals import FundamentalMetrics, QuarterlyFinancials, as_of, compute_metrics
 from marketlens.domain.indicators import TechnicalSnapshot, aligned_closes, compute_technicals
 from marketlens.domain.issues import CompanyIssueImpact, Issue, aggregate_issue_score, compute_issue_impacts
@@ -226,6 +226,22 @@ def watched_stop(prev: AnalysisDigest | None, held: bool) -> float | None:
     if held and prev.action in (Action.HOLD.value, Action.REDUCE.value):
         return prev.guard_stop
     return None
+
+
+def on_current_share_basis(prev: AnalysisDigest | None, splits: Sequence[SplitEvent], as_of: datetime) -> AnalysisDigest | None:
+    """The previous analysis' price levels (price, stop, carried stop, max buy, ATR) on the share basis of today's
+    split-adjusted bars. 8th evaluation I1: a stop set before a 10-for-1 split was compared with post-split closes,
+    so every split of a held name read as a close below the stop → SELL."""
+    if prev is None or not splits:
+        return prev
+    f = split_factor(splits, to_ny(prev.as_of).date(), to_ny(as_of).date())
+    if f == 1.0:
+        return prev
+
+    def adj(v: float | None) -> float | None:
+        return None if v is None else v / f
+
+    return replace(prev, price=adj(prev.price), stop=adj(prev.stop), guard_stop=adj(prev.guard_stop), max_buy=adj(prev.max_buy), atr=adj(prev.atr))
 
 
 def carried_guard_stop(action: Action, plan_stop: float | None, watch: float | None, held: bool) -> float | None:
@@ -593,7 +609,7 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
     # ---------------------------------------------------------------- what changed + decision
     guidance_sig = hashlib.sha1(json.dumps(encode(last_er.guidance), sort_keys=True).encode()).hexdigest()[:10] if last_er is not None else None
     major = tuple(sorted(i.issue_id for i in inp.issues if i.importance >= cfg.major_issue_importance and i.issue_id in priced))
-    prev = inp.previous
+    prev = on_current_share_basis(inp.previous, inp.splits, inp.as_of)
     digest = AnalysisDigest(
         ticker=t,
         as_of=inp.as_of,

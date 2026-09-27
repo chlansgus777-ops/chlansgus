@@ -21,7 +21,7 @@ export default function Opportunities() {
     <div className="grid">
       <div className="page-head"><div><h1>기회 찾기</h1><div className="t-sub">미국 전체 상장 종목을 단계별로 걸러 남은 후보입니다. 표 머리글에 마우스를 올리면 각 항목 설명이 나옵니다. 종목을 누르면 자세한 판단과 매수 계획을 볼 수 있습니다.</div></div></div>
       <ReadinessBanner r={o.data.readiness} />
-      {o.data.readiness?.scanner_status === "SCANNER_NOT_READY" && !o.data.rows.length && <NotReady r={o.data.readiness} />}
+      {o.data.readiness?.scanner_status === "SCANNER_NOT_READY" && !o.data.rows.length && <NotReady r={o.data.readiness} onChange={o.reload} />}
       <Card right={<span className="muted">{o.data.scan ? `스캔 #${o.data.scan.id} · ${stamp(o.data.scan.as_of)} · ${o.data.scan.scoring_model_version}` : "스캔 없음"}</span>}>
         <div className="row" style={{ marginBottom: 10 }}>
           <input placeholder="종목 / 회사명 / 섹터 검색" value={filter} onChange={(e) => setFilter(e.target.value)} />

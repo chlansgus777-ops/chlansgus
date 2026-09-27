@@ -195,6 +195,34 @@ _EPS_HEADS = ("earnings per share", "earnings per diluted share", "earnings", "e
 _TO_LEVEL = re.compile(r"(?<![a-z])(improve|increase|decline|decrease|grow|rise|fall|narrow|reach|total)s?\s+to\s*(approximately\s+|about\s+|between\s+|a range of\s+)?$")
 
 
+# the word right before the metric may qualify it as the company's own measure; any other word names a part of it
+# ("data center revenue", "services gross margin", "interest income per share") — 8th evaluation I2
+_HEAD_OK = frozenset("""total net consolidated company overall reported expect expects expected expecting anticipate anticipates
+    see sees forecast forecasts project projects guide guides guiding target targets raise raises raised raising lower lowers
+    lowered lowering reaffirm reaffirms reaffirmed reaffirming reiterate reiterates reiterated reiterating update updates updated
+    narrow narrows narrowed maintain maintains maintained provide provides providing its their""".split()) | _GAP_OK
+# the rest of the amount after its first number ("$0.05 to $0.08 per share"): what follows it decides whether it is a change
+_AMOUNT_TAIL = re.compile(r"\s*(?:\$\s?\(?\d[\d,]*(?:\.\d+)?\)?|\(?\d[\d,]*(?:\.\d+)?\)?\s*%|\d[\d,]*(?:\.\d+)?"
+                          r"|(?:billion|million|thousand|b|m|to|and|per|diluted|share|percent|approximately|about|around|roughly)(?![a-z])|[-–‒])")
+# "… $0.10 higher than last year", "$50 million above the third quarter": the amount is a difference, not the level
+_COMPARED = re.compile(r"\s*(higher|lower|more|less|greater|fewer|above|below|better|worse|up|down)(?![a-z])")
+
+
+def _qualified_by_part(low: str, head_start: int) -> bool:
+    """A word directly before the metric that is not one of the company-level qualifiers or guidance verbs."""
+    m = re.search(r"([a-z0-9'&-]+)\s+$", low[:head_start])
+    if m is None:
+        return False  # start of the sentence, or punctuation ("Outlook: revenue …")
+    return not all(p in _HEAD_OK or re.fullmatch(r"20\d\d|q[1-4]|fy\d*", p) for p in m.group(1).split("-") if p)
+
+
+def _compared_after(low: str, start: int) -> bool:
+    pos = start
+    while (m := _AMOUNT_TAIL.match(low, pos)) and m.end() > pos:
+        pos = m.end()
+    return bool(_COMPARED.match(low, pos))
+
+
 def _governed(metric: str, low: str, start: int) -> bool:
     """Is the amount at ``start`` the metric's own level? The metric must be named BEFORE the amount, joined to it
     only by allowed words, and nothing before the amount may describe a change or an impact ("tariffs to lower EPS
@@ -211,6 +239,8 @@ def _governed(metric: str, low: str, start: int) -> bool:
                 last = m
     if last is None:
         return False  # the amount comes before the metric: "$0.05 off EPS", "$150 million on revenue"
+    if _qualified_by_part(low, last.start()) or _compared_after(low, start):
+        return False  # a segment's / component's amount, or a difference ("$0.10 higher than last year")
     gap = low[last.end():start]
     to_level = _TO_LEVEL.search(gap)  # "is expected to improve to $0.10": the new level, not a change
     head = low[:last.end() + (to_level.start() if to_level else len(gap))]

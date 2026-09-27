@@ -101,7 +101,8 @@ def delisted_on(s: Session, ticker: str, mode: str) -> date | None:
 
         from marketlens.infrastructure.db.models import PriceBarRow
 
-        traded_after = s.scalars(select(PriceBarRow.day).where(PriceBarRow.ticker == ticker, PriceBarRow.day >= row.delisted_at).limit(1)).first()
+        # strictly after: a bar ON the delisting day is its last trade, backfilled later (8th evaluation I4)
+        traded_after = s.scalars(select(PriceBarRow.day).where(PriceBarRow.ticker == ticker, PriceBarRow.day > row.delisted_at).limit(1)).first()
         if traded_after is not None:
             return None  # it kept trading after it left the listing: not (yet) a delisting — never close at a "last price"
     return row.delisted_at
