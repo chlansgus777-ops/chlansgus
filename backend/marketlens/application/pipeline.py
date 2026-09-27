@@ -34,7 +34,7 @@ from marketlens.domain.facts import DataQualityReport, Fact, build_quality_repor
 from marketlens.domain.freshness import FreshnessCheck, check_age, missing as fresh_missing, rules_from_config
 from marketlens.domain.annual import AnnualFinancials, annual_features
 from marketlens.domain.banks import bank_features
-from marketlens.domain.corporate_actions import SplitEvent, factor_since, normalize_quarters, split_key
+from marketlens.domain.corporate_actions import SplitEvent, analysis_basis, normalize_quarters, share_multiplier, split_key
 from marketlens.domain.fundamentals import FundamentalMetrics, QuarterlyFinancials, as_of, compute_metrics
 from marketlens.domain.indicators import TechnicalSnapshot, aligned_closes, compute_technicals
 from marketlens.domain.issues import CompanyIssueImpact, Issue, aggregate_issue_score, compute_issue_impacts
@@ -236,7 +236,7 @@ def on_current_share_basis(prev: AnalysisDigest | None, splits: Sequence[SplitEv
     so every split of a held name read as a close below the stop → SELL."""
     if prev is None or not splits:
         return prev
-    f = factor_since(splits, prev.splits_applied, to_ny(prev.as_of).date(), to_ny(as_of).date())
+    f = share_multiplier(splits, analysis_basis(to_ny(prev.as_of).date(), prev.splits_applied), to_ny(as_of).date()) or 1.0
     if f == 1.0:
         return prev
 

@@ -21,7 +21,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from marketlens.application.codec import encode
-from marketlens.domain.corporate_actions import encoded_split_keys, factor_since
+from marketlens.domain.corporate_actions import analysis_basis, encoded_split_keys, share_multiplier
 from marketlens.domain.calibration import compare_shadow, propose_weights, segment_report
 from marketlens.domain.enums import BULLISH_ACTIONS, Action, ExitReason
 from marketlens.domain.evaluation import HORIZONS, OutcomeSample, bucket_performance, dedupe_samples, factor_ic, forward_outcome, is_mature, rolling_ic
@@ -114,7 +114,7 @@ class EvaluationService:
 
     # ------------------------------------------------------------------ paper trading (one account)
     def _signal(self, pos: PaperPositionRow, spread_bps: float | None, basis_date: date | None = None, key: str | None = None,
-                applied: tuple[str, ...] | None = None) -> PaperSignal:
+                applied: frozenset[str] | None = None) -> PaperSignal:
         """The plan's price levels expressed on the share basis of the stored bars. Levels were set on the
         basis of the recommendation day; every split executed after it (and already applied to the bars,
         i.e. on/before ``basis_date``) divides them, so a 10:1 split does not turn a normal entry into a
@@ -122,7 +122,7 @@ class EvaluationService:
         f = 1.0
         if basis_date is not None:
             # the splits the recommendation's bars already reflected (9th evaluation H1), else the date rule
-            f = factor_since(self.svc.data.splits(key or pos.ticker), applied, to_ny(pos.recommended_at).date(), basis_date)
+            f = share_multiplier(self.svc.data.splits(key or pos.ticker), analysis_basis(to_ny(pos.recommended_at).date(), applied), basis_date) or 1.0
         # the signal is keyed by the COMPANY (identity key), not the ticker label: a reused ticker is another company
         return PaperSignal(key or pos.ticker, pos.recommended_at, pos.action, pos.score, pos.confidence, pos.stop / f, pos.target1 / f, pos.target2 / f,
                            pos.thesis, pos.model_version, pos.regime, pos.sector, spread_bps, pos.max_buy / f if pos.max_buy is not None else None)

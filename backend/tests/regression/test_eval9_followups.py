@@ -13,7 +13,11 @@ UTC = timezone.utc
 
 # ---------------------------------------------------------------- H1: the basis is the recorded splits, not the date
 def test_the_share_basis_follows_the_splits_an_analysis_already_reflected():
-    from marketlens.domain.corporate_actions import SplitEvent, factor_since, split_key
+    # round 10: factor_since was folded into the single conversion share_multiplier(splits, basis, through); same cases
+    from marketlens.domain.corporate_actions import SplitEvent, analysis_basis, share_multiplier, split_key
+
+    def factor_since(splits, applied, after, through):  # noqa: ANN001, ANN202
+        return share_multiplier(splits, analysis_basis(after, applied), through)
 
     s = SplitEvent("T", date(2026, 9, 24), 1, 10, "polygon")
     today = date(2026, 9, 25)

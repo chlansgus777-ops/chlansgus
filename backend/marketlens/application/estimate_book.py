@@ -46,11 +46,14 @@ def on_price_basis(history: Sequence[EstimateObservation], splits: Sequence[Any]
         return list(history)
     from dataclasses import replace
 
-    from marketlens.domain.corporate_actions import split_factor
+    from marketlens.domain.corporate_actions import ShareBasis, share_multiplier
 
     out: list[EstimateObservation] = []
     for h in history:
-        f = split_factor(splits, h.observed_on, as_of)
+        # an outside snapshot observed ON a split's execution day may be on either basis: left out, never guessed
+        f = share_multiplier(splits, ShareBasis(h.observed_on, unknown_on_execution_day=True), as_of)
+        if f is None:
+            continue
         if f == 1.0:
             out.append(h)
             continue

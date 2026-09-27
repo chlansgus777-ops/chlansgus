@@ -28,7 +28,7 @@ from marketlens.application.theses import ThesisBook
 from marketlens.config import AGENT_PROMPT_VERSION, CONFIG_DIR, SCHEMA_VERSION, ModelConfig, Settings, code_version, load_model_config
 from marketlens.domain.enums import BULLISH_ACTIONS, Action, DataMode
 from marketlens.domain.freshness import PlanCheck, RecommendationFreshness, recommendation_freshness
-from marketlens.domain.corporate_actions import encoded_split_keys, factor_since, split_factor
+from marketlens.domain.corporate_actions import ShareBasis, analysis_basis, encoded_split_keys, share_multiplier
 from marketlens.domain.market_calendar import UTC, to_ny
 from marketlens.domain.paper import position_notional
 from marketlens.domain.portfolio import Holding, Portfolio
@@ -196,7 +196,7 @@ class MarketLensService:
             # a holding entered before a split is on the old share basis: the split multiplies the quantity and divides
             # the average cost, as the broker does, so it is valued with today's split-adjusted closes (9th evaluation H4)
             entered = r.updated_at if r.updated_at.tzinfo is not None else r.updated_at.replace(tzinfo=UTC)
-            f = split_factor(self.data.splits(r.ticker), to_ny(entered).date(), today)
+            f = share_multiplier(self.data.splits(r.ticker), ShareBasis(to_ny(entered).date()), today) or 1.0
             hs.append(Holding(r.ticker, r.quantity * f, r.cost_basis / f, sec.sector if sec else "Unknown", ("AI",) if exp and exp.ai >= 0.4 else (),
                               exp.rates if exp else 0.0, split_adjusted=f))
         return Portfolio(tuple(hs), cash)
@@ -231,7 +231,7 @@ class MarketLensService:
         quote is on the new basis."""
         entry = (row.result or {}).get("entry") or {}
         known = encoded_split_keys((row.inputs or {}).get("splits")) if isinstance(row.inputs, dict) else None
-        f = factor_since(self.data.splits(row.ticker), known, to_ny(row.as_of).date(), to_ny(self.now()).date())
+        f = share_multiplier(self.data.splits(row.ticker), analysis_basis(to_ny(row.as_of).date(), known), to_ny(self.now()).date()) or 1.0
 
         def adj(v: Any) -> float | None:
             return None if v is None else float(v) / f

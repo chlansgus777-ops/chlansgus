@@ -1,0 +1,37 @@
+name: guidance-corpus
+# Collects REAL outlook sentences from SEC 8-K Exhibit 99 press releases (scripts/corpus/collect_guidance_sentences.py)
+# on a GitHub-hosted runner, because the development sandbox cannot reach sec.gov. The raw candidates are committed to
+# the branch the workflow runs on (backend/tests/corpus/guidance_candidates.jsonl); labels are added by hand in
+# guidance_corpus.jsonl. Only SEC is called; the User-Agent names the requester (SEC fair-access policy).
+on:
+  workflow_dispatch:
+    inputs:
+      sec_user_agent:
+        description: "SEC User-Agent (name + contact email). Empty = the SEC_USER_AGENT secret."
+        required: false
+        default: ""
+permissions:
+  contents: write
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend (lock file)
+        run: pip install -r backend/requirements.lock && pip install --no-deps -e ./backend
+      - name: Collect sentences from SEC
+        env:
+          SEC_USER_AGENT: ${{ inputs.sec_user_agent != '' && inputs.sec_user_agent || secrets.SEC_USER_AGENT }}
+          MARKETLENS_DATA_DIR: ${{ runner.temp }}/marketlens
+        run: python scripts/corpus/collect_guidance_sentences.py --out backend/tests/corpus/guidance_candidates.jsonl
+      - name: Commit the candidates
+        run: |
+          git config user.name "guidance-corpus workflow"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/tests/corpus/guidance_candidates.jsonl
+          git commit -m "corpus: real 8-K Exhibit 99 outlook sentences (run ${{ github.run_id }})" || echo "nothing new"
+          git push origin HEAD:${{ github.ref_name }}

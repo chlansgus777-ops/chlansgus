@@ -30,20 +30,49 @@ class SplitEvent:
         return self.split_to / self.split_from
 
 
-def split_factor(splits: Sequence[SplitEvent], after: date, through: date) -> float:
-    """Cumulative share multiplier of splits executed in (after, through]."""
+@dataclass(frozen=True, slots=True)
+class ShareBasis:
+    """Which splits a recorded per-share value (a price level, a quantity, a cost, an EPS, an estimate) already reflects.
+
+    ``applied``: the keys of the splits the value's source had applied when it was recorded (an analysis records the
+    splits its bars reflected). ``None``: no record — then every split executed on or before ``as_of`` counts as
+    applied (a user's broker quantity, a filing, an older snapshot). ``unknown_on_execution_day``: an outside source
+    observed ON an execution day may be on either side of the split — its basis is unknown (never guessed)."""
+
+    as_of: date
+    applied: frozenset[str] | None = None
+    unknown_on_execution_day: bool = False
+
+
+def share_multiplier(splits: Sequence[SplitEvent], basis: ShareBasis, through: date) -> float | None:
+    """THE share-basis conversion (every path uses this one function): the multiplier from ``basis`` to the basis of
+    today's split-adjusted bars — the product of the ratios of the splits executed on or before ``through`` that the
+    basis does not reflect. Quantities multiply by it; per-share amounts divide by it. None = the basis is unknown."""
     f = 1.0
     for s in splits:
-        if after < s.execution_date <= through and s.split_from > 0 and s.split_to > 0:
+        if s.split_from <= 0 or s.split_to <= 0 or s.execution_date > through:
+            continue
+        if basis.applied is not None:
+            reflected = split_key(s) in basis.applied
+        else:
+            if basis.unknown_on_execution_day and s.execution_date == basis.as_of:
+                return None
+            reflected = s.execution_date <= basis.as_of
+        if not reflected:
             f *= s.ratio
     return f
+
+
+def split_factor(splits: Sequence[SplitEvent], after: date, through: date) -> float:
+    """Cumulative share multiplier of splits executed in (after, through] — ``share_multiplier`` with a date basis."""
+    return share_multiplier(splits, ShareBasis(after), through) or 1.0
 
 
 def split_key(s: SplitEvent) -> str:
     return f"{s.execution_date.isoformat()}:{s.split_from}:{s.split_to}"
 
 
-def encoded_split_keys(encoded: Sequence[object] | None) -> tuple[str, ...] | None:
+def encoded_split_keys(encoded: Sequence[object] | None) -> frozenset[str] | None:
     """Keys of splits stored in an encoded analysis input (``inputs["splits"]``); None when the record predates it."""
     if encoded is None:
         return None
@@ -51,22 +80,13 @@ def encoded_split_keys(encoded: Sequence[object] | None) -> tuple[str, ...] | No
     for e in encoded:
         if isinstance(e, dict) and e.get("execution_date"):
             out.append(f"{e['execution_date']}:{e.get('split_from')}:{e.get('split_to')}")
-    return tuple(out)
+    return frozenset(out)
 
 
-def factor_since(splits: Sequence[SplitEvent], applied: Sequence[str] | None, after: date, through: date) -> float:
-    """Share multiplier from the basis of an earlier analysis to today's bars. The basis of an analysis is the splits
-    its bars already reflected (``applied``), not its date: an analysis on a split's execution day before that day's
-    sync still had pre-split bars (9th evaluation H1). Without that record (older snapshots) the date rule
-    (``after``, ``through``] is used."""
-    if applied is None:
-        return split_factor(splits, after, through)
-    known = set(applied)
-    f = 1.0
-    for s in splits:
-        if s.execution_date <= through and split_key(s) not in known and s.split_from > 0 and s.split_to > 0:
-            f *= s.ratio
-    return f
+def analysis_basis(as_of: date, applied: Sequence[str] | None) -> ShareBasis:
+    """The basis of an analysis (or a stored recommendation / paper signal made from one): the splits it recorded, else
+    — records from before the field existed — its date."""
+    return ShareBasis(as_of, frozenset(applied) if applied is not None else None)
 
 
 PER_SHARE_DIVIDE = ("eps_diluted",)  # per-share amounts: divide by the share multiplier
