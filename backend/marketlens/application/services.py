@@ -145,6 +145,7 @@ class MarketLensService:
         self.store = MarketStore(session_factory, self.registry.mode.value) if store_on else None
         self.data = DataAccess(self.registry, self.base_cfg.cache_ttl, store=self.store, now_fn=self.now)
         self._lock = threading.Lock()
+        self._sync_lock = threading.Lock()
         self.last_scan_context: ScanContext | None = None
         self._check_db_environment()
 
@@ -469,6 +470,60 @@ class MarketLensService:
         out = {"status": "SYNC_COMPLETE" if rep.complete else "SYNC_PARTIAL", "bar_days_remaining": max(0, rep.bar_days_missing - rep.bar_days_loaded - rep.bar_days_empty), **rep.__dict__}
         self.store.set_setting("last_sync", json.dumps({"status": out["status"], "at": self.now().isoformat(), "bar_days_remaining": out["bar_days_remaining"], "errors": rep.errors[:5]}))
         return out
+
+    def start_sync(self, max_rounds: int = 20) -> dict[str, Any]:
+        """LIVE: prepare the local store in the background, one bounded :meth:`sync_market` round after another,
+        until the price history window is complete and no fundamentals are waiting — or a round makes no
+        progress. Every round keeps each provider's own rate limit; nothing is fetched twice."""
+        if self.store is None:
+            return {"started": False, "reason": "MOCK 모드는 데이터 준비가 필요 없음"}
+        if not self._sync_lock.acquire(blocking=False):
+            return {"started": False, "reason": "이미 데이터를 준비하는 중", **self.sync_status()}
+        self._sync_state({"status": "RUNNING", "round": 0, "started_at": self.now().isoformat()})
+        threading.Thread(target=self._sync_rounds, args=(max_rounds,), name="marketlens-sync", daemon=True).start()
+        return {"started": True, **self.sync_status()}
+
+    def _sync_state(self, state: dict[str, Any]) -> None:
+        with self.sf() as s:
+            repo.set_setting(s, "sync_job", json.dumps(state))
+            s.commit()
+
+    def _sync_rounds(self, max_rounds: int) -> None:
+        """Runs holding ``_sync_lock`` (taken by :meth:`start_sync`)."""
+        state: dict[str, Any] = {"status": "RUNNING", "round": 0, "started_at": self.now().isoformat()}
+        try:
+            for i in range(max_rounds):
+                out = self.sync_market()
+                progressed = bool(out["bar_days_loaded"] or out["bar_days_empty"] or out["fundamentals_ingested"] or out["profiles_updated"])
+                state.update(round=i + 1, bar_days_remaining=out["bar_days_remaining"], fundamentals_pending=out["fundamentals_pending"],
+                             errors=out["errors"][:3], updated_at=self.now().isoformat())
+                # profiles have no pending count: a round that still added some may have left more (bounded per round)
+                if out["status"] == "SYNC_COMPLETE" and not out["fundamentals_pending"] and not out["profiles_updated"]:
+                    state["status"] = "DONE"
+                    break
+                if not progressed:  # the next round would repeat the same calls: stop and say why
+                    state["status"] = "FAILED" if out["errors"] else "DONE"
+                    break
+                self._sync_state(state)
+            else:
+                state["status"] = "PAUSED"  # round cap reached; pressing the button again continues where it stopped
+        except Exception as e:  # the job must end with a visible state; the error is logged with its traceback
+            log.exception("background sync failed")
+            state.update(status="FAILED", errors=[f"{type(e).__name__}: {e}"])
+        finally:
+            state["finished_at"] = self.now().isoformat()
+            self._sync_state(state)
+            self._sync_lock.release()
+
+    def sync_status(self) -> dict[str, Any]:
+        """The background data preparation's progress. RUNNING while no job holds the lock = the app was closed mid-way."""
+        if self.store is None:
+            return {"job": None}
+        with self.sf() as s:
+            job = json.loads(repo.get_setting(s, "sync_job", "") or "null")
+        if job and job.get("status") == "RUNNING" and not self._sync_lock.locked():
+            job["status"] = "INTERRUPTED"
+        return {"job": job}
 
     def readiness(self) -> dict[str, Any]:
         """Scanner readiness + recommendation readiness gate + per-category data status (see readiness.py)."""

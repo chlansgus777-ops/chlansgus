@@ -395,6 +395,17 @@ def sync(req: Request) -> dict[str, Any]:
     return encode(svc(req).sync_market())
 
 
+@router.post("/sync/start")
+def sync_start(req: Request) -> dict[str, Any]:
+    """Start preparing the LIVE data in the background (returns at once; follow it with GET /sync/status)."""
+    return svc(req).start_sync()
+
+
+@router.get("/sync/status")
+def sync_status(req: Request) -> dict[str, Any]:
+    return svc(req).sync_status()
+
+
 @router.post("/calibration/run")
 def run_calibration(req: Request) -> dict[str, Any]:
     return EvaluationService(svc(req)).calibrate()

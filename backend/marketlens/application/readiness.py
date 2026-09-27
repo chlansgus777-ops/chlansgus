@@ -85,8 +85,13 @@ def evaluate(mode: str, reg: Any, stats: dict[str, Any] | None, sync_state: str 
                          ("모의(MOCK) 데이터 — 실제 시장이 아니므로 연습·검증용으로만 사용",), ())
     reasons: list[str] = []
     prog: dict[str, float | None] = {}
+    # a key the preparation needs is missing: say so first — pressing "데이터 준비 시작" cannot fix it
+    if not _cfg(reg, "universe", "sec-edgar"):
+        reasons.append("SEC 요청자(SEC_USER_AGENT)가 비어 있어 종목 목록·재무를 받을 수 없음 — 설정 화면에서 '이름 이메일'을 입력하고 앱을 다시 시작하세요")
+    if not _cfg(reg, "price", "polygon"):
+        reasons.append("POLYGON_API_KEY가 없어 일봉(가격 이력)을 받을 수 없음 — 설정 화면에서 입력하고 앱을 다시 시작하세요")
     if not stats or not stats.get("listed"):
-        reasons.append("유니버스(종목 목록)가 아직 적재되지 않음 — 데이터 동기화를 실행하세요")
+        reasons.append("유니버스(종목 목록)가 아직 적재되지 않음 — ‘데이터 준비 시작’(데이터 동기화)을 실행하세요")
         prog = {"price_history": 0.0, "market_cap": 0.0, "sector": 0.0, "fundamentals": 0.0, "market_days": 0.0}
     else:
         listed, large = stats["listed"], max(1, stats["large"])

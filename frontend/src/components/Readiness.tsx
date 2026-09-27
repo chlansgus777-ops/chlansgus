@@ -1,6 +1,9 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { api } from "../api";
 import { READINESS_KO } from "../i18n";
 import { Card, Notice } from "./ui";
+import { useApi } from "./useApi";
 
 export interface ReadinessInfo {
   mode: string; recommendation_readiness: string; readiness_reasons: string[];
@@ -56,10 +59,52 @@ export function ProgressBars({ p }: { p: Record<string, number | null> }) {
   );
 }
 
+export interface SyncJob {
+  status: "RUNNING" | "DONE" | "FAILED" | "PAUSED" | "INTERRUPTED"; round: number;
+  bar_days_remaining?: number; fundamentals_pending?: number; errors?: string[]; started_at?: string; finished_at?: string;
+}
+const JOB_KO: Record<SyncJob["status"], string> = {
+  RUNNING: "받는 중", DONE: "끝남", FAILED: "실패", PAUSED: "일시 정지(다시 누르면 이어서 받음)", INTERRUPTED: "중단됨(앱이 꺼짐) — 다시 누르면 이어서 받음",
+};
+
+/** LIVE: the button that fills the local data store (SEC list and filings, Polygon daily prices), with its progress.
+ * Without it an installed app had no way to leave "NOT READY". */
+export function SyncControl({ onChange }: { onChange?: () => void }) {
+  const st = useApi<{ job: SyncJob | null }>("/sync/status");
+  const [err, setErr] = useState<string | null>(null);
+  const job = st.data?.job ?? null;
+  const running = job?.status === "RUNNING";
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => { st.reload(); onChange?.(); }, 10000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+  const start = async () => {
+    setErr(null);
+    try { await api.post("/sync/start"); st.reload(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+  };
+  return (
+    <div className="sync-control">
+      <div className="row">
+        <button className="primary" disabled={running} onClick={start}>{running ? "데이터 받는 중…" : "데이터 준비 시작"}</button>
+        {job && <span className="t-sub">상태: {JOB_KO[job.status] ?? job.status} · {job.round}회차
+          {job.bar_days_remaining !== undefined && ` · 남은 가격 거래일 ${job.bar_days_remaining}`}
+          {job.fundamentals_pending !== undefined && ` · 재무 대기 ${job.fundamentals_pending}종목`}</span>}
+      </div>
+      <div className="explain">무료 API 요청 한도를 지키며 받기 때문에 처음 한 번은 1시간 안팎 걸릴 수 있습니다. 앱을 켜 둔 채 기다리세요.
+        중간에 꺼도 받은 데이터는 남고, 다시 누르면 이어서 받습니다. 그 뒤로는 하루 한 번 누르면 새 거래일만 받습니다.</div>
+      {job?.errors?.length ? <ul className="list">{job.errors.map((x, i) => <li key={i}><span className="dot warn">!</span><span>{x}</span></li>)}</ul> : null}
+      {err && <Notice tone="neg">{err}</Notice>}
+    </div>
+  );
+}
+
 /** Shown instead of "no opportunities" when the scanner's data is not ready. */
-export function NotReady({ r }: { r: ReadinessInfo }) {
+export function NotReady({ r, onChange }: { r: ReadinessInfo; onChange?: () => void }) {
   return (
     <Card title="데이터를 준비하는 중입니다" icon="⏳" tone="warn" explain="데이터가 준비되지 않아 추천 종목이 없는 것처럼 보일 수 있습니다. 이 목록이 비어 있어도 ‘살 종목이 없다’는 뜻이 아닙니다.">
+      {r.mode === "LIVE" && <SyncControl onChange={onChange} />}
       <ProgressBars p={r.progress} />
       <ul className="list">{r.scanner_reasons.map((x, i) => <li key={i}><span className="dot warn">!</span><span>{x}</span></li>)}</ul>
     </Card>

@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import { Card, Err, Loading } from "../components/ui";
-import { ProgressBars, ReadinessBanner, statusKo, type ReadinessInfo } from "../components/Readiness";
+import { ProgressBars, ReadinessBanner, statusKo, SyncControl, type ReadinessInfo } from "../components/Readiness";
 import { useApi } from "../components/useApi";
 import { num, pct, stamp } from "../format";
 
@@ -32,6 +32,7 @@ export default function Health() {
               {r.data.readiness_reasons.length > 0 && <ul className="list">{r.data.readiness_reasons.map((x, i) => <li key={i}><span className="dot warn">!</span><span>{x}</span></li>)}</ul>}
             </Card>
             <Card title="스캐너 데이터 준비" icon="⏳" explain={r.data.scanner_status === "SCANNER_READY" ? "전체 시장 스캔에 필요한 데이터가 준비되었습니다." : r.data.scanner_status === "NOT_APPLICABLE" ? "모의 데이터는 준비가 필요 없습니다." : "아직 준비 중입니다. 준비 전 스캔 결과는 믿으면 안 됩니다."}>
+              {r.data.mode === "LIVE" && <SyncControl onChange={r.reload} />}
               <ProgressBars p={r.data.progress} />
               {r.data.sync.status && <div className="caption">마지막 동기화: {r.data.sync.status}{r.data.sync.at ? ` · ${stamp(r.data.sync.at)}` : ""}{r.data.sync.bar_days_remaining ? ` · 남은 가격 거래일 ${r.data.sync.bar_days_remaining}` : ""}</div>}
               {r.data.scanner_reasons.length > 0 && <ul className="list">{r.data.scanner_reasons.map((x, i) => <li key={i}><span className="dot warn">!</span><span>{x}</span></li>)}</ul>}
