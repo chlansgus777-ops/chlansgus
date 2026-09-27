@@ -1,0 +1,23 @@
+# 다른 독립 검토(2240992 대상, F01~F14)의 반례 15건을 9차 평가 대상 2b217e2 에서 실행한 결과
+# 테스트 원본: 신청자 브랜치 커밋 7292d51 의 evaluations/independent_2240992/ (대상 커밋 이후에 추가됨)
+#   git show 7292d51:evaluations/independent_2240992/conftest.py > /tmp/ind/conftest.py
+#   git show 7292d51:evaluations/independent_2240992/test_independent_review.py > /tmp/ind/test_independent_review.py
+#   (저장소의 evaluations/ 아래에 두고) python -m pytest -q -o addopts="" -rA evaluations/independent_2240992
+# 실행 환경: Python 3.11, backend/requirements.lock, 2026-09-27
+
+PASSED evaluations/independent_2240992/test_independent_review.py::test_r1_material_gate_cannot_reinstate_buy_above_max_price
+PASSED evaluations/independent_2240992/test_independent_review.py::test_r3_after_hours_release_not_visible_before_actual_release
+PASSED evaluations/independent_2240992/test_independent_review.py::test_r4_guidance_range_preserves_each_endpoint_scale
+PASSED evaluations/independent_2240992/test_independent_review.py::test_r5_trading_security_missing_once_is_not_delisted
+PASSED evaluations/independent_2240992/test_independent_review.py::test_r13_stock_split_must_not_trigger_old_stop
+PASSED evaluations/independent_2240992/test_independent_review.py::test_r14_prospective_eps_adjusts_when_split_occurs_after_snapshot
+FAILED evaluations/independent_2240992/test_independent_review.py::test_r2_same_timestamp_quote_must_validate_plan
+FAILED evaluations/independent_2240992/test_independent_review.py::test_r6_reused_ticker_does_not_archive_new_company_bars
+FAILED evaluations/independent_2240992/test_independent_review.py::test_r7_store_must_check_requested_start_not_only_end
+FAILED evaluations/independent_2240992/test_independent_review.py::test_r8_small_allocation_must_still_respect_sector_limit
+FAILED evaluations/independent_2240992/test_independent_review.py::test_r9_guidance_must_compare_the_named_quarter
+FAILED evaluations/independent_2240992/test_independent_review.py::test_r10_original_stop_survives_an_intermediate_hold
+FAILED evaluations/independent_2240992/test_independent_review.py::test_r11_previous_recommendation_must_match_security_identity
+FAILED evaluations/independent_2240992/test_independent_review.py::test_r12_neutral_macro_news_cannot_invent_rate_increase
+FAILED evaluations/independent_2240992/test_independent_review.py::test_r15_cross_site_get_cannot_trigger_persistent_analysis
+9 failed, 6 passed in 2.80s

@@ -1,0 +1,365 @@
+<title>MarketLens 9차 평가</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f3f4f7; --paper:#ffffff; --ink:#18202c; --muted:#596272; --line:#dadfe7; --soft:#eef0f5;
+  --accent:#34468a; --accent-soft:#e7eaf6;
+  --p0:#a3261d; --p0-bg:#f9e4e1; --p1:#a4531b; --p1-bg:#fbeadb; --p2:#7f6400; --p2-bg:#f7efcf; --p3:#4f5968; --p3-bg:#e8ebef;
+  --ok:#2b774a; --ok-bg:#e1f1e7; --code:#eceff4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#10141b; --paper:#171d26; --ink:#e4e8ef; --muted:#9aa3b1; --line:#2a323e; --soft:#1d2430;
+    --accent:#9daef0; --accent-soft:#232c45;
+    --p0:#f1958b; --p0-bg:#3b1c1a; --p1:#f0ae78; --p1-bg:#38261a; --p2:#e2c65e; --p2-bg:#332c14; --p3:#b3bcc9; --p3-bg:#262d38;
+    --ok:#7fcf9e; --ok-bg:#1a3124; --code:#212834;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#10141b; --paper:#171d26; --ink:#e4e8ef; --muted:#9aa3b1; --line:#2a323e; --soft:#1d2430;
+  --accent:#9daef0; --accent-soft:#232c45;
+  --p0:#f1958b; --p0-bg:#3b1c1a; --p1:#f0ae78; --p1-bg:#38261a; --p2:#e2c65e; --p2-bg:#332c14; --p3:#b3bcc9; --p3-bg:#262d38;
+  --ok:#7fcf9e; --ok-bg:#1a3124; --code:#212834;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;font-size:15px;line-height:1.7;margin:0;padding-inline:16px;padding-block:28px 72px}
+main{max-width:940px;margin:0 auto;display:grid;gap:24px}
+h1,h2,h3{text-wrap:balance;margin:0}
+h1{font-size:28px;line-height:1.3}
+h2{font-size:19px;line-height:1.4}
+h3{font-size:15.5px;line-height:1.45}
+p{margin:0;max-width:70ch}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-size:12.5px}
+code{background:var(--code);padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}
+pre{background:var(--code);padding:12px 14px;border-radius:4px;overflow-x:auto;margin:0;font-size:12.5px;line-height:1.6}
+pre code{background:none;padding:0}
+a{color:var(--accent)}
+header{display:grid;gap:10px;padding-bottom:18px;border-bottom:2px solid var(--ink)}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+section{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:20px 22px;display:grid;gap:14px}
+.lede{color:var(--muted)}
+/* verdict */
+.verdict{display:grid;grid-template-columns:auto 1fr;gap:18px 26px;align-items:start}
+.stamp{border:2px solid var(--accent);border-radius:6px;padding:12px 18px;display:grid;gap:2px;text-align:center;min-width:150px;background:var(--accent-soft)}
+.stamp .score{font-size:40px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums;color:var(--accent)}
+.stamp .score small{font-size:16px;font-weight:500;color:var(--muted)}
+.stamp .grade{font-size:15px;font-weight:700}
+.stamp .gate{font-size:12.5px;color:var(--p0);font-weight:500}
+.stamp .gate.pass{color:var(--ok)}
+.stamp .gate.short{color:var(--p1)}
+.verdict ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px 22px;margin:0}
+.meta div{display:grid;gap:1px}
+.meta dt{font-size:12px;color:var(--muted);letter-spacing:.03em}
+.meta dd{margin:0;font-weight:500;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+/* tables */
+.tbl{overflow-x:auto;margin:0 -4px;padding:0 4px}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:13.5px}
+th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.03em;white-space:nowrap}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+th.num{text-align:right}
+tfoot td{font-weight:700;border-bottom:none}
+.pill{display:inline-block;font-size:12px;font-weight:500;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.ok{color:var(--ok);background:var(--ok-bg)}
+.part{color:var(--p2);background:var(--p2-bg)}
+.reg{color:var(--p0);background:var(--p0-bg)}
+.no{color:var(--p1);background:var(--p1-bg)}
+.sev{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:500;font-size:12px;padding:1px 7px;border-radius:3px;white-space:nowrap}
+.P0{color:var(--p0);background:var(--p0-bg)} .P1{color:var(--p1);background:var(--p1-bg)} .P2{color:var(--p2);background:var(--p2-bg)} .P3{color:var(--p3);background:var(--p3-bg)}
+/* findings */
+.counts{display:flex;flex-wrap:wrap;gap:8px}
+.findings{display:grid;gap:12px}
+.finding{border:1px solid var(--line);border-left:4px solid var(--p3);border-radius:4px;padding:12px 14px;display:grid;gap:8px;background:var(--paper)}
+.finding.s0{border-left-color:var(--p0)} .finding.s1{border-left-color:var(--p1)} .finding.s2{border-left-color:var(--p2)}
+.fhead{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline}
+.fid{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:500;font-size:13px}
+.finding dl{display:grid;grid-template-columns:52px 1fr;gap:4px 12px;margin:0;font-size:14px}
+.finding dt{color:var(--muted);font-size:12.5px;padding-top:2px}
+.finding dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.where{font-size:12.5px;color:var(--muted)}
+.note{border-left:3px solid var(--accent);padding:4px 0 4px 12px;color:var(--muted);max-width:none}
+ol.prio{margin:0;padding-left:22px;display:grid;gap:6px}
+section > ul{margin:0;padding-left:20px;display:grid;gap:6px}
+section > ul li{max-width:78ch}
+ol.prio li{max-width:78ch}
+@media (max-width:560px){
+  .verdict{grid-template-columns:1fr}
+  .stamp{justify-self:start}
+  .finding dl{grid-template-columns:1fr}
+  .finding dt{padding-top:6px}
+  section{padding:16px 14px}
+}
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">독립 평가 · 9차 결과</div>
+    <h1>MarketLens 9차 평가</h1>
+    <p class="lede">9차 재평가 신청서(대상 커밋 <span class="mono">2b217e2</span>)의 주장을 재현하고, 8차 반례 I1~I6의 처리를 확인했습니다. 신청서가 요청한 세 가지 점검(분할 환산 경로, 가이던스 앞뒤 규칙, 백그라운드 데이터 준비)을 모두 시도했습니다. 저장소에 올라온 다른 독립 검토의 반례도 대상 커밋에서 직접 다시 돌려 봤습니다.</p>
+  </header>
+
+  <section aria-labelledby="h-verdict">
+    <h2 id="h-verdict">판정</h2>
+    <div class="verdict">
+      <div class="stamp" role="img" aria-label="70점, C등급, A등급 Gate 5개 중 4개 통과, G1 실패">
+        <div class="score">70<small>/100</small></div>
+        <div class="grade">C 등급</div>
+        <div class="gate">A Gate 4/5 — G1 실패</div>
+        <div class="gate">열린 P0 1건(F02)</div>
+      </div>
+      <ul>
+        <li>신청서 수치는 <strong>모두 재현</strong>됐습니다. 675 수집, 평가자 반례 107 passed, 프런트 56 passed, CI·Windows 실행 5건 success, live-verify 13/13 VERIFIED입니다.</li>
+        <li>8차 반례 <strong>I1~I6(21건)은 모두 통과</strong>합니다. 다만 요청하신 점검에서 새 반례 다섯 가지를 찾았습니다. 가장 무거운 <strong>H1(P1)</strong>은 I1의 남은 경로입니다. 분할 실행일 당일, 그날 동기화 전에 한 분석은 분할 전 손절가를 가지는데, 환산 구간이 그날을 빼서 다음 분석이 "종가 기준 이탈 → 매도"를 냅니다. 그 밖에 가이던스에서 틀린 값(H2, P2)과 흔한 문장의 누락(H3, P3), 분할 전에 입력한 보유 수량(H4, P2), 데이터 준비 작업의 동시성·오류 처리(H5, P3)가 있습니다.</li>
+        <li>신청자 브랜치의 대상 이후 커밋 <span class="mono">7292d51</span>에 다른 독립 검토(<span class="mono">2240992</span> 대상, F01~F14)가 들어 있습니다. 그 반례를 <span class="mono">2b217e2</span>에서 돌리면 <strong>15건 중 9건이 실패</strong>합니다. 평가자가 코드와 탐침으로 하나씩 확인하고 이 평가의 기준으로 등급을 다시 매겼습니다. 가장 무거운 <strong>F02(P0)</strong>는 이것입니다. 앱이 매수 추천을 한 적이 없는 보유 종목(사용자가 입력한 보유 종목)은 화면에 보인 손절가 아래로 마감해도 매도 판정이 나오지 않습니다. 화면에는 "종가가 손절 기준가 아래로 마감하면 매도(보유 중)"라고 적혀 있습니다.</li>
+        <li>이 9건은 8차 대상 <span class="mono">1b48217</span>에서도 모두 실패합니다. <strong>8차 평가가 놓친 결함</strong>이고, 8차 보고서의 "I1만 고쳐도 A 구간"이라는 안내는 틀렸습니다.</li>
+        <li><strong>항목별 감점을 더하면 70.5점, C 등급입니다.</strong> 이 가운데 다른 검토 몫이 14.5점입니다. 그것을 빼면 85점이지만, F02는 대상 커밋에 실제로 있는 P0이므로 A가 될 수 없습니다.</li>
+      </ul>
+    </div>
+    <dl class="meta">
+      <div><dt>저장소 · 평가 대상</dt><dd class="mono">chlansgus777-ops/chlansgus @ 2b217e2</dd></div>
+      <div><dt>평가일</dt><dd>2026-09-27</dd></div>
+      <div><dt>반례 테스트 위치</dt><dd class="mono">claude/new-session-ir1fdw : evaluations/eval9/</dd></div>
+      <div><dt>반례 실행 결과(2b217e2)</dt><dd>평가자 반례 39건 실패(모두 의도한 실패) · 다른 검토 반례 15건 중 9건 실패</dd></div>
+    </dl>
+  </section>
+
+  <section aria-labelledby="h-trend">
+    <h2 id="h-trend">라운드별 변화</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>평가</th><th>대상</th><th class="num">점수</th><th class="num">Gate 통과</th><th class="num">열린 P0</th><th class="num">열린 P1</th><th class="num">P2</th><th class="num">P3</th></tr></thead>
+      <tbody>
+        <tr><td>3차</td><td class="mono">445221f</td><td class="num">63</td><td class="num">2 / 5</td><td class="num">1</td><td class="num">4</td><td class="num">8</td><td class="num">1</td></tr>
+        <tr><td>4차</td><td class="mono">4182468</td><td class="num">73</td><td class="num">3 / 5</td><td class="num">1</td><td class="num">0</td><td class="num">3</td><td class="num">1</td></tr>
+        <tr><td>5차</td><td class="mono">f6b048b</td><td class="num">78</td><td class="num">4 / 5</td><td class="num">0</td><td class="num">1</td><td class="num">2</td><td class="num">0</td></tr>
+        <tr><td>6차</td><td class="mono">f80c460</td><td class="num">83</td><td class="num">5 / 5</td><td class="num">0</td><td class="num">2</td><td class="num">2</td><td class="num">1</td></tr>
+        <tr><td>7차</td><td class="mono">2240992</td><td class="num">84</td><td class="num">5 / 5</td><td class="num">0</td><td class="num">1</td><td class="num">3</td><td class="num">2</td></tr>
+        <tr><td>8차</td><td class="mono">1b48217</td><td class="num">84*</td><td class="num">5 / 5*</td><td class="num">0*</td><td class="num">1</td><td class="num">2</td><td class="num">3</td></tr>
+        <tr><td><strong>9차</strong></td><td class="mono">2b217e2</td><td class="num"><strong>70</strong></td><td class="num">4 / 5</td><td class="num">1</td><td class="num">1</td><td class="num">5</td><td class="num">6</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">* 8차 수치는 발표한 그대로 두었습니다. F02를 포함한 다른 검토의 결함 9건이 1b48217에도 있었으므로, 그때 알았다면 8차도 G1 실패였고 점수도 낮았습니다. 9차 점수가 크게 내려간 것은 대부분 코드가 나빠져서가 아니라 이전 평가가 놓친 결함을 이번에 반영했기 때문입니다.</p>
+  </section>
+
+  <section aria-labelledby="h-gate">
+    <h2 id="h-gate">A 등급 Gate</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>기준</th><th>내용</th><th>결과</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td class="n">G1</td><td>열린 P0 없음</td><td><span class="pill reg">실패</span></td><td>F02. 사용자가 입력한 보유 종목이라는 흔한 입력에서, 화면이 약속한 종가 손절 규칙이 조용히 적용되지 않음</td></tr>
+        <tr><td class="n">G2</td><td>시점 정확성·종목 동일성 P1 없음</td><td><span class="pill ok">통과</span></td><td>F06·F10은 종목 동일성 결함이지만 티커 재사용이라는 드문 경우라 P2. H1은 I1과 같이 가격 기준을 섞는 문제</td></tr>
+        <tr><td class="n">G3</td><td>실제 공급자 검증 기록</td><td><span class="pill ok">통과</span></td><td>run 36298323921(<span class="mono">0f88bc4</span>) 로그: 13/13 VERIFIED, 종료 코드 0. 평가자 재실행 run 36307718744(<span class="mono">2b217e2</span>): SEC가 필요 없는 6개 항목 VERIFIED, SEC 7개 항목은 secret이 없어 실행 안 됨</td></tr>
+        <tr><td class="n">G4</td><td>대상 커밋 CI 통과</td><td><span class="pill ok">통과</span></td><td>ci run 36298686768(<span class="mono">2b217e2</span>) success. windows-build run 36298325140(<span class="mono">0f88bc4</span>) success. <span class="mono">0f88bc4</span>→<span class="mono">2b217e2</span>는 문서 두 파일(README, DATA_SOURCES)만 바뀜</td></tr>
+        <tr><td class="n">G5</td><td>직전 평가 반례가 원문 그대로 재현되지 않음</td><td><span class="pill ok">통과</span></td><td>저장소 루트에서 <code>pytest evaluations</code> 107 passed(3~8차)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-claims">
+    <h2 id="h-claims">신청서 주장 확인</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>주장</th><th>확인 결과</th><th>방법</th></tr></thead>
+      <tbody>
+        <tr><td>Backend 675 수집 = 675 통과, 건너뜀 0</td><td><span class="pill ok">일치</span></td><td><code>--collect-only</code> 675개. 전체 실행 세 번: 첫 번째 674 passed·1 failed(끝줄만 남겨 어떤 테스트였는지 기록하지 못함), 두 번째 675 passed, CI 방식 명령 종료 코드 0. 8차의 E2E 간헐 실패와 같은 종류로 봄</td></tr>
+        <tr><td>평가자 원본 반례 107 passed</td><td><span class="pill ok">일치</span></td><td>저장소 루트에서 <code>pytest evaluations</code> → 107 passed</td></tr>
+        <tr><td>8차 반례 21건을 첫 줄만 바꿔 편입, 기존 테스트 변경 없음</td><td><span class="pill ok">일치</span></td><td>편입본은 첫 줄만 다름. <code>evaluations/eval8</code>의 네 파일은 평가자 커밋과 같음. 기존 테스트 파일 수정 없음</td></tr>
+        <tr><td>Frontend 56 passed, 14개 파일</td><td><span class="pill ok">일치</span></td><td><code>tsc</code> 종료 코드 0, vitest 14파일 56 passed, 빌드 성공</td></tr>
+        <tr><td>CI·Windows success</td><td><span class="pill ok">일치</span></td><td>ci 36298686768(<span class="mono">2b217e2</span>), 36298321638(<span class="mono">0f88bc4</span>), 36297902803(<span class="mono">13b0f49</span>). windows-build 36298325140(<span class="mono">0f88bc4</span>), 36297905943(<span class="mono">13b0f49</span>)</td></tr>
+        <tr><td>live-verify 13/13 VERIFIED (run 36298323921)</td><td><span class="pill ok">일치</span></td><td>로그의 13개 항목 모두 VERIFIED, 종료 코드 0. 표본 값은 8차와 같음</td></tr>
+        <tr><td>G1 통과(열린 P0 없음)</td><td><span class="pill no">맞지 않음</span></td><td>대상 커밋에 F02가 있음. 신청서에는 다른 독립 검토가 나오지 않고, 그 결과는 신청서 뒤의 커밋(<span class="mono">7292d51</span>)에 들어왔습니다. 제출 때 신청자가 알았는지 확인할 수 없어 문서 점수에서는 감점하지 않았습니다</td></tr>
+        <tr><td>가이던스 규칙이 더 보수적: 허용 목록 밖 단어가 지표 바로 앞에 있으면 UNCLEAR(예: organic revenue, core EPS)</td><td><span class="pill part">맞지만 좁음</span></td><td>규칙 설명은 맞습니다. 다만 영향 범위가 예시보다 넓습니다. "expects to report revenue", "The Company's revenue", "annual EPS", "is forecasting revenue"처럼 흔한 회사 전체 문장도 빠집니다(H3)</td></tr>
+        <tr><td>백그라운드 데이터 준비는 실제 API로 끝까지 돌려 보지 않음</td><td><span class="pill ok">일치</span></td><td>한계로 공개됨. 픽스처 기반 테스트 8개는 통과</td></tr>
+        <tr><td>pyflakes·ruff</td><td><span class="pill ok">일치</span></td><td>pyflakes 계열은 이전과 같은 4건(테스트 밖 3 + 테스트 1)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-live">
+    <h2 id="h-live">live-verify 기록과 재실행 대조</h2>
+    <p>평가 대상 커밋에서 워크플로를 다시 실행했습니다(run 36307718744, 2026-09-27 08:55 UTC). 저장소 secret <code>SEC_USER_AGENT</code>는 여전히 비어 있습니다. 신청자 실행은 이번에도 워크플로 입력으로 값을 넣었고, 그 값은 실행 로그에 그대로 보입니다.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>항목</th><th>신청자 run 36298323921</th><th>평가자 run 36307718744</th><th>판정</th></tr></thead>
+      <tbody>
+        <tr><td>price · bars</td><td>NVDA 225.07, AAPL 341.07, MSFT 516.17 (09-25)</td><td>같은 값</td><td><span class="pill ok">재현</span></td></tr>
+        <tr><td>news · macro · short_interest</td><td>NVDA 93건 · DFF 3.88 · NVDA 294,225,803</td><td>84건(시각에 따라 바뀜) · 같은 값 · 같은 값</td><td><span class="pill ok">재현</span></td></tr>
+        <tr><td>estimates</td><td>NVDA 13.481742 (09-27 관측)</td><td>같은 값</td><td><span class="pill ok">재현</span></td></tr>
+        <tr><td>SEC 7개 항목</td><td>VERIFIED (가이던스: NVDA 보도자료에서 2건 추출)</td><td>BLOCKED_BY_CREDENTIAL (secret 없음)</td><td><span class="pill part">기록만 확인</span></td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-items">
+    <h2 id="h-items">8차 반례 처리 확인</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>#</th><th>내용</th><th>결과</th><th>확인 내용 · 남은 문제</th></tr></thead>
+      <tbody>
+        <tr><td class="n">I1</td><td>분할 전 손절가를 분할 뒤 일봉과 비교</td><td><span class="pill part">해결, 빈틈 있음</span></td><td>직전 분석의 가격 수준을 (분석일, 오늘] 사이에 실행된 분할로 나눔. 저장된 추천의 상태 점검·화면 요약·매수 금액도 같은 환산. 분할 실행일 당일, 동기화 전에 한 분석은 이 구간에서 빠짐(H1)</td></tr>
+        <tr><td class="n">I2</td><td>금액 뒤 변화, 지표 앞 부문</td><td><span class="pill part">해결, 빈틈 있음</span></td><td>14문장과 끝단 1건 통과. 규칙이 받는 다른 형태가 있고(H2), 새 앞 단어 규칙이 흔한 회사 전체 문장을 놓침(H3)</td></tr>
+        <tr><td class="n">I3</td><td>장 마감 직후 빈 일봉을 영구 기록</td><td><span class="pill ok">해결</span></td><td>최근 7일 안의 빈 날은 "대기"로 두고 다음 동기화에서 다시 요청</td></tr>
+        <tr><td class="n">I4</td><td>채워진 마지막 거래일이 상장폐지를 지움</td><td><span class="pill ok">해결</span></td><td>상장폐지일 다음 날부터의 일봉만 셈</td></tr>
+        <tr><td class="n">I5</td><td>키체인에 저장한 키가 옛 .env 줄에 짐</td><td><span class="pill ok">해결</span></td><td>저장할 때 같은 이름의 .env 줄을 지움. 역슬래시·따옴표·<code>$</code>·<code>${HOME}</code>·<code>#</code>·작은따옴표·끝 역슬래시 8가지 값이 저장 뒤 그대로 읽힘(평가자 탐침)</td></tr>
+        <tr><td class="n">I6</td><td>한도 초과 보유의 음수 금액 문구</td><td><span class="pill ok">해결</span></td><td>"이미 한 종목 한도에 도달 — 더 사지 않음". 다만 분할 전에 입력한 보유는 한도 계산 자체가 틀림(H4)</td></tr>
+        <tr><td class="n">새 기능</td><td>화면에서 LIVE 데이터 준비(백그라운드)</td><td><span class="pill part">동작, 빈틈 있음</span></td><td>중단(앱 종료) 뒤 INTERRUPTED 표시와 이어받기는 확인. 다른 동기화 경로와의 동시 실행, 마지막 상태 저장 실패 때 잠금(H5)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-new">
+    <h2 id="h-new">새 반례 (평가자)</h2>
+    <div class="counts"><span class="sev P1">P1 × 1</span><span class="sev P2">P2 × 2</span><span class="sev P3">P3 × 2</span></div>
+    <p class="note">등급 기준은 3~8차와 같습니다. 흔한 입력에서 결정 근거가 조용히 틀리면 P0, 일부 경우나 덜 흔한 형태에서만 틀리면 P1, 조건이 더 필요하면 P2, 값이 비는 쪽으로만 틀리거나 아주 드물면 P3입니다.</p>
+    <div class="findings">
+
+      <article class="finding s1">
+        <div class="fhead"><span class="fid">H1</span><span class="sev P1">P1</span><h3>분할 실행일 당일, 동기화 전에 한 분석의 손절가가 환산되지 않아 거짓 매도</h3></div>
+        <dl>
+          <dt>입력</dt><dd>모의 시장의 NVDA. 10:1 분할이 목요일(09-24)에 실행됨. 직전 분석은 그날 08:00(뉴욕)에 돌았고, 저장소가 분할을 아직 몰라서 조정 전 일봉으로 손절가 350.26을 정함. 장 마감 뒤 동기화가 분할을 저장하고 일봉을 다시 계산함. 금요일에는 일봉과 시세가 모두 분할 기준이고 주가 자체는 그대로. 보유 중(직전 BUY, 또는 HOLD와 이어받은 손절가)</dd>
+          <dt>기대</dt><dd>직전 분석이 분할 전 기준이므로 손절가를 35.03으로 맞춰 비교. 손절 이탈 아님</dd>
+          <dt>실제</dt><dd>환산 구간이 (09-24, 09-25]라 실행일의 분할이 빠짐. 종가 37.58 ≤ 350.26으로 보고 <strong>"종가 기준 이탈 → 매도"</strong>, SELL. 직전 분석의 날짜를 실행일 전으로 두면 같은 입력이 HOLD. 저장된 추천(<code>levels_now</code>)도 분할 전 손절가 350.26·최대 매수가 372를 그대로 보여 줌(분할 비율 1.0). 모의투자의 <code>_signal</code>도 같은 구간을 씀(코드 확인)</dd>
+          <dt>빈도</dt><dd>스케줄러를 켜면 분할일마다 이 경우입니다. 장전부터 분석하고 동기화는 장 마감 뒤에 하기 때문입니다. 수동 사용에서는 실행일에 동기화보다 분석을 먼저 할 때 생깁니다. 한국 저녁(뉴욕 장전·장중)에 앱을 열어 분석하고, 다음 날 아침에 동기화하는 흐름이 그 경우입니다</dd>
+        </dl>
+        <div class="where">위치 <code>application/pipeline.py</code> <code>on_current_share_basis()</code>, <code>application/services.py</code> <code>levels_now()</code>, <code>evaluation_service._signal()</code>: 분석의 기준을 날짜로 추정함. 분석 결과의 기준은 그때 쓴 일봉의 분할 반영 여부가 정합니다. 각 추천의 <code>inputs.splits</code>에 그때 알던 분할이 이미 저장되어 있습니다 · 테스트 <code>test_H1_*</code> (3건)</div>
+      </article>
+
+      <article class="finding s2">
+        <div class="fhead"><span class="fid">H2</span><span class="sev P2">P2</span><h3>가이던스: 회사 수준이 아닌 금액이 아직 EXTRACTED</h3></div>
+        <dl>
+          <dt>입력</dt><dd>세 형태 13문장. (a) 금액 뒤에 붙은 일부: "We expect revenue of approximately $500 million <em>from the acquired business</em>", "revenue of $1.2 billion <em>in the Americas</em>", "approximately $30 billion <em>in the Data Center segment</em>", "adjusted EPS of $0.25 <em>from the acquired business</em>" 등 5문장. (b) 허용 단어 앞의 부문: "Data center <em>net</em> revenue", "Cloud segment <em>adjusted</em> operating margin", "Services <em>GAAP</em> gross margin". (c) 비교어가 떨어진 차이: "$50 million<em>, or 5%,</em> higher than the prior year", "$200 million <em>or 3%</em> above", "$0.10 <em>a share</em> higher" 등 5문장</dd>
+          <dt>기대</dt><dd>UNCLEAR(값 없음)</dd>
+          <dt>실제</dt><dd>13문장 모두 그 금액을 회사 가이던스로 EXTRACTED. 앞 단어 검사는 지표 바로 앞 한 단어만 보고, 뒤 비교어 검사는 쉼표나 "or 5%"를 건너뛰지 못하며, 금액 뒤의 "from/in + 부문"은 보지 않음. 끝단 2건: 부문 줄이 전체보다 먼저 나오면 다음 분기 매출 가이던스 −26%, 차이만 적은 문장은 −96%로 읽혀 실적을 넘은 분기가 둘 다 <strong>BEAT_WEAK_GUIDE</strong></dd>
+        </dl>
+        <div class="where">위치 <code>domain/guidance.py</code> <code>_qualified_by_part()</code>, <code>_compared_after()</code>, <code>_governed()</code> · 테스트 <code>test_H2_*</code> (15건)</div>
+      </article>
+
+      <article class="finding s2">
+        <div class="fhead"><span class="fid">H4</span><span class="sev P2">P2</span><h3>분할 전에 입력한 보유 수량·평단을 분할 뒤 가격과 계산</h3></div>
+        <dl>
+          <dt>입력</dt><dd>9월 1일에 NVDA 10주·평단 180을 입력(현금 10,000). 9월 22일 10:1 분할. 저장된 일봉은 모두 분할 기준(18). 보유 행에는 입력 날짜(<code>updated_at</code>)가 있음</dd>
+          <dt>기대</dt><dd>100주·평단 18로 환산: 평가금액 1,800, 손익 0%, 비중 약 15%. 한 종목 한도 10%를 넘었으므로 ADD는 "이미 한도에 도달"</dd>
+          <dt>실제</dt><dd><code>GET /api/portfolio</code>: 평가금액 180, <strong>평가손익 −90%</strong>, 비중 1.8%, 순자산 10,180(실제 11,800). ADD 매수 금액 계산은 HALF로 <strong>14주($252)를 더 사라고 권함</strong>. 포트폴리오 점검(<code>review_candidate</code>)도 같은 수량×가격으로 비중을 계산하므로 업종·한 종목 한도가 작동하지 않음(코드 확인)</dd>
+        </dl>
+        <div class="where">위치 <code>application/services.py</code> <code>portfolio()</code>(보유 행을 그대로 씀), <code>api/routes.py</code> <code>_position_plan()</code>·<code>portfolio()</code> · 테스트 <code>test_H4_*</code> (2건). 신청서가 요청한 "분할 환산이 빠진 가격 비교 경로"에 해당합니다. 이중으로 나누는 경로는 찾지 못했습니다</div>
+      </article>
+
+      <article class="finding s3">
+        <div class="fhead"><span class="fid">H3</span><span class="sev P3">P3</span><h3>가이던스: 흔한 회사 전체 문장이 이제 UNCLEAR</h3></div>
+        <dl>
+          <dt>입력</dt><dd>1b48217에서 맞게 추출하던 17문장. "The Company is forecasting revenue of $2.10 billion to $2.20 billion", "We are projecting revenue", "The Company expects to report revenue/EPS", "We expect to generate/deliver revenue", "The Company's revenue/EPS/gross margin … is expected to be", "annual revenue/EPS", "with revenue of", "this year's revenue", "We are updating/maintaining revenue guidance", "We are projecting gross margin"</dd>
+          <dt>기대</dt><dd>EXTRACTED, 적힌 범위 그대로</dd>
+          <dt>실제</dt><dd>17문장 모두 GUIDANCE_UNCLEAR. 지표 바로 앞 단어(report, generate, deliver, forecasting, projecting, updating, maintaining, company's, year's, annual, with)가 허용 목록에 없음. 값이 비는 쪽이라 P3이지만, 빠지는 범위는 신청서 예시(organic revenue, core EPS)보다 넓음. 가이던스가 빠지면 실적 판정이 "가이던스 약함"을 놓침</dd>
+        </dl>
+        <div class="where">위치 <code>domain/guidance.py</code> <code>_HEAD_OK</code> · 테스트 <code>test_H3_*</code> (17건). H2와 같이 고치려면, 허용 수식어(net, adjusted, GAAP …)를 왼쪽으로 건너뛴 뒤 처음 나오는 단어가 동사·한정사·회사 소유격이면 받고 그 밖의 명사면 부문으로 보는 방식이 두 쪽을 다 만족합니다</div>
+      </article>
+
+      <article class="finding s3">
+        <div class="fhead"><span class="fid">H5</span><span class="sev P3">P3</span><h3>데이터 준비 작업: 다른 동기화와 동시에 돌고, 마지막 상태 저장이 실패하면 잠금이 남음</h3></div>
+        <dl>
+          <dt>입력</dt><dd>(a) 작업이 첫 일괄 일봉 응답을 기다리는 동안 <code>sync_market()</code>이 따로 불림(POST /api/sync, <code>marketlens sync</code>, 스케줄러의 장 마감 뒤 단계가 모두 이 함수). (b) 한 라운드가 "database is locked"로 실패하고, 바로 뒤 마지막 상태(FAILED) 저장도 같은 이유로 실패</dd>
+          <dt>기대</dt><dd>(a) 두 번째 동기화는 기다리거나 거절하고, 같은 거래일을 두 번 받지 않음. (b) 작업이 끝나면 잠금이 풀려 상태가 RUNNING에 머물지 않고 다시 시작할 수 있음</dd>
+          <dt>실제</dt><dd>(a) 같은 거래일 <strong>30개를 두 번 받음</strong>. 작업은 시작할 때 만든 목록대로 다시 받음(신청서: "같은 것을 두 번 받지 않음"). (b) <code>finally</code>에서 상태 저장이 예외를 내면 <code>_sync_lock.release()</code>에 닿지 않음. 앱을 다시 켤 때까지 상태는 RUNNING, 화면은 "데이터 받는 중…"과 비활성 버튼. 앱 종료 뒤 INTERRUPTED 표시와 이어받기는 정상</dd>
+        </dl>
+        <div class="where">위치 <code>application/services.py</code> <code>sync_market()</code>(잠금 없음), <code>_sync_rounds()</code>의 <code>finally</code> · 테스트 <code>test_H5_*</code> (2건)</div>
+      </article>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-other">
+    <h2 id="h-other">다른 독립 검토에서 대상 커밋에 남은 결함</h2>
+    <p>신청자 브랜치 커밋 <span class="mono">7292d51</span>(대상 이후)의 <code>evaluations/independent_2240992/</code>에 있는 반례 15건을 <span class="mono">2b217e2</span>에서 그대로 돌렸습니다. 9건이 실패하고 6건이 통과합니다. 실패한 9건은 코드를 읽어 원인을 확인했고, F02와 F11은 평가자 탐침으로 영향도 쟀습니다. 등급은 원 검토의 등급이 아니라 이 평가의 기준으로 다시 매겼습니다. 같은 9건은 8차 대상 <span class="mono">1b48217</span>에서도 모두 실패합니다. <span class="mono">7292d51</span>은 이번 대상이 아니라서 확인하지 않았습니다.</p>
+    <div class="counts"><span class="sev P0">P0 × 1</span><span class="sev P2">P2 × 3</span><span class="sev P3">P3 × 4</span><span class="sev P3">감점 없음 × 1</span></div>
+    <div class="findings">
+      <article class="finding s0">
+        <div class="fhead"><span class="fid">F02</span><span class="sev P0">P0</span><h3>앱이 매수 추천을 하지 않은 보유 종목에는 종가 손절 규칙이 적용되지 않음</h3></div>
+        <dl>
+          <dt>입력</dt><dd>사용자가 입력한 NVDA 보유. 첫 분석은 HOLD, 가격 계획의 손절 기준가 350.26(화면에 표시). 이어받은 손절가(<code>guard_stop</code>)는 없음. 다음 날 종가 332.75</dd>
+          <dt>기대</dt><dd>"종가 기준 이탈 → 매도". 화면 설명: "종가가 손절 기준가 아래로 마감하면 매도(보유 중)·매수 중단으로 판단합니다"</dd>
+          <dt>실제</dt><dd><strong>HOLD</strong>, 손절 관련 사유 없음. <code>watched_stop()</code>은 직전 추천이 HOLD·REDUCE면 <code>guard_stop</code>만 보는데, 이 값은 앱이 BUY·ADD를 낸 뒤에만 생김. 앱 밖에서 산 보유는 ADD가 나오기 전까지 손절 점검이 한 번도 없음. 점수 기반 REDUCE·SELL은 작동하지만 느리고, 화면이 약속한 규칙은 아님. 원 검토의 <code>test_r10</code>도 같은 원인으로 실패</dd>
+          <dt>등급</dt><dd>사용자 입력 보유라는 흔한 입력에서, 화면이 약속한 결정 규칙이 조용히 빠짐 → P0. 8차의 "메모 5 해결"은 앱의 BUY로 시작한 보유에만 맞았습니다</dd>
+        </dl>
+        <div class="where">위치 <code>application/pipeline.py</code> <code>watched_stop()</code>, <code>carried_guard_stop()</code></div>
+      </article>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>항목</th><th>이 평가 등급</th><th>원 테스트</th><th>대상 커밋에서 확인한 내용</th></tr></thead>
+      <tbody>
+        <tr><td class="n">F06</td><td><span class="sev P2">P2</span></td><td class="n"><code>test_r6</code> 실패</td><td>티커가 재사용되면, 같은 동기화에서 먼저 저장한 새 회사의 첫 일봉이 옛 회사 보관 기록으로 옮겨짐(일봉 저장이 목록 단계보다 먼저). 새 회사는 첫날이 비고, 옛 회사 기록에는 다른 회사 가격이 붙음</td></tr>
+        <tr><td class="n">F10</td><td><span class="sev P2">P2</span></td><td class="n"><code>test_r11</code> 실패</td><td>재사용된 티커의 새 회사 분석이 옛 회사의 직전 추천(손절가, 히스테리시스)을 이어받음. 직전 추천 조회가 티커만 봄</td></tr>
+        <tr><td class="n">F14</td><td><span class="sev P2">P2</span></td><td class="n"><code>test_r15</code> 실패</td><td>API 토큰이 없으면(기본값) 다른 사이트가 시작한 GET <code>/api/stocks/{t}?refresh=true</code>가 분석을 저장하고, BUY면 모의투자 포지션도 만듦. 응답은 읽지 못해도 기록은 바뀜. 설정 저장 같은 쓰기 요청의 CSRF 방어는 여전히 유효</td></tr>
+        <tr><td class="n">F07</td><td><span class="sev P3">P3</span></td><td class="n"><code>test_r7</code> 실패</td><td>저장된 일봉이 끝 날짜만 덮으면 시작 구간을 확인하지 않음. 동기화 창(300일, 약 207거래일)이 분석 창(420일)보다 짧아, 새 설치는 240거래일이 쌓일 때까지 약 7주 동안 52주 값이 비어 있음(값이 비는 쪽)</td></tr>
+        <tr><td class="n">F08</td><td><span class="sev P3">P3</span></td><td class="n"><code>test_r8</code> 실패</td><td>업종 비중 29.5%(한도 30%)에 SMALL(1.25%)을 허용해 30.75%</td></tr>
+        <tr><td class="n">F09</td><td><span class="sev P3">P3</span></td><td class="n"><code>test_r9</code> 실패</td><td>가이던스가 적은 분기(3분기)가 아니라 가장 가까운 다음 발표(2분기)의 컨센서스와 비교됨. 다음 분기가 아닌 분기를 적은 가이던스는 드묾</td></tr>
+        <tr><td class="n">F11</td><td><span class="sev P3">P3</span></td><td class="n"><code>test_r12</code> 실패</td><td>"Federal Reserve leaves interest rates unchanged"·"Fed holds rates steady"를 금리 상승(+1)으로, 중요도 0.7(중대 이슈 기준과 같음)로 처리. 모의 시장에서 NEE·PLD −6.3, JPM·BAC +3.9~4.9의 이슈 영향. 점수 영향은 계산상 약 0.2점이지만 이슈 화면의 방향이 틀리고 재검증 표시가 붙음</td></tr>
+        <tr><td class="n">F01 보조</td><td>감점 없음</td><td class="n"><code>test_r2</code> 실패</td><td>분석과 같은 시각의 호가로는 계획을 다시 검사하지 않음. 대상 커밋에서는 자기 가격에서 이미 깨진 BUY가 저장되는 경로를 찾지 못함(<code>test_r1</code> 통과, 위원회는 낮추기만 함). 방어층 누락으로만 기록</td></tr>
+      </tbody>
+    </table></div>
+    <p class="where">실행 기록: <code>evaluations/eval9/independent_2240992_on_2b217e2.txt</code>. 통과한 6건(F01 본 테스트, F03, F04, F05, F12, F13)은 대상 커밋에서 해결된 상태입니다. F12·F13은 8차 I1·분할 추정치와 같은 결함이었습니다.</p>
+  </section>
+
+  <section aria-labelledby="h-asked">
+    <h2 id="h-asked">신청서가 요청한 점검 결과</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>요청</th><th>결과</th></tr></thead>
+      <tbody>
+        <tr><td>분할 환산(<code>on_current_share_basis</code>, <code>levels_now</code>)이 빠진 가격 비교 경로, 또는 이중으로 나누는 경로</td><td>빠진 경로 두 가지를 찾음. 분할 실행일 당일의 분석(H1, 파이프라인·저장된 추천·모의투자 공통)과 사용자가 입력한 보유 수량·평단(H4). 이중으로 나누는 경로는 찾지 못함(요약·상태 점검·매수 금액이 각각 한 번씩 환산, 추정치·발행주식수는 별도 경로)</td></tr>
+        <tr><td>가이던스 앞 수식어·뒤 비교어 규칙이 틀린 값을 EXTRACTED로 남기거나, 흔한 회사 전체 가이던스를 놓치는 문장</td><td>둘 다 찾음. 틀린 값 13문장과 끝단 2건(H2), 놓치는 회사 전체 문장 17개(H3, 모두 1b48217에서는 추출됨)</td></tr>
+        <tr><td>백그라운드 데이터 준비(<code>/api/sync/start</code>)의 동시성·중단·오류 처리</td><td>동시성: 다른 동기화 경로가 잠금을 보지 않음(H5a). 오류: 마지막 상태 저장 실패 때 잠금이 남음(H5b). 중단: 앱 종료 뒤 INTERRUPTED 표시와 이어받기는 정상, 각 단계가 트랜잭션이라 데이터가 반쯤 남지 않음</td></tr>
+        <tr><td>반례를 실행 가능한 테스트로</td><td><code>evaluations/eval9</code> 39건, 모두 <span class="mono">2b217e2</span>에서 의도대로 실패. 3~8차 반례 107건은 계속 통과</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="h-score">
+    <h2 id="h-score">점수 기준표</h2>
+    <p class="note">3~8차와 같은 기준표입니다. 등급 구간: A는 85점 이상이면서 Gate 5개 모두 통과, B 75~84, C 60~74, D 60 미만. 감점 폭은 대략 P0 −8, P1 −4~5, P2 −1.5, P3 −0.5~1입니다. 항목별 감점을 소수점까지 더하면 70.5점입니다.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>영역</th><th class="num">배점</th><th class="num">8차</th><th class="num">9차</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td>데이터 무결성·시점 정확성</td><td class="num">25</td><td class="num">23</td><td class="num">17.5</td><td>I3 해결. 분할 전 보유 수량(H4, −1.5). 재사용 티커의 일봉 귀속(F06, −1.5)과 직전 추천 이어받기(F10, −1.5). 회사 전체 가이던스 누락(H3, −1). F07·F09·F11(각 −0.5). 설계 한계(−0.5, 8차와 같음)</td></tr>
+        <tr><td>결정 안전성</td><td class="num">20</td><td class="num">13.5</td><td class="num">6</td><td>I1 주 경로 해결. 입력 보유의 손절 규칙 누락(F02, P0, −8). 분할 실행일 거짓 매도(H1, −4. I1보다 좁은 경우라 −5보다 작게). 가이던스 틀린 값(H2, −1.5). 업종 한도 초과(F08, −0.5)</td></tr>
+        <tr><td>성과 평가·모의투자</td><td class="num">15</td><td class="num">14</td><td class="num">13</td><td>I4 해결. 다른 사이트 요청이 추천·모의 포지션을 기록(F14, −1.5). H1과 같은 창의 모의 포지션(−0.5)</td></tr>
+        <tr><td>실데이터 검증</td><td class="num">15</td><td class="num">12</td><td class="num">11.5</td><td>재검증 13/13. 8차의 감점 사유 세 가지는 그대로(SEC 항목 독립 재현 불가, 값 대조 없음, 종목 마스터 동기화 미검증). 데이터 준비 작업을 실제 API로 돌리지 않음(−0.5, 공개된 한계)</td></tr>
+        <tr><td>테스트·CI·재현성</td><td class="num">10</td><td class="num">9</td><td class="num">9</td><td>수치 정확, 테스트 44개 증가. 세 번 중 한 번 1건 간헐 실패(원인 미확인, 8차와 같음)</td></tr>
+        <tr><td>UI 정확성</td><td class="num">10</td><td class="num">9</td><td class="num">9.5</td><td>I5·I6 해결, 데이터 준비 버튼과 진행 표시 추가. 상태 저장 실패 때 "받는 중"에 멈춤(H5, −0.5)</td></tr>
+        <tr><td>신청서·문서의 정확성</td><td class="num">5</td><td class="num">4</td><td class="num">4</td><td>수치와 실행 기록은 사실, 한계를 솔직히 적음. 가이던스 누락 범위 설명은 좁음. "열린 P0 없음"은 대상 커밋 기준으로 틀리지만 제출 때 알았는지 확인할 수 없어 감점하지 않음</td></tr>
+      </tbody>
+      <tfoot><tr><td>합계</td><td class="num">100</td><td class="num">84.5 → 84</td><td class="num">70.5 → 70</td><td>C 등급 · A Gate 4/5</td></tr></tfoot>
+    </table></div>
+    <p class="where">감점 29.5점의 내역: 이전부터 이어진 사유 5.5점(설계 한계, 실데이터 세 가지, 간헐 실패, 문서), 이번 평가자 반례 9.5점(H1~H5와 데이터 준비 실데이터 미검증), 다른 검토 결함 14.5점(F02 8, F06·F10·F14 각 1.5, F07·F08·F09·F11 각 0.5).</p>
+  </section>
+
+  <section aria-labelledby="h-next">
+    <h2 id="h-next">다음 라운드 우선순위</h2>
+    <ol class="prio">
+      <li><strong>F02 보유 종목의 손절.</strong> 직전 추천이 HOLD·REDUCE이고 이어받은 손절가가 없으면 그 분석 자신의 손절가를 보십시오. 신청자 커밋 <span class="mono">7292d51</span>이 이렇게 고쳤다고 적었으니, 다음 신청 대상에서 원 검토의 테스트와 함께 확인하겠습니다.</li>
+      <li><strong>H1 분할의 기준.</strong> 분석의 기준을 날짜로 추정하지 말고, 그 분석이 이미 반영한 분할을 기록해 두십시오(각 추천의 <code>inputs.splits</code>, 또는 요약에 새 필드). 나눌 때는 그 목록에 없고 이미 실행된 분할만 쓰십시오. 기록이 없는 옛 요약만 날짜 규칙을 쓰면 됩니다. <code>on_current_share_basis</code>, <code>levels_now</code>, 모의투자 <code>_signal</code>에 같은 규칙을 쓰십시오.</li>
+      <li><strong>H4 보유 수량.</strong> 보유 행의 <code>updated_at</code> 이후에 실행된 분할로 수량을 곱하고 평단을 나눠서 평가·비중·매수 금액을 계산하고, 화면에 "분할 반영"을 표시하십시오.</li>
+      <li><strong>H2·H3 가이던스.</strong> 앞쪽은 허용 수식어를 왼쪽으로 건너뛴 뒤 처음 나오는 단어로 판단하십시오. 동사, 한정사, 회사·연도 소유격, annual/quarterly/with이면 받고, 그 밖의 명사는 부문으로 보십시오. 뒤쪽은 금액 뒤의 "from/in/for + 부문"을 부문으로 보십시오. 기간 표현("in fiscal 2027", "for the fourth quarter")과 "from continuing operations"는 받아야 합니다. 비교어 검사는 ", or 5%,"와 "a share"를 건너뛰게 하십시오.</li>
+      <li><strong>H5 데이터 준비.</strong> <code>sync_market()</code>도 같은 잠금을 쓰십시오. 작업 안에서는 잠금 없는 내부 함수를 쓰거나 RLock을 쓰면 됩니다. 잠금 해제는 상태 저장과 다른 <code>finally</code>에 두십시오.</li>
+      <li><strong>F06·F10·F14·F07·F08·F09·F11.</strong> 원 검토의 테스트를 회귀 테스트로 유지하십시오. 신청서에는 다른 검토의 결과와 그 처리도 적어 주십시오.</li>
+      <li><strong>live-verify.</strong> <code>SEC_USER_AGENT</code> secret, 몇 개 값의 공시 원문 대조, 실제 유니버스 동기화 기록, 데이터 준비 작업의 실제 실행 기록.</li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="h-repro">
+    <h2 id="h-repro">재현 방법</h2>
+    <pre><code># 반례 모음 가져오기 (평가 브랜치 = 2b217e2 + evaluations/eval9)
+git fetch origin claude/new-session-ir1fdw
+git checkout origin/claude/new-session-ir1fdw -- evaluations/eval9
+
+pip install -r backend/requirements.lock &amp;&amp; pip install --no-deps -e ./backend
+python -m pytest -q -o addopts="" evaluations/eval9        # 2b217e2: 39 failed (의도한 실패)
+python -m pytest -q -o addopts="" evaluations              # 39 failed, 107 passed (3~8차는 통과)
+
+# 다른 독립 검토의 반례 (원본은 신청자 커밋 7292d51)
+mkdir -p evaluations/independent_2240992
+git show 7292d51:evaluations/independent_2240992/conftest.py &gt; evaluations/independent_2240992/conftest.py
+git show 7292d51:evaluations/independent_2240992/test_independent_review.py &gt; evaluations/independent_2240992/test_independent_review.py
+python -m pytest -q -o addopts="" evaluations/independent_2240992   # 2b217e2: 9 failed, 6 passed</code></pre>
+    <p class="note">반례 테스트는 <code>backend/tests</code> 밖에 있어 CI가 수집하지 않습니다. 고친 뒤에는 모두 통과해야 하며, 통과한 테스트는 회귀 테스트로 <code>backend/tests</code>로 옮기면 됩니다.</p>
+  </section>
+</main>
