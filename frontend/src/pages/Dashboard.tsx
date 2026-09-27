@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 import { advise } from "../advice";
 import { api } from "../api";
@@ -53,15 +53,54 @@ function OppCard({ r }: { r: OppRow }) {
   );
 }
 
+interface ScanStatus {
+  state: { scan_id: number; status: "COMPLETE" | "RUNNING" | "INTERRUPTED"; started_at: string; saved: number; total: number } | null;
+  coverage: { universe: number; excluded: number; deep_analysed: number; analysed: number; data_insufficient: number; data_insufficient_rate: number | null;
+    missing_by_field: Record<string, { count: number; rate: number }>; excluded_by_reason: Record<string, number>;
+    llm: { calls: number; estimated_cost_usd: number; cost_complete: boolean } } | null;
+}
+
+const FIELD_KO: Record<string, string> = { price: "현재가", price_history: "가격 이력", fundamentals: "재무", analyst: "애널리스트 추정치", earnings: "실적", macro: "거시", news: "뉴스", options: "옵션", ownership: "수급" };
+
+/** How much of the market the last scan judged, why the rest was left out, the missing-data rate and the AI
+ * cost — and whether the scan finished (an interrupted scan keeps what it saved). */
+export function CoverageCard({ s }: { s: ScanStatus | null }) {
+  if (!s || !s.state) return <Card title="분석 범위" icon="◫"><Empty hint="‘전체 시장 스캔’을 실행하면 표시됩니다.">아직 스캔 기록이 없습니다.</Empty></Card>;
+  const c = s.coverage;
+  const st = s.state;
+  const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+  return (
+    <Card title="분석 범위" icon="◫" explain="마지막 스캔이 시장의 얼마를 실제로 판단했는지와 빠진 이유"
+          tone={st.status === "INTERRUPTED" ? "warn" : undefined}>
+      {st.status === "INTERRUPTED" && <Notice tone="warn">지난 스캔이 중간에 멈췄습니다({st.saved}/{st.total}개 저장). 저장된 결과는 유지되며, 다시 스캔하면 이미 받은 AI 검토 결과를 재사용합니다.</Notice>}
+      {st.status === "RUNNING" && <div className="caption">스캔 진행 중: {st.saved}/{st.total}개 저장</div>}
+      {c && (
+        <div className="kv">
+          <span className="k">전체 종목</span><span>{c.universe.toLocaleString("ko-KR")}개</span>
+          <span className="k">기준 미달로 제외</span><span>{c.excluded.toLocaleString("ko-KR")}개 ({pct(c.universe ? c.excluded / c.universe : null)})</span>
+          <span className="k">정밀 분석</span><span>{c.deep_analysed.toLocaleString("ko-KR")}개 → 최종 순위 {c.analysed}개</span>
+          <span className="k">데이터 부족으로 판단 안 함</span><span className={c.data_insufficient ? "warn" : undefined}>{c.data_insufficient}개 ({pct(c.data_insufficient_rate)})</span>
+          {Object.entries(c.missing_by_field).slice(0, 4).map(([k, v]) => <Fragment key={k}><span className="k">{FIELD_KO[k] ?? k} 없음</span><span>{v.count}개 ({pct(v.rate)})</span></Fragment>)}
+          <span className="k">AI 검토 비용</span><span>{c.llm.calls}회 · 약 ${c.llm.estimated_cost_usd.toFixed(2)}{c.llm.cost_complete ? "" : " (일부 비용 미상)"}</span>
+        </div>
+      )}
+      {c && Object.keys(c.excluded_by_reason).length > 0 && (
+        <div className="caption" style={{ marginTop: 6 }}>제외 이유: {Object.entries(c.excluded_by_reason).map(([k, v]) => `${k} ${v}`).join(" · ")}</div>
+      )}
+    </Card>
+  );
+}
+
 export default function Dashboard() {
   const d = useApi<Dash>("/dashboard");
+  const ss = useApi<ScanStatus>("/scan/status");
   const { mode } = useMode();
   const [busy, setBusy] = useState(false);
   const [scanErr, setScanErr] = useState<string | null>(null);
   const scan = async () => {
     setBusy(true);
     setScanErr(null);
-    try { await api.post("/scan?committee=true"); d.reload(); } catch (e) { setScanErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    try { await api.post("/scan?committee=true"); d.reload(); ss.reload(); } catch (e) { setScanErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   if (d.state === "loading") return <Loading what="대시보드" />;
   if (!d.data) return <Err error={d.error} retry={d.reload} />;
@@ -128,6 +167,8 @@ export default function Dashboard() {
           {x.watchlist_alerts.length ? <ul className="list">{x.watchlist_alerts.map((a) => <li key={a.ticker}><span className={`dot ${a.level === "positive" ? "pos" : a.level === "warning" ? "warn" : "info"}`}>{a.level === "positive" ? "↑" : a.level === "warning" ? "!" : "i"}</span><span><Link to={`/stocks/${a.ticker}`}>{a.ticker}</Link> {a.text}</span></li>)}</ul> : <Empty hint="종목 분석 화면에서 ‘관심종목 추가’를 누르세요.">관심 종목이 없습니다.</Empty>}
         </Card>
       </div>
+
+      <CoverageCard s={ss.data ?? null} />
 
       <Card title="시스템 상태" icon="●" right={<Link to="/health">자세히 →</Link>}>
         {down.length ? <Notice tone="warn">일부 데이터 공급자가 중단되었습니다({down.map((h) => h.kind).join(", ")}). 해당 데이터는 ‘없음’으로 표시되고 판단에서 보수적으로 처리됩니다.</Notice>

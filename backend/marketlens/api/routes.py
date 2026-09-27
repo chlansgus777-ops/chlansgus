@@ -117,6 +117,13 @@ def run_scan(req: Request, committee: bool = True) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- stock detail
+@router.get("/scan/status")
+def scan_status(req: Request) -> dict[str, Any]:
+    """The last scan: progress (COMPLETE / RUNNING / INTERRUPTED with how many results were saved) and coverage —
+    how much of the market was judged, why the rest was left out, the missing-data rate and the AI cost."""
+    return svc(req).scan_status()
+
+
 @router.get("/stocks/{ticker}")
 def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
     s = svc(req)
@@ -137,8 +144,10 @@ def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
         com = repo.committee_for(ss, row.id)
         history = [{"id": h.id, "as_of": h.as_of.isoformat(), "score": h.score, "action": h.final_action} for h in repo.recommendation_history(ss, t, 30, mode=mode)]
         bars = (row.inputs or {}).get("bars") or []
+        summary = _row_summary(row, s, fetch_quote=True)
         return {
-            "recommendation": _row_summary(row, s, fetch_quote=True),
+            "recommendation": summary,
+            "position_plan": _position_plan(s, ss, row, summary),
             "analysis": row.result,
             "price_history": [{"day": b["day"], "close": b["close"]} for b in bars[-130:]],
             "committee": com.payload if com else None,
@@ -148,6 +157,27 @@ def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
                          "provider": row.provider_version, "schema": row.schema_version, "code": row.code_version, "app": row.app_version, "llm_models": row.llm_model_ids,
                          "input_fingerprint": row.input_fingerprint},
         }
+
+
+def _position_plan(s: MarketLensService, ss: Any, row: Any, summary: dict[str, Any]) -> dict[str, Any]:
+    """Dollars and whole shares for a buy recommendation, from the user's portfolio value (cash + holdings at the
+    last close). Without an entered portfolio the screen says so instead of guessing an account size."""
+    from marketlens.domain.portfolio import position_plan
+
+    pf = s.portfolio(ss)
+    end = last_completed_session(s.now())
+    closes = {h.ticker: {b.day: b.close for b in (s.data.bars(h.ticker, end - timedelta(days=10), end).value or []) if b.day <= end} for h in pf.holdings}
+    entered = repo.get_setting(ss, "portfolio_cash", "") not in ("", None) or bool(pf.holdings)  # a default cash figure is not the user's account
+    nav = portfolio_snapshot(pf, closes).nav if entered else None
+    price = summary.get("revalidated_price") or summary.get("price")  # the re-checked current price when there is one
+    current = next((h.quantity * price for h in pf.holdings if h.ticker == row.ticker), 0.0) if price else 0.0
+    entry = (row.result or {}).get("entry") or {}
+    size_cap = ((row.result or {}).get("decision") or {}).get("size_limit")
+    p = position_plan(row.final_action, size_cap, nav, price, entry.get("stop"), current, s.model_config().portfolio)
+    if p is None:
+        why = ("포트폴리오(현금·보유 종목)를 입력하면 매수 금액과 수량을 계산합니다" if not nav else "매수 판정이 아니거나 현재가가 없어 계산하지 않음")
+        return {"available": False, "reason": why}
+    return {"available": True, "nav": round(nav or 0, 2)} | encode(p)
 
 
 @router.post("/recommendations/{rec_id}/committee")
@@ -406,6 +436,27 @@ def health(req: Request) -> dict[str, Any]:
     }
 
 
+class SetupIn(BaseModel):
+    values: dict[str, str] = Field(default_factory=dict)
+
+
+@router.put("/settings/setup")
+def save_setup(req: Request, body: SetupIn) -> dict[str, Any]:
+    """First-run setup from the screen (no file editing). Values are stored, never returned; the running backend
+    keeps its settings until it is restarted."""
+    from fastapi import HTTPException
+
+    from marketlens.config import save_setup as _save
+
+    svc(req)  # the service must exist (and the CSRF guard has already checked the client header)
+    try:
+        where = _save(body.values)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return {"saved": where, "restart_required": bool(where),
+            "note": "저장했습니다. 앱을 다시 시작하면 적용됩니다. 저장한 값은 화면에 다시 표시하지 않습니다."}
+
+
 @router.get("/settings")
 def settings(req: Request) -> dict[str, Any]:
     s = svc(req)
@@ -413,7 +464,8 @@ def settings(req: Request) -> dict[str, Any]:
     st = s.settings
     return {
         "mode": st.mode.value,
-        "keys_configured": {"FINNHUB_API_KEY": bool(st.finnhub_api_key), "FRED_API_KEY": bool(st.fred_api_key), "POLYGON_API_KEY": bool(st.polygon_api_key), "FINRA_API_KEY": bool(st.finra_api_key), "ANTHROPIC_API_KEY": bool(st.anthropic_api_key), "OPENAI_API_KEY": bool(st.openai_api_key), "SEC_USER_AGENT": bool(st.sec_user_agent)},
+        "keys_configured": {"SEC_USER_AGENT": bool(st.sec_user_agent), "FINNHUB_API_KEY": bool(st.finnhub_api_key), "POLYGON_API_KEY": bool(st.polygon_api_key), "FRED_API_KEY": bool(st.fred_api_key), "ALPHAVANTAGE_API_KEY": bool(st.alphavantage_api_key), "FINRA_API_KEY": bool(st.finra_api_key), "ANTHROPIC_API_KEY": bool(st.anthropic_api_key), "OPENAI_API_KEY": bool(st.openai_api_key)},
+        "llm_provider": st.llm_provider,
         "weights": dict(cfg.scoring_model.weights),
         "decision": encode(cfg.decision),
         "entry": encode(cfg.entry),

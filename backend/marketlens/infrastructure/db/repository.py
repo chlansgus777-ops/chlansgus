@@ -157,11 +157,13 @@ def record_llm_call(s: Session, rec: Any) -> None:
     s.add(LLMCallRow(provider=rec.provider, model=rec.model, tier=rec.tier, purpose=rec.purpose, input_tokens=rec.input_tokens, output_tokens=rec.output_tokens, latency_ms=rec.latency_ms, estimated_cost_usd=rec.estimated_cost_usd, cached=rec.cached, error=rec.error, created_at=rec.created_at))
 
 
-def llm_usage(s: Session) -> dict[str, Any]:
-    r = s.execute(select(func.count(LLMCallRow.id), func.sum(LLMCallRow.input_tokens), func.sum(LLMCallRow.output_tokens), func.sum(LLMCallRow.estimated_cost_usd), func.avg(LLMCallRow.latency_ms))).one()
-    cached = s.scalar(select(func.count(LLMCallRow.id)).where(LLMCallRow.cached.is_(True))) or 0
-    errors = s.scalar(select(func.count(LLMCallRow.id)).where(LLMCallRow.error.is_not(None))) or 0
-    unknown = s.scalar(select(func.count(LLMCallRow.id)).where(LLMCallRow.estimated_cost_usd.is_(None), LLMCallRow.cached.is_(False), LLMCallRow.error.is_(None))) or 0
+def llm_usage(s: Session, since: datetime | None = None) -> dict[str, Any]:
+    """LLM calls, tokens and estimated cost (all time, or since ``since`` — e.g. one scan)."""
+    w = [LLMCallRow.created_at >= since] if since is not None else []
+    r = s.execute(select(func.count(LLMCallRow.id), func.sum(LLMCallRow.input_tokens), func.sum(LLMCallRow.output_tokens), func.sum(LLMCallRow.estimated_cost_usd), func.avg(LLMCallRow.latency_ms)).where(*w)).one()
+    cached = s.scalar(select(func.count(LLMCallRow.id)).where(LLMCallRow.cached.is_(True), *w)) or 0
+    errors = s.scalar(select(func.count(LLMCallRow.id)).where(LLMCallRow.error.is_not(None), *w)) or 0
+    unknown = s.scalar(select(func.count(LLMCallRow.id)).where(LLMCallRow.estimated_cost_usd.is_(None), LLMCallRow.cached.is_(False), LLMCallRow.error.is_(None), *w)) or 0
     return {"calls": r[0] or 0, "input_tokens": r[1] or 0, "output_tokens": r[2] or 0,
             "estimated_cost_usd": round(r[3] or 0.0, 4), "unknown_cost_calls": unknown,
             "cost_complete": unknown == 0, "avg_latency_ms": round(r[4] or 0.0, 1), "cached_calls": cached, "errors": errors}
