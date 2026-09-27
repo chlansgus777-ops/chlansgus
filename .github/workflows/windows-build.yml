@@ -29,6 +29,9 @@ jobs:
           npm ci
           npm test
           npm run build:desktop
+      - name: Record the build commit (shown in the app, so an installed build can be identified)
+        shell: pwsh
+        run: git rev-parse --short=12 HEAD | Out-File -Encoding ascii build_commit.txt
       - name: PyInstaller sidecar
         working-directory: backend
         run: pyinstaller --noconfirm packaging/marketlens-backend.spec
@@ -49,6 +52,8 @@ jobs:
           if (-not $ready) { Get-Content "$env:RUNNER_TEMP\smoke.err"; throw "backend never became ready" }
           $sys = Invoke-RestMethod http://127.0.0.1:8799/api/system
           if ($sys.mode -ne "MOCK") { throw "unexpected mode $($sys.mode)" }
+          $want = (Get-Content build_commit.txt).Trim()
+          if ($sys.versions.code_version -ne $want) { throw "build commit not baked: '$($sys.versions.code_version)' (expected '$want')" }
           # a second instance on the same data dir must refuse to start (exit 4)
           $second = Start-Process -FilePath $exe -ArgumentList "serve","--port","0" -PassThru -Wait
           if ($second.ExitCode -ne 4) { throw "second instance exit $($second.ExitCode), expected 4" }

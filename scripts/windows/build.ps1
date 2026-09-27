@@ -9,6 +9,7 @@ Push-Location frontend
 npm ci
 npm run build:desktop
 Pop-Location
+git rev-parse --short=12 HEAD | Out-File -Encoding ascii build_commit.txt  # shown in the app as the build
 Push-Location backend
 & $py -m PyInstaller --noconfirm packaging\marketlens-backend.spec
 Pop-Location

@@ -26,6 +26,12 @@ const ADVANCED: [string, string, string][] = [
 ];
 
 
+/** Which build is running (the commit it was built from): after installing a new version the owner can check it. */
+export function versionLabel(sys: SystemInfo): string {
+  const v = sys.versions ?? {};
+  return `앱 버전 ${v.app_version ?? "?"} · 빌드 ${v.code_version ?? "unknown"}`;
+}
+
 export default function App() {
   const sys = useApi<SystemInfo>("/system");
   const ready = useApi<{ recommendation_readiness: string }>("/readiness");
@@ -48,7 +54,8 @@ export default function App() {
             <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}><span aria-hidden>{icon}</span>{label}</NavLink>
           ))}
         </details>
-        <div className="foot">MarketLens는 주문을 넣지 않습니다. 모든 매매는 직접 판단·실행하세요. 가격은 모두 미국 달러(USD)입니다.</div>
+        <div className="foot">MarketLens는 주문을 넣지 않습니다. 모든 매매는 직접 판단·실행하세요. 가격은 모두 미국 달러(USD)입니다.
+          {sys.data && <div data-testid="app-version">{versionLabel(sys.data)}</div>}</div>
       </nav>
       <div style={{ minWidth: 0 }}>
         {sys.data && <ModeBanner mode={sys.data.mode} />}

@@ -146,3 +146,96 @@ def test_with_every_key_the_preparation_does_not_ask_for_setup(tmp_path):
     _join()
     job = svc.sync_status()["job"]
     assert job["status"] != "NEEDS_SETUP" and not job.get("missing")
+
+
+# ---------------------------------------------------------------- owner report 2026-09-27 (2): still 10 s, still NOT READY
+def test_a_missing_quote_key_is_named_although_the_data_itself_is_complete(tmp_path):
+    """Without FINNHUB_API_KEY the recommendation readiness is NOT READY (the current price cannot be checked) even
+    with every stored dataset complete; the button cannot fix that. The job must say so, never 'done'."""
+    svc = _live(tmp_path, finnhub_api_key=None)
+    svc.start_sync()
+    _join()
+    job = svc.sync_status()["job"]
+    assert svc.readiness()["recommendation_readiness"] == "NOT READY"
+    assert job["status"] == "NEEDS_SETUP", job
+    assert any("FINNHUB_API_KEY" in m for m in job["missing"]), job
+    assert any("FINNHUB_API_KEY" in m for m in svc.readiness()["readiness_reasons"])  # the header's reason names it too
+
+
+def test_a_job_with_nothing_left_to_fetch_is_not_done_while_the_readiness_is_not_ready(tmp_path, monkeypatch):
+    """Whatever made the round fetch nothing (days recorded as empty by an older version, companies waiting for a
+    retry): the job ends INCOMPLETE with the readiness reasons, not DONE."""
+    svc = _live(tmp_path)
+
+    def nothing(**_k):  # noqa: ANN003, ANN202
+        return {"status": "SYNC_COMPLETE", "bar_days_remaining": 0, "bar_days_loaded": 0, "bar_days_empty": 0, "fundamentals_ingested": 0,
+                "profiles_updated": 0, "fundamentals_pending": 0, "errors": [], "missing": []}
+
+    monkeypatch.setattr(svc, "sync_market", nothing)
+    svc.start_sync()
+    _join()
+    job = svc.sync_status()["job"]
+    assert svc.readiness()["recommendation_readiness"] == "NOT READY"
+    assert job["status"] == "INCOMPLETE", job
+    assert job["reasons"] and any("유니버스" in r for r in job["reasons"]), job
+
+
+def test_companies_whose_filings_all_failed_are_shown_with_the_cause_and_the_retry_time(tmp_path, monkeypatch):
+    from marketlens.application.sync import _find
+    from marketlens.providers.contracts import ProviderUnavailable
+
+    svc = _live(tmp_path)
+    fund = _find(svc.registry, "fundamental", "get_quarterly")
+
+    def refused(_t):  # noqa: ANN001, ANN202
+        raise ProviderUnavailable("unauthorized (403) — check API key / license / SEC User-Agent")
+
+    monkeypatch.setattr(fund, "get_quarterly", refused)
+    svc.start_sync()
+    _join()
+    job = svc.sync_status()["job"]
+    assert job["status"] == "INCOMPLETE", job
+    assert any("403" in f for f in job["failures"]), job
+    assert job.get("retry_at"), job
+
+
+# ---------------------------------------------------------------- owner request: show the real progress (%) while it runs
+def test_the_preparation_reports_its_progress_while_it_runs(tmp_path, monkeypatch):
+    from marketlens.application.sync import _find
+
+    svc = _live(tmp_path)
+    grouped = _find(svc.registry, "price", "get_grouped_daily")
+    real = grouped.get_grouped_daily
+    calls = {"n": 0}
+    third, go = threading.Event(), threading.Event()
+
+    def slow(d):  # noqa: ANN001, ANN202
+        calls["n"] += 1
+        if calls["n"] == 3:
+            third.set()
+            go.wait(timeout=20)
+        return real(d)
+
+    monkeypatch.setattr(grouped, "get_grouped_daily", slow)
+    seen: list[tuple[str, int, int]] = []
+    record = svc._on_sync_progress
+
+    def spy(step, done, total, detail=""):  # noqa: ANN001, ANN202
+        seen.append((step, done, total))
+        record(step, done, total, detail)
+
+    monkeypatch.setattr(svc, "_on_sync_progress", spy)
+    svc.start_sync()
+    assert third.wait(timeout=20)
+    p = svc.sync_status()["job"]["progress"]  # mid-round: before the round has ended
+    bars = p["steps"]["bars"]
+    assert bars["total"] > 0 and bars["done"] == 2 and bars["detail"], p  # two sessions stored, the third being fetched
+    assert 0 < p["percent"] < 100 and p.get("eta_seconds", 0) > 0, p
+    go.set()
+    _join()
+    job = svc.sync_status()["job"]
+    fin = job["progress"]
+    assert all(s["done"] == s["total"] for s in fin["steps"].values()), fin
+    assert job["status"] == "DONE" and fin["percent"] == 100, job
+    b = [(d, t) for s, d, t in seen if s == "bars"]
+    assert all(d1 <= d2 for (d1, _), (d2, _) in zip(b, b[1:])) and all(d <= t for d, t in b)  # never backwards, never above the total

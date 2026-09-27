@@ -47,3 +47,35 @@ describe("a preparation that needs a key first", () => {
     expect(screen.getByRole("link", { name: /설정 화면/ }).getAttribute("href")).toContain("settings");
   });
 });
+
+describe("a preparation with nothing left to fetch while the readiness is not ready", () => {
+  it("says it is not ready yet, why, which failures it saw and when it retries — never 'done'", async () => {
+    const job = { status: "INCOMPLETE", round: 1, bar_days_remaining: 0, errors: [], missing: [],
+      reasons: ["대형주 분기 재무 수집 12% < 60% (수집 실패 800종목(재시도 대기))"],
+      failures: ["재무 AAPL: unauthorized (403) — check API key / license / SEC User-Agent"], retry_at: "2026-09-27T18:00:00+00:00" };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ job }), { status: 200 })));
+    render(<MemoryRouter><NotReady r={r} /></MemoryRouter>);
+    expect(await screen.findByText(/아직 준비 안 됨/)).toBeTruthy();
+    expect(screen.queryByText(/상태: 끝남/)).toBeNull();
+    expect(screen.getByText(/대형주 분기 재무 수집 12%/)).toBeTruthy();
+    expect(screen.getByText(/AAPL: unauthorized \(403\)/)).toBeTruthy();
+    expect(screen.getByText(/다시 시도할 수 있는 시각/)).toBeTruthy();
+  });
+});
+
+describe("progress while the data is prepared (owner request)", () => {
+  it("shows the overall percentage, each step's counts and the time left", async () => {
+    const job = { status: "RUNNING", round: 2, started_at: "2026-09-27T12:00:00+00:00",
+      progress: { percent: 37.4, eta_seconds: 2460, current: "bars",
+        steps: { bars: { done: 76, total: 206, percent: 36, detail: "2026-05-14" }, universe: { done: 1, total: 1, percent: 100, detail: "" },
+                 fundamentals: { done: 35, total: 812, percent: 4, detail: "MSFT" } } } };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ job }), { status: 200 })));
+    render(<MemoryRouter><NotReady r={r} /></MemoryRouter>);
+    expect(await screen.findByText(/데이터 준비 37\.4%/)).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "데이터 준비 전체" }).getAttribute("aria-valuenow")).toBe("37");
+    expect(screen.getByText(/가격 이력: 76\/206 거래일 \(36%\)/)).toBeTruthy();
+    expect(screen.getByText(/2026-05-14 받는 중/)).toBeTruthy();
+    expect(screen.getByText(/재무: 35\/812 종목 \(4%\)/)).toBeTruthy();
+    expect(screen.getByText(/남은 시간 약 41분/)).toBeTruthy();
+  });
+});

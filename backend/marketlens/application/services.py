@@ -158,6 +158,7 @@ class MarketLensService:
         self._lock = threading.Lock()
         self._sync_lock = threading.Lock()  # the background preparation job (taken by start_sync, freed by the job)
         self._ledger_lock = threading.Lock()  # one trade-record change at a time (check and write together)
+        self._sync_progress: dict[str, Any] = {}  # live counts of the running preparation (MarketSync progress callback)
         self._sync_run = threading.Lock()  # one sync_market() at a time, whoever calls it (9th evaluation H5)
         self.last_scan_context: ScanContext | None = None
         self._check_db_environment()
@@ -639,6 +640,7 @@ class MarketLensService:
         if not self._sync_lock.acquire(blocking=False):
             return {"started": False, "reason": "이미 데이터를 준비하는 중", **self.sync_status()}
         state: dict[str, Any] = {"status": "RUNNING", "round": 0, "started_at": self.now().isoformat()}
+        self._sync_progress = {}
         try:
             self._sync_state(state)
             threading.Thread(target=self._sync_rounds, args=(max_rounds, state), name="marketlens-sync", daemon=True).start()
@@ -656,10 +658,12 @@ class MarketLensService:
         """Runs holding ``_sync_lock`` (taken by :meth:`start_sync`)."""
         try:
             for i in range(max_rounds):
-                out = self.sync_market()
+                out = self.sync_market(progress=self._on_sync_progress)
                 progressed = bool(out["bar_days_loaded"] or out["bar_days_empty"] or out["fundamentals_ingested"] or out["profiles_updated"])
                 state.update(round=i + 1, bar_days_remaining=out["bar_days_remaining"], fundamentals_pending=out["fundamentals_pending"],
                              errors=out["errors"][:3], missing=out.get("missing", []), updated_at=self.now().isoformat())
+                state["failures"] = list(dict.fromkeys(state.get("failures", []) + out.get("failures", [])))[:3]
+                state["progress"] = self._progress_summary()
                 # profiles have no pending count: a round that still added some may have left more (bounded per round)
                 if out["status"] == "SYNC_COMPLETE" and not out["fundamentals_pending"] and not out["profiles_updated"]:
                     state["status"] = "DONE"
@@ -671,8 +675,8 @@ class MarketLensService:
                 self._sync_state(state)
             else:
                 state["status"] = "PAUSED"  # round cap reached; pressing the button again continues where it stopped
-            if state["status"] == "PAUSED" and state.get("missing"):
-                state["status"] = "NEEDS_SETUP"  # what it could fetch it did, but readiness needs the missing key first
+            state["progress"] = self._progress_summary()
+            self._settle_sync(state)
         except Exception as e:  # the job must end with a visible state; the error is logged with its traceback
             log.exception("background sync failed")
             state.update(status="FAILED", errors=[f"{type(e).__name__}: {e}"])
@@ -686,6 +690,70 @@ class MarketLensService:
             finally:
                 self._sync_lock.release()  # always: the button must work again without restarting the app
 
+    # seconds one item takes at the free providers' limits (Polygon 5 requests/minute; SEC filings are large downloads):
+    # used for the weights of the overall percentage and for the time estimate until a measured pace exists
+    SYNC_SECONDS_PER_ITEM = {"bars": 12.5, "universe": 10.0, "profiles": 0.5, "fundamentals": 1.5}
+
+    def _on_sync_progress(self, step: str, done: int, total: int, detail: str = "") -> None:
+        """MarketSync's progress callback: counts of the whole preparation after every stored item."""
+        import time
+
+        now = time.monotonic()
+        rec = self._sync_progress.get(step)
+        if rec is None or done < rec["first"]:
+            rec = {"first": done, "t0": now}
+            self._sync_progress[step] = rec
+        rec.update(done=done, total=total, detail=detail, t=now)
+        self._sync_progress["_current"] = step
+
+    def _progress_summary(self) -> dict[str, Any] | None:
+        """{steps: {step: done/total/percent/detail}, percent, eta_seconds, current}: the overall percentage weighs
+        each step's items by the time one takes; 100 only when every item of every reported step is done. The time
+        left uses the pace measured in this job once three items went through, else the providers' limits."""
+        import math
+
+        steps = {k: v for k, v in self._sync_progress.items() if not k.startswith("_")}
+        if not steps:
+            return None
+        out: dict[str, Any] = {}
+        work = done_work = eta = 0.0
+        for k, v in steps.items():
+            total, done = int(v["total"]), min(int(v["done"]), int(v["total"]))
+            spu = self.SYNC_SECONDS_PER_ITEM.get(k, 1.0)
+            n, dt = done - v["first"], v["t"] - v["t0"]
+            pace = dt / n if n >= 3 and dt > 0 else spu
+            out[k] = {"done": done, "total": total, "percent": math.floor(100 * done / total) if total else 100, "detail": v.get("detail", "")}
+            work += total * spu
+            done_work += done * spu
+            eta += (total - done) * pace
+        percent = 100.0 if done_work >= work else math.floor(1000 * done_work / work) / 10
+        return {"steps": out, "percent": percent, "eta_seconds": round(eta), "current": self._sync_progress.get("_current")}
+
+    def _settle_sync(self, state: dict[str, Any]) -> None:
+        """The job's last word agrees with the recommendation readiness (owner report: "done" in 10 s while the
+        screen stayed NOT READY). A missing key → NEEDS_SETUP; nothing left to fetch while still NOT READY →
+        INCOMPLETE with the readiness reasons, the failures seen and when a retry is allowed; DONE only otherwise."""
+        from marketlens.application.data_access import FUNDAMENTALS
+        from marketlens.application.readiness import missing_setup
+
+        missing = missing_setup(self.registry)
+        state["missing"] = missing
+        rd = self.readiness()
+        if rd["recommendation_readiness"] != "NOT READY":
+            return
+        generic = "스캐너 데이터 준비가 끝나지 않아"
+        reasons = [r for r in list(rd["scanner_reasons"]) + list(rd["readiness_reasons"]) if r not in missing and not r.startswith(generic)]
+        state["reasons"] = list(dict.fromkeys(reasons))[:8]
+        now = self.now()
+        waits = [m.next_attempt_at for m in self.store.ingestion_all(FUNDAMENTALS).values()
+                 if m.status != "OK" and m.next_attempt_at is not None and m.next_attempt_at > now] if self.store is not None else []
+        if waits:
+            state["retry_at"] = min(waits).isoformat()
+        if missing and state["status"] in ("DONE", "PAUSED", "FAILED"):
+            state["status"] = "NEEDS_SETUP"  # what it could fetch it did (errors stay listed); readiness needs the key first
+        elif state["status"] == "DONE":
+            state["status"] = "INCOMPLETE"
+
     def sync_status(self) -> dict[str, Any]:
         """The background data preparation's progress. RUNNING while no job holds the lock = the app was closed mid-way."""
         if self.store is None:
@@ -697,6 +765,10 @@ class MarketLensService:
             if last is not None and last.get("started_at") == job.get("started_at"):
                 return {"job": {**last, "note": "마지막 상태를 저장하지 못해 메모리의 결과를 보여 줌"}}
             job["status"] = "INTERRUPTED"
+        if job and job.get("status") == "RUNNING":
+            live = self._progress_summary()  # item by item, not only at the end of a round
+            if live is not None:
+                job["progress"] = live
         return {"job": job}
 
     def readiness(self) -> dict[str, Any]:

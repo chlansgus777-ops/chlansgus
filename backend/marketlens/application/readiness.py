@@ -49,15 +49,19 @@ def _cfg(reg: Any, kind: str, name: str) -> bool:
     return any(p.name == name and getattr(p, "configured", True) for p in reg.chain(kind).providers)
 
 
-def missing_setup(reg: Any) -> list[str]:
-    """THE list of what the data preparation cannot fetch for lack of a key (the readiness screen and the sync job
-    both use it): the recommendation cannot become ready until these are set, whatever the button does."""
-    out = []
-    if not _cfg(reg, "universe", "sec-edgar"):
-        out.append("SEC 요청자(SEC_USER_AGENT)가 비어 있어 종목 목록·재무를 받을 수 없음 — 설정 화면에서 '이름 이메일'을 입력하고 앱을 다시 시작하세요")
-    if not _cfg(reg, "price", "polygon"):
-        out.append("POLYGON_API_KEY가 없어 일봉(가격 이력)을 받을 수 없음 — 설정 화면에서 입력하고 앱을 다시 시작하세요")
-    return out
+# what the recommendation readiness needs a key for: (chain, provider, message, fetched by the data preparation).
+# ONE table: the readiness screen, the sync report and the preparation job's final state all read it.
+REQUIRED_SETUP = (
+    ("universe", "sec-edgar", "SEC 요청자(SEC_USER_AGENT)가 비어 있어 종목 목록·재무를 받을 수 없음 — 설정 화면에서 '이름 이메일'을 입력하고 앱을 다시 시작하세요", True),
+    ("price", "polygon", "POLYGON_API_KEY가 없어 일봉(가격 이력)을 받을 수 없음 — 설정 화면에서 입력하고 앱을 다시 시작하세요", True),
+    ("price", "finnhub", "FINNHUB_API_KEY가 없어 현재가를 확인할 수 없음(추천을 지금 가격으로 다시 검사하지 못함) — 설정 화면에서 입력하고 앱을 다시 시작하세요", False),
+)
+
+
+def missing_setup(reg: Any, sync_only: bool = False) -> list[str]:
+    """What the recommendation cannot become ready without, for lack of a key (``sync_only``: only the datasets the
+    data preparation fetches). Pressing "데이터 준비 시작" cannot fix any of these."""
+    return [msg for chain, name, msg, synced in REQUIRED_SETUP if (synced or not sync_only) and not _cfg(reg, chain, name)]
 
 
 def categories(reg: Any, stats: dict[str, Any] | None, live_verified: dict[str, bool]) -> tuple[DataCategory, ...]:
@@ -97,7 +101,7 @@ def evaluate(mode: str, reg: Any, stats: dict[str, Any] | None, sync_state: str 
     reasons: list[str] = []
     prog: dict[str, float | None] = {}
     # a key the preparation needs is missing: say so first — pressing "데이터 준비 시작" cannot fix it
-    reasons += missing_setup(reg)
+    reasons += missing_setup(reg, sync_only=True)
     if not stats or not stats.get("listed"):
         reasons.append("유니버스(종목 목록)가 아직 적재되지 않음 — ‘데이터 준비 시작’(데이터 동기화)을 실행하세요")
         prog = {"price_history": 0.0, "market_cap": 0.0, "sector": 0.0, "fundamentals": 0.0, "market_days": 0.0}
@@ -130,9 +134,12 @@ def evaluate(mode: str, reg: Any, stats: dict[str, Any] | None, sync_state: str 
     cats = categories(reg, stats, lvf)
     core = [c for c in cats if c.category in ("현재가", "일봉 이력", "재무(미국 GAAP)")]
     rr_reasons: list[str] = []
-    if scanner != "SCANNER_READY":
+    other_missing = [m for m in missing_setup(reg) if m not in reasons]  # needed at recommendation time, not fetched by the sync
+    if scanner != "SCANNER_READY" or other_missing:
         rec = "NOT READY"
-        rr_reasons.append("스캐너 데이터 준비가 끝나지 않아 추천을 실전 판단에 쓰면 안 됨")
+        if scanner != "SCANNER_READY":
+            rr_reasons.append("스캐너 데이터 준비가 끝나지 않아 추천을 실전 판단에 쓰면 안 됨")
+        rr_reasons += other_missing
     elif any(c.status.startswith(("BLOCKED", "UNAVAILABLE")) for c in core):
         rec = "NOT READY"
         rr_reasons.append("핵심 공급자(가격·일봉·재무) 연결 안 됨")

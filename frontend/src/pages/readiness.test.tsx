@@ -30,6 +30,18 @@ describe("readiness UI", () => {
   });
 });
 
+describe("the banner names the actual reason (owner report: 'not finished' while a key was missing)", () => {
+  it("shows the first specific reason, a missing key before the progress", () => {
+    const r = { ...notReady, readiness_reasons: ["스캐너 데이터 준비가 끝나지 않아 추천을 실전 판단에 쓰면 안 됨", "FINNHUB_API_KEY가 없어 현재가를 확인할 수 없음"] };
+    render(<MemoryRouter><ReadinessBanner r={r} /></MemoryRouter>);
+    expect(screen.getByText(/이유: FINNHUB_API_KEY가 없어/)).toBeTruthy();
+  });
+  it("falls back to the first data reason", () => {
+    render(<MemoryRouter><ReadinessBanner r={notReady} /></MemoryRouter>);
+    expect(screen.getByText(/이유: 저장된 거래일 20일/)).toBeTruthy();
+  });
+});
+
 describe("stock page wording", () => {
   it("confidence is a level, not a probability", () => {
     expect(confidenceLevel(76)).toBe("높음");

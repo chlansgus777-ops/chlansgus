@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
+import { stamp } from "../format";
 import { READINESS_KO } from "../i18n";
 import { Card, Notice } from "./ui";
 import { useApi } from "./useApi";
@@ -26,15 +27,23 @@ export function statusKo(s: string): string {
   return (STATUS_KO[base] ?? base) + tail;
 }
 
-/** One-line banner: can today's recommendations be relied on? */
+/** The first reason that says something specific: a missing key or a data shortfall, not the summary line. */
+export function firstReason(r: ReadinessInfo): string | undefined {
+  const specific = r.readiness_reasons.filter((x) => !x.startsWith("스캐너 데이터 준비가 끝나지 않아"));
+  return specific[0] ?? r.scanner_reasons[0];
+}
+
+/** One-line banner: can today's recommendations be relied on — and if not, the first actual reason. */
 export function ReadinessBanner({ r }: { r: ReadinessInfo | undefined | null }) {
   if (!r) return null;
   const info = READINESS_KO[r.recommendation_readiness];
   if (!info) return null;
   const tone: "info" | "warn" | "neg" = info.tone === "neg" ? "neg" : info.tone === "warn" ? "warn" : "info";
+  const why = r.recommendation_readiness === "NOT READY" ? firstReason(r) : undefined;
   return (
     <Notice tone={tone}>
       <b>추천 준비도: {info.label}</b> — {info.help} <Link to="/health">자세히 보기</Link>
+      {why ? <div>이유: {why}</div> : null}
     </Notice>
   );
 }
@@ -60,12 +69,53 @@ export function ProgressBars({ p }: { p: Record<string, number | null> }) {
 }
 
 export interface SyncJob {
-  status: "RUNNING" | "DONE" | "FAILED" | "PAUSED" | "INTERRUPTED" | "NEEDS_SETUP"; round: number;
+  status: "RUNNING" | "DONE" | "FAILED" | "PAUSED" | "INTERRUPTED" | "NEEDS_SETUP" | "INCOMPLETE"; round: number;
   bar_days_remaining?: number; fundamentals_pending?: number; errors?: string[]; missing?: string[]; started_at?: string; finished_at?: string;
+  reasons?: string[]; failures?: string[]; retry_at?: string; progress?: SyncProgress | null;
+}
+export interface SyncProgress {
+  percent: number; eta_seconds?: number; current?: string | null;
+  steps: Record<string, { done: number; total: number; percent: number; detail?: string }>;
+}
+const STEP_KO: Record<string, [string, string]> = {
+  bars: ["가격 이력", "거래일"], universe: ["종목 목록", ""], profiles: ["업종 정보", "종목"], fundamentals: ["재무", "종목"],
+};
+const STEP_ORDER = ["bars", "universe", "profiles", "fundamentals"];
+
+function eta(seconds: number | undefined): string {
+  if (seconds === undefined) return "";
+  if (seconds < 60) return "남은 시간 1분 미만";
+  const m = Math.ceil(seconds / 60);
+  return m >= 90 ? `남은 시간 약 ${Math.floor(m / 60)}시간 ${m % 60}분` : `남은 시간 약 ${m}분`;
+}
+
+/** The preparation's real progress: the overall share of the work, each step's counts, the item being fetched. */
+export function SyncProgressView({ p, running }: { p: SyncProgress; running: boolean }) {
+  const steps = STEP_ORDER.filter((k) => p.steps[k]).concat(Object.keys(p.steps).filter((k) => !STEP_ORDER.includes(k)));
+  return (
+    <div className="sync-progress">
+      <div className="progress">
+        <span>데이터 준비 {p.percent}%</span>
+        <div className="track" role="progressbar" aria-label="데이터 준비 전체" aria-valuenow={Math.round(p.percent)} aria-valuemin={0} aria-valuemax={100}>
+          <div className={p.percent >= 100 ? "ok" : ""} style={{ width: `${Math.min(100, p.percent)}%` }} />
+        </div>
+        <b>{running ? eta(p.eta_seconds) : ""}</b>
+      </div>
+      <ul className="list">{steps.map((k) => {
+        const st = p.steps[k]!;
+        const [label, unit] = STEP_KO[k] ?? [k, ""];
+        const now = running && p.current === k && st.detail && st.done < st.total ? ` — ${st.detail} 받는 중` : "";
+        return <li key={k}><span className={`dot ${st.done >= st.total ? "info" : "warn"}`}>{st.done >= st.total ? "✓" : "…"}</span>
+          <span>{label}: {st.done}/{st.total}{unit ? ` ${unit}` : ""} ({st.percent}%){now}</span></li>;
+      })}</ul>
+      {running && p.percent < 100 && !p.steps.fundamentals && <div className="caption">재무·업종 단계의 양은 가격 이력을 받은 뒤에 정해지므로 전체 %가 그때 한 번 달라질 수 있습니다.</div>}
+    </div>
+  );
 }
 const JOB_KO: Record<SyncJob["status"], string> = {
   RUNNING: "받는 중", DONE: "끝남", FAILED: "실패", PAUSED: "일시 정지(다시 누르면 이어서 받음)", INTERRUPTED: "중단됨(앱이 꺼짐) — 다시 누르면 이어서 받음",
   NEEDS_SETUP: "설정 필요 — 키가 없어 받을 수 없는 데이터가 있음",
+  INCOMPLETE: "지금 받을 수 있는 것은 다 받았지만 아직 준비 안 됨 — 아래 이유",
 };
 
 /** LIVE: the button that fills the local data store (SEC list and filings, Polygon daily prices), with its progress.
@@ -77,7 +127,9 @@ export function SyncControl({ onChange }: { onChange?: () => void }) {
   const running = job?.status === "RUNNING";
   useEffect(() => {
     if (!running) return;
-    const id = setInterval(() => { st.reload(); onChange?.(); }, 10000);
+    let n = 0;
+    // the progress changes item by item: read it every 3 s; the readiness (heavier) every 15 s
+    const id = setInterval(() => { st.reload(); if (++n % 5 === 0) onChange?.(); }, 3000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running]);
@@ -93,12 +145,21 @@ export function SyncControl({ onChange }: { onChange?: () => void }) {
           {job.bar_days_remaining !== undefined && ` · 남은 가격 거래일 ${job.bar_days_remaining}`}
           {job.fundamentals_pending !== undefined && ` · 재무 대기 ${job.fundamentals_pending}종목`}</span>}
       </div>
+      {job?.progress ? <SyncProgressView p={job.progress} running={running} /> : null}
       <div className="explain">무료 API 요청 한도를 지키며 받기 때문에 처음 한 번은 1시간 안팎 걸릴 수 있습니다. 앱을 켜 둔 채 기다리세요.
         중간에 꺼도 받은 데이터는 남고, 다시 누르면 이어서 받습니다. 그 뒤로는 하루 한 번 누르면 새 거래일만 받습니다.</div>
       {job?.missing?.length ? (
         <Notice tone="neg">
           <b>이 버튼만으로는 준비를 끝낼 수 없습니다.</b> 아래 항목을 <Link to="/settings">설정 화면</Link>에서 입력하고 앱을 다시 시작한 뒤 다시 누르세요.
           <ul className="list">{job.missing.map((x, i) => <li key={i}><span className="dot warn">!</span><span>{x}</span></li>)}</ul>
+        </Notice>
+      ) : null}
+      {job && job.status !== "RUNNING" && job.reasons?.length ? (
+        <Notice tone="warn">
+          <b>아직 준비되지 않은 이유</b>
+          <ul className="list">{job.reasons.map((x, i) => <li key={i}><span className="dot warn">!</span><span>{x}</span></li>)}</ul>
+          {job.failures?.length ? <div className="caption">실패 예: {job.failures.join(" · ")}</div> : null}
+          {job.retry_at ? <div className="caption">실패한 항목을 다시 시도할 수 있는 시각: {stamp(job.retry_at)} — 그 뒤에 다시 누르세요</div> : null}
         </Notice>
       ) : null}
       {job?.errors?.length ? <ul className="list">{job.errors.map((x, i) => <li key={i}><span className="dot warn">!</span><span>{x}</span></li>)}</ul> : null}

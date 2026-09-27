@@ -11,6 +11,8 @@ datas = [
     (str(ROOT / "config"), "config"),
     (str(ROOT / "backend" / "alembic"), "alembic"),
 ]
+if (ROOT / "build_commit.txt").exists():  # written by the build (git rev-parse): config.code_version reads it
+    datas.append((str(ROOT / "build_commit.txt"), "."))
 dist = ROOT / "frontend" / "dist"
 if dist.exists():
     datas.append((str(dist), "frontend/dist"))

@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Callable
 
 from marketlens.application.market_store import MarketStore
 from marketlens.application.registry import ProviderRegistry
@@ -21,6 +21,8 @@ from marketlens.domain.market_calendar import is_trading_day, last_completed_ses
 from marketlens.providers.contracts import ProviderError
 
 log = logging.getLogger("marketlens.sync")
+Progress = Callable[..., None]  # (step, done, total, detail) — see MarketSync.run
+FINAL_WITHOUT_DATA = ("NOT_SUPPORTED", "PARSE_GAP")  # manifest statuses that need no further attempt to count as done
 PROFILE_MAX_AGE = timedelta(days=30)
 FUNDAMENTALS_REFRESH = timedelta(days=7)  # look for a new 10-Q/10-K weekly; stored vintages never expire
 # an empty grouped-daily answer for a session this recent is "not published yet", not "outside the provider's history
@@ -46,6 +48,7 @@ class SyncReport:
     bars_split_adjusted: int = 0
     errors: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)  # required datasets with no configured provider (readiness.missing_setup)
+    failures: list[str] = field(default_factory=list)  # a few per-company failures with their cause (the screen shows them)
 
     @property
     def complete(self) -> bool:
@@ -68,10 +71,13 @@ class MarketSync:
 
     def run(self, now: Any, backfill_days: int = 300, max_bar_calls: int = 30, max_profiles: int = 300,
             min_market_cap: float = 1e9, min_dollar_volume: float = 2e7, max_fundamentals: int = 150,
-            fundamentals_refresh: timedelta = FUNDAMENTALS_REFRESH) -> SyncReport:
+            fundamentals_refresh: timedelta = FUNDAMENTALS_REFRESH, progress: Progress | None = None) -> SyncReport:
+        """``progress(step, done, total, detail)`` is called after every stored item (a session's bars, a company's
+        profile or filings) with the counts of the WHOLE preparation, not of this bounded round."""
         from marketlens.application.readiness import missing_setup
 
-        rep = SyncReport(missing=missing_setup(self.reg))
+        _p: Progress = progress or (lambda *_a: None)
+        rep = SyncReport(missing=missing_setup(self.reg, sync_only=True))
         today = last_completed_session(now)
         unloaded: set[date] = set()
         # 1) bars via grouped daily (before the universe step, see 2a)
@@ -81,13 +87,18 @@ class MarketSync:
             empty = {date.fromisoformat(x) for x in empty_s.split(",") if x}
             have = self.store.stored_days(grouped.name) | empty
             wanted = []
+            window = 0
             d = today
             while d >= today - timedelta(days=backfill_days):
-                if is_trading_day(d) and d not in have:
-                    wanted.append(d)
+                if is_trading_day(d):
+                    window += 1
+                    if d not in have:
+                        wanted.append(d)
                 d -= timedelta(days=1)
             rep.bar_days_missing = len(wanted)
             unloaded = set(wanted)  # sessions without market data yet: no evidence for the universe step (2a)
+            done = window - len(wanted)
+            _p("bars", done, window, "")
             for d in wanted[:max_bar_calls]:  # newest first; older history fills in over later runs
                 try:
                     bars = grouped.get_grouped_daily(d)
@@ -100,9 +111,12 @@ class MarketSync:
                     rep.bar_days_loaded += 1
                 elif d >= today - RECENT_EMPTY:
                     rep.bar_days_pending += 1  # not published yet: asked again next time, not an error
+                    continue  # not done: the progress counts it when it is stored
                 else:
                     empty.add(d)
                     rep.bar_days_empty += 1
+                done += 1
+                _p("bars", done, window, d.isoformat())
             if rep.bar_days_empty:
                 self.store.set_setting("grouped_empty_days", ",".join(sorted(x.isoformat() for x in empty)))
             if rep.bar_days_loaded + rep.bar_days_empty + rep.bar_days_pending >= rep.bar_days_missing and not rep.errors:
@@ -112,6 +126,7 @@ class MarketSync:
         try:
             secs = self.reg.chain("universe").call("list_securities", None).value
             rep.universe = self.store.sync_universe(secs, today, unloaded)
+            _p("universe", 1, 1, "")
         except ProviderError as e:
             rep.errors.append(f"universe: {e}")
         # 2b) stock splits (one bulk request) → rescale stored bars fetched before the split
@@ -158,29 +173,38 @@ class MarketSync:
         if sec is not None and hasattr(sec, "company_profile"):
             bars = self.store.last_bars_all(today - timedelta(days=40), today)
             todo = []
+            eligible = 0
             for s in self.store.securities(None):
                 b = bars.get(s.ticker, [])
                 if len(b) < 5 or (s.market_cap or 0) < min_market_cap:
                     continue
                 adv = sum(x.close * x.volume for x in b[-20:]) / len(b[-20:])
+                if adv < min_dollar_volume:
+                    continue
+                eligible += 1
                 age = self.store.profile_age(s.ticker)
-                if adv >= min_dollar_volume and (age is None or age > PROFILE_MAX_AGE):
+                if age is None or age > PROFILE_MAX_AGE:
                     todo.append(s.ticker)
+            done = eligible - len(todo)
+            _p("profiles", done, eligible, "")
             for t in todo[:max_profiles]:
                 try:
                     self.store.set_profile(t, sec.company_profile(t))
                     rep.profiles_updated += 1
+                    done += 1
+                    _p("profiles", done, eligible, t)
                 except ProviderError as e:
                     rep.errors.append(f"profile {t}: {e}")
         # 5) SEC quarterly fundamentals for the names the scanner can use — here, bounded per run and
         #    recorded in the ingestion manifest, instead of one SEC request per ticker inside every scan
         fund = _find(self.reg, "fundamental", "get_quarterly")
         if fund is not None:
-            self._ingest_fundamentals(fund, now, rep, max_fundamentals, fundamentals_refresh, min_market_cap, min_dollar_volume, today)
+            self._ingest_fundamentals(fund, now, rep, max_fundamentals, fundamentals_refresh, min_market_cap, min_dollar_volume, today, progress=_p)
         log.info("sync finished", extra={"fields": {"bars": rep.bar_days_loaded, "missing": rep.bar_days_missing, "profiles": rep.profiles_updated}})
         return rep
 
-    def _ingest_fundamentals(self, fund: Any, now: Any, rep: SyncReport, budget: int, refresh: timedelta, min_market_cap: float, min_dollar_volume: float, today: date) -> None:
+    def _ingest_fundamentals(self, fund: Any, now: Any, rep: SyncReport, budget: int, refresh: timedelta, min_market_cap: float, min_dollar_volume: float, today: date,
+                             progress: Progress | None = None) -> None:
         from marketlens.application.data_access import FUNDAMENTALS, _failure_status
         from marketlens.providers.contracts import NotSupported, RateLimited
 
@@ -188,6 +212,7 @@ class MarketSync:
         manifest = self.store.ingestion_all(FUNDAMENTALS)
         never: list[tuple[float, str]] = []
         stale: list[tuple[Any, str]] = []
+        eligible = done = 0
         for s in self.store.securities(None):
             b = bars.get(s.ticker, [])
             if s.is_etf or len(b) < 5 or (s.market_cap or 0) < min_market_cap:
@@ -195,6 +220,9 @@ class MarketSync:
             if sum(x.close * x.volume for x in b[-20:]) / len(b[-20:]) < min_dollar_volume:
                 continue
             m = manifest.get(s.ticker)
+            eligible += 1
+            if m is not None and (m.last_success_at is not None or m.status in FINAL_WITHOUT_DATA):
+                done += 1  # read, or known to have no quarterly us-gaap facts / tags the parser reads
             if m is not None and m.next_attempt_at is not None and m.next_attempt_at > now:
                 continue  # back-off after a failure (NOT_SUPPORTED: 30 days)
             if m is None or m.last_success_at is None:
@@ -203,6 +231,9 @@ class MarketSync:
                 stale.append((m.last_success_at, s.ticker))
         todo = [t for _, t in sorted(never)] + [t for _, t in sorted(stale)]  # first-time names first, largest first
         rep.fundamentals_pending = max(0, len(todo) - budget)
+        first = {t for _, t in never}
+        _p: Progress = progress or (lambda *_a: None)
+        _p("fundamentals", done, eligible, "")
         for t in todo[:budget]:
             try:
                 qs = fund.get_quarterly(t)
@@ -218,11 +249,20 @@ class MarketSync:
                 self.store.record_ingestion(FUNDAMENTALS, t, now, status, str(e))
                 if status == "PARSE_GAP":
                     rep.fundamentals_failed += 1
+                if t in first and status in FINAL_WITHOUT_DATA:
+                    done += 1
+                    _p("fundamentals", done, eligible, t)
                 continue
             except ProviderError as e:
                 self.store.record_ingestion(FUNDAMENTALS, t, now, _failure_status(f"{type(e).__name__}: {e}"), str(e))
                 rep.fundamentals_failed += 1
+                sample = getattr(rep, "failures", None)  # a caller's own report object may not carry samples
+                if sample is not None and len(sample) < 3:
+                    sample.append(f"재무 {t}: {e}"[:200])
                 continue
             self.store.save_quarters(t, qs)
             self.store.record_ingestion(FUNDAMENTALS, t, now, "OK", rows=len(qs))
             rep.fundamentals_ingested += 1
+            if t in first:
+                done += 1
+            _p("fundamentals", done, eligible, t)
