@@ -1,0 +1,135 @@
+FFFFFFFFFFFFFFF                                                          [100%]
+=================================== FAILURES ===================================
+__________ test_r1_material_gate_cannot_reinstate_buy_above_max_price __________
+deliverables/eval7/test_independent_review.py:47: in test_r1_material_gate_cannot_reinstate_buy_above_max_price
+    assert d.action not in {Action.BUY, Action.BUY_SMALL, Action.ADD}, d
+E   AssertionError: Decision(action=<Action.BUY: 'BUY'>, confidence=90.0, vetoes=(), reasons=('히스테리시스 적용: 매수 유지 기준 76, 소량 매수 유지 기준 68', '점...기'), raw_action=<Action.WAIT: 'WAIT'>, suppressed_change=True, size_limit=None, notes=('BUY → WAIT 변경 보류: 중요한 변화 없음',))
+E   assert <Action.BUY: 'BUY'> not in {<Action.ADD: 'ADD'>, <Action.BUY: 'BUY'>, <Action.BUY_SMALL: 'BUY SMALL'>}
+E    +  where <Action.BUY: 'BUY'> = Decision(action=<Action.BUY: 'BUY'>, confidence=90.0, vetoes=(), reasons=('히스테리시스 적용: 매수 유지 기준 76, 소량 매수 유지 기준 68', '점...기'), raw_action=<Action.WAIT: 'WAIT'>, suppressed_change=True, size_limit=None, notes=('BUY → WAIT 변경 보류: 중요한 변화 없음',)).action
+_______________ test_r2_same_timestamp_quote_must_validate_plan ________________
+deliverables/eval7/test_independent_review.py:54: in test_r2_same_timestamp_quote_must_validate_plan
+    assert not r.actionable, r
+E   AssertionError: RecommendationFreshness(status='CURRENT', at_creation='FRESH', sessions_since=0, reason_ko='추천 당시 데이터 최신; 분석 0분 경과, 이후 가격 변동 가능 시간 없음', problems=(), revalidated_price=None)
+E   assert not True
+E    +  where True = RecommendationFreshness(status='CURRENT', at_creation='FRESH', sessions_since=0, reason_ko='추천 당시 데이터 최신; 분석 0분 경과, 이후 가격 변동 가능 시간 없음', problems=(), revalidated_price=None).actionable
+________ test_r3_after_hours_release_not_visible_before_actual_release _________
+deliverables/eval7/test_independent_review.py:61: in test_r3_after_hours_release_not_visible_before_actual_release
+    assert not earnings_visible(reports[0], datetime(2026, 7, 30, 20, 1, tzinfo=UTC))
+E   AssertionError: assert not True
+E    +  where True = earnings_visible(EarningsReport(report_date=datetime.date(2026, 7, 30), fiscal_label='Q2 2026', source='fixture', revenue_actual=None, ...agement_tone=None, management_tone_source=None, call_highlights=(), pre_earnings_run_pct=None, price_reaction_pct=None), datetime.datetime(2026, 7, 30, 20, 1, tzinfo=datetime.timezone.utc))
+E    +    where datetime.datetime(2026, 7, 30, 20, 1, tzinfo=datetime.timezone.utc) = datetime(2026, 7, 30, 20, 1, tzinfo=datetime.timezone.utc)
+_____________ test_r4_guidance_range_preserves_each_endpoint_scale _____________
+deliverables/eval7/test_independent_review.py:66: in test_r4_guidance_range_preserves_each_endpoint_scale
+    assert g.status != 'EXTRACTED' or (g.low, g.high) == (900_000_000, 1_100_000_000), g
+E   AssertionError: GuidanceItem(metric='revenue', low=900000000000.0, high=1100000000.0, unit='USD', period_label='third quarter of fisca...third quarter of fiscal 2026 is expected to be $900 million to $1.1 billion.', status='EXTRACTED', confidence='MEDIUM')
+E   assert ('EXTRACTED' != 'EXTRACTED' or (900000000000.0, 1100000000.0) == (900000000, 1100000000)
+E    +  where 'EXTRACTED' = GuidanceItem(metric='revenue', low=900000000000.0, high=1100000000.0, unit='USD', period_label='third quarter of fisca...third quarter of fiscal 2026 is expected to be $900 million to $1.1 billion.', status='EXTRACTED', confidence='MEDIUM').status
+E     
+E     At index 0 diff: 900000000000.0 != 900000000
+E     Use -v to get more diff)
+____________ test_r5_trading_security_missing_once_is_not_delisted _____________
+deliverables/eval7/test_independent_review.py:76: in test_r5_trading_security_missing_once_is_not_delisted
+    assert repo.delisted_on(s, 'ABC', 'LIVE') is None
+E   AssertionError: assert datetime.date(2026, 9, 22) is None
+E    +  where datetime.date(2026, 9, 22) = <function delisted_on at 0x7f191779c900>(<sqlalchemy.orm.session.Session object at 0x7f1917983d40>, 'ABC', 'LIVE')
+E    +    where <function delisted_on at 0x7f191779c900> = <module 'marketlens.infrastructure.db.repository' from '/workspace/scratch/9f7b9f65bd0a/review/backend/marketlens/infrastructure/db/repository.py'>.delisted_on
+___________ test_r6_reused_ticker_does_not_archive_new_company_bars ____________
+deliverables/eval7/test_independent_review.py:87: in test_r6_reused_ticker_does_not_archive_new_company_bars
+    assert all(b.day < date(2026, 9, 22) for b in old), old
+E   AssertionError: [Bar(day=datetime.date(2026, 9, 21), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000000.0), Bar(day=datetime.date(2026, 9, 22), open=10.0, high=11.0, low=9.0, close=10.0, volume=1000000.0)]
+E   assert False
+E    +  where False = all(<generator object test_r6_reused_ticker_does_not_archive_new_company_bars.<locals>.<genexpr> at 0x7f19177f1c60>)
+____________ test_r7_store_must_check_requested_start_not_only_end _____________
+deliverables/eval7/test_independent_review.py:105: in test_r7_store_must_check_requested_start_not_only_end
+    assert result.value[0].day == old.day, result
+E   AssertionError: Fetched(value=[Bar(day=datetime.date(2026, 9, 25), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000000.0)], provider='store', error=None, conflicts=[])
+E   assert datetime.date(2026, 9, 25) == datetime.date(2026, 9, 1)
+E    +  where datetime.date(2026, 9, 25) = Bar(day=datetime.date(2026, 9, 25), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000000.0).day
+E    +  and   datetime.date(2026, 9, 1) = Bar(day=datetime.date(2026, 9, 1), open=90, high=91, low=89, close=90, volume=1000000.0).day
+___________ test_r8_small_allocation_must_still_respect_sector_limit ___________
+deliverables/eval7/test_independent_review.py:115: in test_r8_small_allocation_must_still_respect_sector_limit
+    assert review.sector_weights['Technology'] + proposed <= limits.max_sector, review
+E   AssertionError: PortfolioReview(total_value=100000, sector_weights={'Technology': 0.295}, theme_weights={}, top_holding_weight=0.295, ...'편입 시 섹터 Technology 비중 34% (한도 30%)',), fit='POOR', valuation_status='COMPLETE', missing_prices=(), valuation_day=None)
+E   assert (0.295 + 0.0125) <= 0.3
+E    +  where 0.3 = PortfolioLimits(max_single_name=0.1, max_sector=0.3, max_theme=0.4, high_correlation=0.75, full_position=0.05, half_position=0.025, small_position=0.0125).max_sector
+_______________ test_r9_guidance_must_compare_the_named_quarter ________________
+deliverables/eval7/test_independent_review.py:130: in test_r9_guidance_must_compare_the_named_quarter
+    assert result.guidance.next_q_revenue_consensus is None, result.guidance
+E   AssertionError: Guidance(next_q_revenue_low=200, next_q_revenue_high=220, next_q_revenue_consensus=100, next_q_eps_low=None, next_q_ep...nsus=None, gross_margin_guide=None, source='https://example.test', evidence='Q3 revenue guidance', confidence='MEDIUM')
+E   assert 100 is None
+E    +  where 100 = Guidance(next_q_revenue_low=200, next_q_revenue_high=220, next_q_revenue_consensus=100, next_q_eps_low=None, next_q_ep...nsus=None, gross_margin_guide=None, source='https://example.test', evidence='Q3 revenue guidance', confidence='MEDIUM').next_q_revenue_consensus
+E    +    where Guidance(next_q_revenue_low=200, next_q_revenue_high=220, next_q_revenue_consensus=100, next_q_eps_low=None, next_q_ep...nsus=None, gross_margin_guide=None, source='https://example.test', evidence='Q3 revenue guidance', confidence='MEDIUM') = EarningsReport(report_date=datetime.date(2026, 4, 30), fiscal_label='Q1 2026', source='fixture', revenue_actual=None, ...agement_tone=None, management_tone_source=None, call_highlights=(), pre_earnings_run_pct=None, price_reaction_pct=None).guidance
+_____________ test_r10_original_stop_survives_an_intermediate_hold _____________
+deliverables/eval7/test_independent_review.py:145: in test_r10_original_stop_survives_an_intermediate_hold
+    assert outcome.decision.action == Action.SELL, outcome.decision
+E   AssertionError: Decision(action=<Action.HOLD: 'HOLD'>, confidence=81.8, vetoes=(), reasons=('보유 중, 점수 78.72',), raw_action=<Action.HOLD: 'HOLD'>, suppressed_change=False, size_limit=None, notes=())
+E   assert <Action.HOLD: 'HOLD'> == <Action.SELL: 'SELL'>
+E     
+E     - SELL
+E     + HOLD
+------------------------------ Captured log call -------------------------------
+WARNING  marketlens.scanner:logging.py:150 PROMPT_INJECTION_DETECTED
+________ test_r11_previous_recommendation_must_match_security_identity _________
+deliverables/eval7/test_independent_review.py:160: in test_r11_previous_recommendation_must_match_security_identity
+    assert digest is None and action is None, (digest, action)
+E   AssertionError: (AnalysisDigest(ticker='NVDA', as_of=datetime.datetime(2026, 9, 25, 15, 0, tzinfo=datetime.timezone.utc), score=71.34,... agent_stances={}, baseline_score=71.34, stop=350.26, max_buy=362.33, atr=15.549361159461819), <Action.WATCH: 'WATCH'>)
+E   assert (AnalysisDigest(ticker='NVDA', as_of=datetime.datetime(2026, 9, 25, 15, 0, tzinfo=datetime.timezone.utc), score=71.34, ... thesis_invalidated=False, agent_stances={}, baseline_score=71.34, stop=350.26, max_buy=362.33, atr=15.549361159461819) is None)
+------------------------------ Captured log call -------------------------------
+WARNING  marketlens.scanner:logging.py:150 PROMPT_INJECTION_DETECTED
+___________ test_r12_neutral_macro_news_cannot_invent_rate_increase ____________
+deliverables/eval7/test_independent_review.py:170: in test_r12_neutral_macro_news_cannot_invent_rate_increase
+    assert not effects or all(e.direction == 0 for e in effects), effects
+E   AssertionError: [IssueEffect(node_id='MACRO:RATES', direction=1.0, mechanism=('금리 ↑', '장기 성장주 멀티플 ↓'), origin_impact=False)]
+E   assert (not [IssueEffect(node_id='MACRO:RATES', direction=1.0, mechanism=('금리 ↑', '장기 성장주 멀티플 ↓'), origin_impact=False)] or False)
+E    +  where False = all(<generator object test_r12_neutral_macro_news_cannot_invent_rate_increase.<locals>.<genexpr> at 0x7f1915473920>)
+________________ test_r13_stock_split_must_not_trigger_old_stop ________________
+deliverables/eval7/test_independent_review.py:185: in test_r13_stock_split_must_not_trigger_old_stop
+    assert not any('직전 추천의 손절 기준가 아래' in r for r in out.decision.reasons), out.decision
+E   AssertionError: Decision(action=<Action.SELL: 'SELL'>, confidence=83.4, vetoes=(), reasons=('히스테리시스 적용: 매수 유지 기준 76, 소량 매수 유지 기준 68', ... 이탈: 직전 추천의 손절 기준가 아래로 마감 → 매도'), raw_action=<Action.SELL: 'SELL'>, suppressed_change=False, size_limit=None, notes=())
+E   assert not True
+E    +  where True = any(<generator object test_r13_stock_split_must_not_trigger_old_stop.<locals>.<genexpr> at 0x7f191400cd40>)
+------------------------------ Captured log call -------------------------------
+WARNING  marketlens.scanner:logging.py:150 PROMPT_INJECTION_DETECTED
+______ test_r14_prospective_eps_adjusts_when_split_occurs_after_snapshot _______
+deliverables/eval7/test_independent_review.py:198: in test_r14_prospective_eps_adjusts_when_split_occurs_after_snapshot
+    assert out is None or out.forward_eps is None or out.forward_eps == 1, out
+E   AssertionError: AnalystSnapshot(as_of=datetime.date(2026, 9, 23), source='alphavantage', forward_eps=10.0, forward_revenue=None, eps_r... '30d': 'SELF', '60d': 'SELF', '90d': 'SELF'}, estimate_range_pct=None, cross_check='SINGLE_SOURCE: 비교할 두 번째 공급자 값 없음')
+E   assert (AnalystSnapshot(as_of=datetime.date(2026, 9, 23), source='alphavantage', forward_eps=10.0, forward_revenue=None, eps_r... '30d': 'SELF', '60d': 'SELF', '90d': 'SELF'}, estimate_range_pct=None, cross_check='SINGLE_SOURCE: 비교할 두 번째 공급자 값 없음') is None or 10.0 is None or 10.0 == 1)
+E    +  where 10.0 = AnalystSnapshot(as_of=datetime.date(2026, 9, 23), source='alphavantage', forward_eps=10.0, forward_revenue=None, eps_r... '30d': 'SELF', '60d': 'SELF', '90d': 'SELF'}, estimate_range_pct=None, cross_check='SINGLE_SOURCE: 비교할 두 번째 공급자 값 없음').forward_eps
+E    +  and   10.0 = AnalystSnapshot(as_of=datetime.date(2026, 9, 23), source='alphavantage', forward_eps=10.0, forward_revenue=None, eps_r... '30d': 'SELF', '60d': 'SELF', '90d': 'SELF'}, estimate_range_pct=None, cross_check='SINGLE_SOURCE: 비교할 두 번째 공급자 값 없음').forward_eps
+__________ test_r15_cross_site_get_cannot_trigger_persistent_analysis __________
+deliverables/eval7/test_independent_review.py:216: in test_r15_cross_site_get_cannot_trigger_persistent_analysis
+    assert after == before, f'Cross-site GET created {after-before} recommendation(s)'
+E   AssertionError: Cross-site GET created 1 recommendation(s)
+E   assert 1 == 0
+----------------------------- Captured stderr call -----------------------------
+{"ts": "2026-09-27T00:56:17.938645+00:00", "level": "WARNING", "logger": "marketlens.scanner", "msg": "PROMPT_INJECTION_DETECTED", "event": "PROMPT_INJECTION_DETECTED", "news_id": "MOCKNEWS-002", "patterns": 4}
+{"ts": "2026-09-27T00:56:17.938770+00:00", "level": "INFO", "logger": "marketlens.scanner", "msg": "ISSUE_CREATED", "event": "ISSUE_CREATED", "issue_id": "ISSUE_EXPORT_CONTROL_eb52d2cd", "category": "Export Control"}
+{"ts": "2026-09-27T00:56:17.938818+00:00", "level": "INFO", "logger": "marketlens.scanner", "msg": "ISSUE_CREATED", "event": "ISSUE_CREATED", "issue_id": "ISSUE_AI_e02baf60", "category": "AI"}
+{"ts": "2026-09-27T00:56:17.938852+00:00", "level": "INFO", "logger": "marketlens.scanner", "msg": "ISSUE_CREATED", "event": "ISSUE_CREATED", "issue_id": "ISSUE_INFLATION_e80d95bf", "category": "Inflation"}
+{"ts": "2026-09-27T00:56:17.938882+00:00", "level": "INFO", "logger": "marketlens.scanner", "msg": "ISSUE_CREATED", "event": "ISSUE_CREATED", "issue_id": "ISSUE_OIL_b0d427e2", "category": "Oil"}
+{"ts": "2026-09-27T00:56:17.960803+00:00", "level": "INFO", "logger": "marketlens.service", "msg": "DECISION_CREATED", "event": "DECISION_CREATED", "ticker": "NVDA", "action": "WATCH", "score": 71.34}
+------------------------------ Captured log call -------------------------------
+WARNING  marketlens.scanner:logging.py:150 PROMPT_INJECTION_DETECTED
+INFO     marketlens.scanner:logging.py:150 ISSUE_CREATED
+INFO     marketlens.scanner:logging.py:150 ISSUE_CREATED
+INFO     marketlens.scanner:logging.py:150 ISSUE_CREATED
+INFO     marketlens.scanner:logging.py:150 ISSUE_CREATED
+INFO     marketlens.service:logging.py:150 DECISION_CREATED
+=========================== short test summary info ============================
+FAILED deliverables/eval7/test_independent_review.py::test_r1_material_gate_cannot_reinstate_buy_above_max_price
+FAILED deliverables/eval7/test_independent_review.py::test_r2_same_timestamp_quote_must_validate_plan
+FAILED deliverables/eval7/test_independent_review.py::test_r3_after_hours_release_not_visible_before_actual_release
+FAILED deliverables/eval7/test_independent_review.py::test_r4_guidance_range_preserves_each_endpoint_scale
+FAILED deliverables/eval7/test_independent_review.py::test_r5_trading_security_missing_once_is_not_delisted
+FAILED deliverables/eval7/test_independent_review.py::test_r6_reused_ticker_does_not_archive_new_company_bars
+FAILED deliverables/eval7/test_independent_review.py::test_r7_store_must_check_requested_start_not_only_end
+FAILED deliverables/eval7/test_independent_review.py::test_r8_small_allocation_must_still_respect_sector_limit
+FAILED deliverables/eval7/test_independent_review.py::test_r9_guidance_must_compare_the_named_quarter
+FAILED deliverables/eval7/test_independent_review.py::test_r10_original_stop_survives_an_intermediate_hold
+FAILED deliverables/eval7/test_independent_review.py::test_r11_previous_recommendation_must_match_security_identity
+FAILED deliverables/eval7/test_independent_review.py::test_r12_neutral_macro_news_cannot_invent_rate_increase
+FAILED deliverables/eval7/test_independent_review.py::test_r13_stock_split_must_not_trigger_old_stop
+FAILED deliverables/eval7/test_independent_review.py::test_r14_prospective_eps_adjusts_when_split_occurs_after_snapshot
+FAILED deliverables/eval7/test_independent_review.py::test_r15_cross_site_get_cannot_trigger_persistent_analysis
+15 failed in 1.90s

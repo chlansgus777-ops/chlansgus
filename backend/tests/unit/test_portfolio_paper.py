@@ -54,7 +54,13 @@ def test_existing_position_is_not_correlated_with_itself():
 
 
 def test_theme_overlap():
+    # changed with the independent review (F08): the AI theme is already AT its 40% limit, so even a small position
+    # would exceed it — this test used to expect SMALL (41.25% after the buy); a theme with room for a small
+    # position still gets SMALL
     pf = Portfolio((Holding("NVDA", 400, 100, "Technology", ("AI",)),), 60_000)
+    r = review_candidate(pf, {"NVDA": 100}, CandidateProfile("TSM", "Semis", ("AI",), 0.0), {})
+    assert r.size_cap == SizeClass.WATCH
+    pf = Portfolio((Holding("NVDA", 385, 100, "Technology", ("AI",)),), 61_500)  # 38.5%: room 1.5% ≥ small 1.25%
     r = review_candidate(pf, {"NVDA": 100}, CandidateProfile("TSM", "Semis", ("AI",), 0.0), {})
     assert r.size_cap == SizeClass.SMALL
 

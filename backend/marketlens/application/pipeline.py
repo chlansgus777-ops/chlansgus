@@ -224,7 +224,9 @@ def watched_stop(prev: AnalysisDigest | None, held: bool) -> float | None:
     if prev.action in {a.value for a in BULLISH_ACTIONS}:
         return prev.stop
     if held and prev.action in (Action.HOLD.value, Action.REDUCE.value):
-        return prev.guard_stop
+        # the carried stop of the buy; without one (a position bought outside, or a snapshot from before the
+        # carried stop existed) the HOLD's own stop — never no stop at all (independent review F02)
+        return prev.guard_stop if prev.guard_stop is not None else prev.stop
     return None
 
 

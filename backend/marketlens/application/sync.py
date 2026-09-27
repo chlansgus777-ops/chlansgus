@@ -101,6 +101,8 @@ class MarketSync:
                     rep.bar_days_empty += 1
             if rep.bar_days_empty:
                 self.store.set_setting("grouped_empty_days", ",".join(sorted(x.isoformat() for x in empty)))
+            if rep.bar_days_loaded + rep.bar_days_empty + rep.bar_days_pending >= rep.bar_days_missing and not rep.errors:
+                self.store.set_setting("bars_backfill_complete", (today - timedelta(days=backfill_days)).isoformat())
         # 2a) universe — after the day's bars are stored (a name missing from the SEC file while its bars keep
         #     arriving is a data gap, not a delisting) and before splits (rename links decide which bars a split rescales)
         try:

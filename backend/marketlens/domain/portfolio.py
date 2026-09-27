@@ -162,13 +162,20 @@ def review_candidate(
         room = limits.max_single_name - cur_w
         limit(SizeClass.HALF if room >= limits.half_position else SizeClass.SMALL if room >= limits.small_position else SizeClass.WATCH,
               f"추가 시 {cand.ticker} 비중 {cur_w + limits.full_position:.0%} > 한도 {limits.max_single_name:.0%}")
+    def fitting(room: float) -> SizeClass:
+        """The largest size that still fits the room left under a limit (independent review F08: SMALL was allowed
+        with less room than a small position, ending above the sector limit)."""
+        eps = 1e-9
+        return (SizeClass.FULL if room + eps >= limits.full_position else SizeClass.HALF if room + eps >= limits.half_position
+                else SizeClass.SMALL if room + eps >= limits.small_position else SizeClass.WATCH)
+
     if sector_w.get(cand.sector, 0.0) >= limits.max_sector:
         limit(SizeClass.WATCH, f"섹터 {cand.sector} 비중 이미 {sector_w[cand.sector]:.0%} (한도 {limits.max_sector:.0%})")
     elif sector_after > limits.max_sector:
-        limit(SizeClass.SMALL, f"편입 시 섹터 {cand.sector} 비중 {sector_after:.0%} (한도 {limits.max_sector:.0%})")
+        limit(fitting(limits.max_sector - sector_w.get(cand.sector, 0.0)), f"편입 시 섹터 {cand.sector} 비중 {sector_after:.0%} (한도 {limits.max_sector:.0%})")
     for t, w in theme_after.items():
         if w > limits.max_theme:
-            limit(SizeClass.SMALL, f"편입 시 테마 {t} 노출 {w:.0%} (한도 {limits.max_theme:.0%})")
+            limit(fitting(limits.max_theme - theme_w.get(t, 0.0)), f"편입 시 테마 {t} 노출 {w:.0%} (한도 {limits.max_theme:.0%})")
     if max_c is not None and max_c[1] >= limits.high_correlation:
         limit(SizeClass.HALF, f"{max_c[0]}와 상관계수 {max_c[1]:.2f} (중복 위험)")
     if abs(rate + add * cand.rate_sensitivity) > 0.5 and (rate * cand.rate_sensitivity) > 0:

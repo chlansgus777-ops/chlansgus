@@ -106,13 +106,21 @@ class DataAccess:
     def quote(self, t: str) -> Fetched:
         return self._get("price", "price", "get_quote", t, t, cross_check=relative_conflicts(("price",), 0.02))
 
-    def bars(self, t: str, start: date, end: date) -> Fetched:
+    def bars(self, t: str, start: date, end: date, fill_gaps: bool = True) -> Fetched:
+        """``fill_gaps``: when the stored history misses the requested START and the market sync has not finished its
+        backfill yet, ask the provider for the range (independent review F07: one recent bar answered a request for a
+        month). Scans pass False — hundreds of per-ticker requests would exhaust the free rate limit; they wait for
+        the sync, and readiness says so."""
         stored: list[Bar] = []
         if self.store is not None:
             stored = self.store.bars(t, start, end)
-            # the store is authoritative when it covers the requested end (±3 sessions for sync lag)
+            # the store is authoritative when it covers the requested end (±3 sessions for sync lag) and either its
+            # start, or the backfill of the whole market is complete (then an earlier start is outside the stored
+            # window by design, and a later first bar means the company was not trading yet)
             if stored and (end - stored[-1].day).days <= 5:
-                return Fetched(stored, "store")
+                front_ok = (stored[0].day - start).days <= 5 or bool(self.store.get_setting("bars_backfill_complete"))
+                if front_ok or not fill_gaps:
+                    return Fetched(stored, "store")
             # an archived company (ticker later reused: "ABC~111") or a delisted / renamed-away name is not a
             # current provider ticker — asking for it would return another company or nothing
             if "~" in t or self.store.is_active(t) is False:

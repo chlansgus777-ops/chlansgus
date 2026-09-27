@@ -1,0 +1,9 @@
+2026-09-27, uploaded source labelled 2240992
+Node v24.19.0
+npm ci --no-audit --no-fund: success (149 packages)
+npm run typecheck: success
+npm test: 12 test files passed, 51 tests passed
+npm run build: success, Vite 7.3.6, 70 modules transformed
+Output: index.html 0.40 kB; CSS 12.55 kB; JS 395.62 kB (gzip 125.25 kB)
+This file is a concise transcription of observed command output, not a CI certification.
+Browser E2E: not executed successfully; Chromium download failed.

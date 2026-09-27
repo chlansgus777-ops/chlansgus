@@ -264,6 +264,21 @@ def cluster(items: Sequence[NewsItem], threshold: float = STORY_SIMILARITY) -> l
     return clusters
 
 
+# the physical move of a rate / price, read from the words that say it — not from the headline's sentiment
+# (independent review F11: "leaves interest rates unchanged" has sentiment 0, which read as "rates up")
+_MOVE_HOLD = re.compile(r"\b(unchanged|steady|on hold|holds? (?:rates|interest rates|policy)|leaves? (?:rates|interest rates|policy)|keeps? (?:rates|interest rates|policy)|pause[sd]?|pausing|flat|no change)\b")
+_MOVE_UP = re.compile(r"\b(rise[sn]?|rising|rose|climb(?:s|ed|ing)?|jump(?:s|ed|ing)?|surge[sd]?|surging|soar(?:s|ed|ing)?|spike[sd]?|hikes?|hiked|hiking|raise[sd]?|raising|higher|increase[sd]?|increasing|accelerat\w*|hotter|rall(?:y|ies|ied))\b")
+_MOVE_DOWN = re.compile(r"\b(cuts?|cutting|lower(?:s|ed|ing)?|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|decline[sd]?|declining|slide[sd]?|slid|eas(?:e|es|ed|ing)|plunge[sd]?|tumble[sd]?|slump(?:s|ed)?|cool(?:s|ed|ing|er)?|slow(?:s|ed|ing)?|decreas\w*|sink(?:s|ing)?|sank)\b")
+
+
+def _move(text: str) -> float:
+    """+1 up, −1 down, 0 held / unclear / both."""
+    if _MOVE_HOLD.search(text):
+        return 0.0
+    up, down = bool(_MOVE_UP.search(text)), bool(_MOVE_DOWN.search(text))
+    return 1.0 if up and not down else -1.0 if down and not up else 0.0
+
+
 def _effects(cat: IssueCategory, pol: int, text: str, tickers: tuple[str, ...]) -> tuple[IssueEffect, ...]:
     chain = CAUSAL_TEMPLATES.get(cat, ("사건 발생", "실적 추정치 영향", "재평가"))
     t = text.lower()
@@ -275,10 +290,14 @@ def _effects(cat: IssueCategory, pol: int, text: str, tickers: tuple[str, ...]) 
         d = -0.8 if pol <= 0 else 0.5
         return tuple(IssueEffect(tk, d, chain) for tk in tickers) + (IssueEffect("COUNTRY:CN", 0.0, chain, origin_impact=False),)
     if cat == IssueCategory.OIL:
-        d = 1.0 if pol >= 0 else -1.0
+        d = _move(t)
+        if d == 0:
+            return ()  # the direction of the oil price is not stated: no guessed effect
         return (IssueEffect("COMMODITY:OIL", d, ("유가 ↑" if d > 0 else "유가 ↓",) + chain[1:], origin_impact=False),)
     if cat in (IssueCategory.RATES, IssueCategory.INFLATION):
-        d = 1.0 if pol >= 0 else -1.0  # "yields climb" → rates up
+        d = _move(t)  # "yields climb" → rates up; "leaves rates unchanged" → no effect
+        if d == 0:
+            return ()
         scale = 1.0 if cat == IssueCategory.RATES else 0.7
         return (IssueEffect("MACRO:RATES", d * scale, ("금리 ↑" if d > 0 else "금리 ↓",) + chain[1:], origin_impact=False),)
     if not tickers or pol == 0:

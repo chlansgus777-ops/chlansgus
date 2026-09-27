@@ -105,6 +105,11 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
         if origin is not None and origin not in ALLOWED_ORIGINS and not same_origin:
             return JSONResponse({"detail": "허용되지 않은 출처(Origin)의 요청입니다."}, status_code=403)
         path = request.url.path
+        # a browser marks requests another site started (an <img>, a link, a no-cors fetch — no Origin header):
+        # those never reach the API, not even a GET, since some GETs analyse and store (independent review F14)
+        site = request.headers.get("sec-fetch-site")
+        if path.startswith("/api/") and site in ("cross-site", "same-site") and not same_origin and origin not in ALLOWED_ORIGINS:
+            return JSONResponse({"detail": "다른 사이트에서 시작된 요청은 허용되지 않습니다."}, status_code=403)
         if path.startswith("/api/"):
             if request.method in UNSAFE_METHODS and request.headers.get(CLIENT_HEADER) is None:
                 return JSONResponse({"detail": f"상태 변경 요청에는 {CLIENT_HEADER} 헤더가 필요합니다."}, status_code=403)

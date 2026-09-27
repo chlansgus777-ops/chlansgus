@@ -1,0 +1,414 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MarketLens 2240992 독립 평가 — 70점 C</title><style>*{box-sizing:border-box}body{margin:0;background:#f1f4f8;color:#202c3c;font-family:system-ui,-apple-system,"Malgun Gothic",sans-serif;line-height:1.8;font-size:16px}main{max-width:1050px;margin:32px auto;padding:38px 46px;background:#fff;border-top:7px solid #274e73;box-shadow:0 2px 12px #1024380a}h1{font-size:30px;line-height:1.35;letter-spacing:-1px;margin-top:0}h2{font-size:23px;margin-top:44px;padding-top:18px;border-top:1px solid #ccd5e0}h3{font-size:18px;margin-top:30px;color:#244e72}p{margin:12px 0}strong{color:#142f4b}table{width:100%;border-collapse:collapse;font-size:14px;min-width:580px}th{background:#eaf0f6;text-align:left}th,td{padding:10px 12px;border-bottom:1px solid #d9e1ea;vertical-align:top}.table-scroll{overflow-x:auto;margin:20px 0}code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:#edf1f6;padding:2px 4px;overflow-wrap:anywhere}pre{background:#edf1f6;padding:18px;overflow-x:auto;line-height:1.6}pre code{padding:0;white-space:pre}li{margin:8px 0}a{color:#185a94}footer{margin-top:40px;color:#61738a;font-size:13px}@media(max-width:700px){main{margin:0;padding:24px 18px}h1{font-size:25px}body{font-size:15px}}@media print{body{background:white}main{margin:0;box-shadow:none;padding:0}h2,h3{break-after:avoid}tr{break-inside:avoid}.table-scroll{overflow:visible}table{min-width:0;font-size:11px}a{color:inherit}}</style></head><body><main><h1 id="marketlens-2240992">MarketLens 2240992 독립 평가 및 전체 보강 검토</h1>
+<p>평가일: 2026-09-27 · 대상: 첨부 <code>marketlens-2240992-source.zip</code> · 평가 방식: 원본 소스 검토, 설치·빌드, 기존 테스트 재실행, 독립 반례 실행</p>
+<h2 id="1">1. 최종 판정</h2>
+<p><strong>70/100 · C 등급 · A 등급 불합격. 현재 상태에서 초보자가 BUY·SELL을 그대로 실행하는 용도로는 부적합합니다.</strong></p>
+<p>구조와 테스트 기반은 잘 갖추어져 있습니다. 공급자 분리, 결정론 계산, 근거 저장, 재현, 데이터 준비도 표시, AI 권한 제한, 백업 등은 실제 코드로 구현되어 있습니다. 기존 평가자가 남긴 반례 62개도 모두 통과했습니다.</p>
+<p>그러나 이번 검토에서 <strong>14개 결함 항목을 15개의 실패하는 pytest로 재현</strong>했습니다. 최대 매수가를 넘은 BUY 유지, HOLD 이후 손절 감시 중단, 주식분할 후 잘못된 SELL과 선행 EPS, 종목 재사용 시 가격 이력 오염은 실제 판단 경로의 문제입니다. 단순 문구 개선으로 해결되지 않습니다.</p>
+<p>현재 적절한 용도는 <strong>개발 검증, 원자료를 따로 확인하는 조사 보조, 결함 수정 후의 제한적 관찰 운영</strong>입니다. 모의투자 수익률을 전략의 실효성 증거로 취급할 단계도 아닙니다.</p>
+<p>이 점수는 이번 범위와 증거에 따른 공학적 평가입니다. 이전 보고서의 83점에서 프로그램이 실제로 퇴보했다는 뜻이 아닙니다. 기존 수정은 통과했고, 이번에는 다른 경로와 제품 전체를 더 넓게 조사했습니다. 투자 수익 확률이나 전략의 기대수익을 점수화한 것도 아닙니다.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>평가 항목</th>
+<th style="text-align: right;">점수</th>
+<th>주요 근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>데이터 무결성·시점 정확성</td>
+<td style="text-align: right;">16/25</td>
+<td>빈티지 설계는 좋지만 실적 시각, 종목 이력, 분할 추정치에 결함</td>
+</tr>
+<tr>
+<td>결정 안전성</td>
+<td style="text-align: right;">12/20</td>
+<td>거부권 구현은 있으나 최종 매수 조건과 보유 손절 수명 관리가 불완전</td>
+</tr>
+<tr>
+<td>성과 평가·모의투자</td>
+<td style="text-align: right;">11/15</td>
+<td>시가 진입·비용·계좌 제한은 구현, 잘못된 종목 이력과 원천 판단이 성과를 오염시킬 수 있음</td>
+</tr>
+<tr>
+<td>실데이터 검증</td>
+<td style="text-align: right;">10/15</td>
+<td>표본 검증 기록은 있으나 이번 환경에서 재호출·원본 로그 확인·전체시장 검증은 못 함</td>
+</tr>
+<tr>
+<td>테스트·CI·재현성</td>
+<td style="text-align: right;">9/10</td>
+<td>기존 테스트 통과, 스냅샷 재현·계층 테스트 존재, 브라우저 검증은 미완료</td>
+</tr>
+<tr>
+<td>UI 정확성</td>
+<td style="text-align: right;">8/10</td>
+<td>한국어·결측·MOCK 표시와 상태 재검증은 장점, 실행 금액·판정 일관성·설정 UX 보강 필요</td>
+</tr>
+<tr>
+<td>신청서·문서 정확성</td>
+<td style="text-align: right;">4/5</td>
+<td>한계를 잘 적었으나 발표 시각 안전성·완전한 판단 보호를 뒷받침하지 못함</td>
+</tr>
+<tr>
+<td><strong>합계</strong></td>
+<td style="text-align: right;"><strong>70/100</strong></td>
+<td><strong>C</strong></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="a-gate">A Gate</h3>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>이번 판정</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>G1 열린 P0 없음</td>
+<td><strong>실패</strong> — F01, F02</td>
+</tr>
+<tr>
+<td>G2 시점 정확성·종목 동일성 P1 없음</td>
+<td><strong>실패</strong> — F05, F06, F10, F12, F13 등</td>
+</tr>
+<tr>
+<td>G3 실제 공급자 검증 기록</td>
+<td><strong>문서상 기록 존재 / 독립 인증 미완료</strong> — 원본 실행 로그와 실제 응답은 이번에 확인하지 못함</td>
+</tr>
+<tr>
+<td>G4 대상 커밋 CI 통과</td>
+<td><strong>독립 확인 못 함</strong> — 로컬 테스트와 빌드는 검증, GitHub 대상 SHA의 실행 결과는 별개</td>
+</tr>
+<tr>
+<td>G5 이전 반례 재발 없음</td>
+<td><strong>통과</strong> — 첨부된 이전 pytest 62개 전부 통과</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="2">2. 실제 수행과 검증 한계</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>수행 항목</th>
+<th>직접 확인한 결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>백엔드 의존성</td>
+<td><code>backend/requirements.lock</code> 설치 및 editable 설치 성공</td>
+</tr>
+<tr>
+<td>백엔드 전체 테스트</td>
+<td><strong>570 passed, 13 skipped</strong></td>
+</tr>
+<tr>
+<td>이전 평가 반례</td>
+<td><strong>62 passed</strong></td>
+</tr>
+<tr>
+<td>프런트 타입 검사</td>
+<td>통과</td>
+</tr>
+<tr>
+<td>프런트 테스트</td>
+<td><strong>51 passed / 12 files</strong></td>
+</tr>
+<tr>
+<td>프런트 production 빌드</td>
+<td>통과</td>
+</tr>
+<tr>
+<td>이번 독립 반례</td>
+<td><strong>15 failed</strong> — 정상 동작을 요구하는 assert에서 실패, import·fixture 준비 실패 아님</td>
+</tr>
+<tr>
+<td>원본 코드 수정</td>
+<td>제품 소스 수정 없음. 빌드 산출물은 생성됨</td>
+</tr>
+<tr>
+<td>Windows 설치·Tauri 실행</td>
+<td>직접 확인 못 함</td>
+</tr>
+<tr>
+<td>실제 API·전체시장 스캔</td>
+<td>키를 제공받지 않아 이번에는 호출하지 않음</td>
+</tr>
+<tr>
+<td>브라우저 화면·E2E</td>
+<td>Playwright 설치 후 Chromium 다운로드 실패. E2E 13개와 시각적 화면 검증은 완료하지 못함</td>
+</tr>
+</tbody>
+</table></div>
+<p>환경은 Linux, Python 3.12.14, Node 24.19.0입니다. 의뢰서 CI의 Python 3.11/Node 22와 동일 환경은 아닙니다. 처음 백엔드를 실행했을 때는 이 환경의 SOCKS 프록시에 필요한 <code>socksio</code>가 없어 8개가 실패했습니다. <code>httpx[socks]</code>를 보완한 뒤에는 해당 실패가 사라졌습니다. 이를 제품 결함으로 집계하지 않았습니다.</p>
+<p>기존 62개 반례 일부는 이미 백엔드 테스트에도 편입되어 있습니다. 570과 62를 서로 독립인 검증 632건처럼 해석하면 안 됩니다. 테스트 통과는 다룬 입력에서의 동작을 확인할 뿐, 수익성이나 미검증 입력의 정확성을 보장하지 않습니다.</p>
+<p>ZIP에 Git 이력이 없으므로 커밋 이름은 제출된 식별자를 사용했습니다. 실제 평가 파일의 SHA-256은 다음과 같습니다.</p>
+<pre><code>52de41562ae1774ae2f4810fbf2cb7bf2a36d0440c109033ea290161b061c440
+</code></pre>
+<h2 id="3">3. 확인된 결함 목록</h2>
+<p>P0는 정상적인 사용 흐름에서 판단 근거·보호 조건이 조용히 틀릴 수 있는 문제, P1은 특정 입력·사건에서 잘못된 수치나 판단이 발생하는 문제, P2는 과거 조회 또는 추가 조건이 필요한 문제로 분류했습니다. <strong>P0 2건, P1 9건, P2 3건</strong>입니다. R 번호는 첨부 pytest 함수 이름의 번호입니다.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>항목</th>
+<th>심각도</th>
+<th>반례</th>
+<th>요약</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>F01</td>
+<td>P0</td>
+<td>R1, R2</td>
+<td>매수 조건을 벗어나도 이전 BUY 복원, 생성 직후 CURRENT 허용</td>
+</tr>
+<tr>
+<td>F02</td>
+<td>P0</td>
+<td>R10</td>
+<td>HOLD 상태에서는 이전 손절선 감시가 끊김</td>
+</tr>
+<tr>
+<td>F03</td>
+<td>P2</td>
+<td>R3</td>
+<td>실적 발표 시각을 날짜로 줄여 장후 과거 조회에 정보가 일찍 노출</td>
+</tr>
+<tr>
+<td>F04</td>
+<td>P1</td>
+<td>R4</td>
+<td>가이던스 범위의 million/billion 단위를 양 끝에 잘못 적용</td>
+</tr>
+<tr>
+<td>F05</td>
+<td>P1</td>
+<td>R5</td>
+<td>거래 중인 종목이 SEC 목록에서 한번 빠지면 상장폐지로 기록</td>
+</tr>
+<tr>
+<td>F06</td>
+<td>P1</td>
+<td>R6</td>
+<td>티커 재사용 발견 시 새 회사의 당일 가격까지 옛 회사로 이동</td>
+</tr>
+<tr>
+<td>F07</td>
+<td>P2</td>
+<td>R7</td>
+<td>요청 구간 앞부분이 없어도 최근 일봉 하나로 저장소 응답 확정</td>
+</tr>
+<tr>
+<td>F08</td>
+<td>P1</td>
+<td>R8</td>
+<td>SMALL 축소 후에도 업종 한도 초과 가능</td>
+</tr>
+<tr>
+<td>F09</td>
+<td>P1</td>
+<td>R9</td>
+<td>가이던스의 회계분기를 확인하지 않고 다른 분기 컨센서스 연결</td>
+</tr>
+<tr>
+<td>F10</td>
+<td>P1</td>
+<td>R11</td>
+<td>다른 회사가 재사용한 티커에 옛 추천·손절·히스테리시스 연결</td>
+</tr>
+<tr>
+<td>F11</td>
+<td>P1</td>
+<td>R12</td>
+<td>금리 동결 기사를 금리 상승 효과로 변환</td>
+</tr>
+<tr>
+<td>F12</td>
+<td>P1</td>
+<td>R13</td>
+<td>주식분할 후 이전 손절가를 조정하지 않아 잘못된 SELL</td>
+</tr>
+<tr>
+<td>F13</td>
+<td>P1</td>
+<td>R14</td>
+<td>분할 전 선행 EPS를 분할 후 가격에 계속 사용</td>
+</tr>
+<tr>
+<td>F14</td>
+<td>P2</td>
+<td>R15</td>
+<td>토큰 없는 서버 모드에서 cross-site GET이 분석 결과를 DB에 기록</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="f01">F01 — 매수가·손익비 보호를 이전 판단 유지 로직이 덮어씀</h3>
+<p>위치: <code>domain/decision.py:212</code>, <code>domain/what_changed.py:diff</code>, <code>domain/freshness.py:233</code>.</p>
+<p>재현: 손절 90, 목표 120이면 최소 손익비 2의 최대 매수가가 100입니다. 가격이 99.9에서 100.1로 움직이면 손익비는 약 2.03에서 1.97로 내려갑니다. ATR 2에서는 구간 이탈폭이 0.25 ATR보다 작아 <code>diff()</code>가 중요한 변화로 보지 않습니다. <code>decide()</code>는 먼저 WAIT를 계산한 뒤, 이전 BUY를 다시 최종 판단으로 복원합니다.</p>
+<p>별도 반례에서는 같은 시각의 100.1 시세와 최대 매수가 100을 전달해도 <code>recommendation_freshness()</code>가 CURRENT/actionable=True를 반환합니다. 시세가 분석 시각보다 엄격히 나중일 때만 먼저 재검증하기 때문입니다. 따라서 UI 재검증이 이 결함을 항상 막아준다고 할 수도 없습니다.</p>
+<p>수정 방향: 판단 흔들림 억제는 점수 등급에만 적용하고, <strong>최종 BUY/BUY SMALL/ADD 직전에 현재 가격·손익비·손절·비중 조건을 다시 강제</strong>해야 합니다. 생성 직후의 계획도 유효성을 확인해야 합니다. 매수의견과 지금 실행 가능 여부를 별도 상태로 관리하는 것이 좋습니다.</p>
+<h3 id="f02-hold">F02 — 보유 중 HOLD로 바뀌면 손절 감시 중단</h3>
+<p>위치: <code>application/pipeline.py:598–604</code>, <code>application/services.py:_previous_lookup</code>.</p>
+<p>재현: 보유 종목의 직전 분석이 HOLD, 손절 100이고 이후 완료된 일봉 종가가 95인 입력을 사용했습니다. 결과는 <strong>HOLD, 거부권 없음</strong>이었습니다. 손절 이탈 검사 자체가 직전 action이 BUY/BUY SMALL/ADD인 경우로 제한되어 있습니다.</p>
+<p>이는 흔한 BUY → 실제 보유 → HOLD → 하락 흐름에서 나타날 수 있습니다. 또한 매번 현재가에서 새 계획을 만드는 구조이므로 진입 때의 손절을 최근 분석의 새 손절로 바꾸지 않도록 별도 관리해야 합니다.</p>
+<p>수정 방향: 추천 스냅샷과 <strong>보유 포지션의 활성 계획</strong>을 분리합니다. 진입 시 손절·계획 ID·주식 기준을 저장하고 HOLD에서도 계속 검사해야 합니다. 손절 변경은 명시적인 규칙과 변경 기록을 거쳐야 합니다. 사용자가 외부에서 산 기존 보유분은 활성 계획 미설정 상태를 명확히 표시해야 합니다.</p>
+<h3 id="f03">F03 — 장후 실적 시각 누수</h3>
+<p>위치: <code>domain/earnings.py:pair_with_releases</code>, <code>application/pipeline.py:earnings_visible</code>.</p>
+<p>재현: 17:00 ET에 공개된 것으로 전달한 실적 입력을 16:01 ET 조회에서 이미 사용할 수 있었습니다. 원천 함수는 datetime을 받지만 <code>EarningsReport</code>에는 날짜만 남기고, 같은 날 정규장 마감부터 허용합니다.</p>
+<p>이번 반례는 과거 시점 조회를 대상으로 하므로 P2입니다. SEC 접수 시각과 실제 보도자료 공개 시각도 항상 같은 것은 아닙니다. 현재의 날짜 변환만으로 “늦게 잡혀도 미래 정보가 새지 않는다”는 문서 주장을 충족하지 못합니다.</p>
+<p>수정 방향: 검증된 <code>published_at/accepted_at</code>과 출처를 보존하고 분석 시각과 직접 비교합니다. 시각이 없으면 다음 세션부터 쓰는 등 보수적인 규칙을 명시합니다.</p>
+<h3 id="f04-1000">F04 — 혼합 단위 가이던스 1,000배 오류</h3>
+<p>위치: <code>domain/guidance.py:_parse</code>, 약 109행.</p>
+<p>입력: <code>Revenue for the third quarter of fiscal 2026 is expected to be $900 million to $1.1 billion.</code></p>
+<p>기대 범위는 9억~11억 달러입니다. 실제는 <strong>9,000억~11억 달러</strong>, <code>EXTRACTED</code>, <code>MEDIUM</code>입니다. 오른쪽 billion을 왼쪽 900에도 적용했고, low &gt; high도 차단하지 않습니다.</p>
+<p>수정 방향: 각 끝점에 독립적으로 단위를 적용하고, 단위가 생략된 경우에만 명시된 단위를 공유합니다. low ≤ high, 통화 일치, 유한한 값 등 기본 불변조건에 실패하면 GUIDANCE_UNCLEAR로 보내야 합니다. GAAP/non-GAAP 및 수준/변화량 검증과 별개로 단위 검증이 필요합니다.</p>
+<h3 id="f05">F05 — 일시적 목록 누락이 즉시 상장폐지가 됨</h3>
+<p>위치: <code>application/market_store.py:sync_universe</code>, 약 156행.</p>
+<p>재현: ABC와 KEEP이 상장되어 있고 ABC의 다음 날 거래 일봉도 저장되어 있습니다. 다음 SEC 목록에서 ABC만 빠지면 즉시 <code>delisted_at</code>이 설정됩니다. <code>_really_delisted()</code>의 거래 지속 검사는 돌아온 종목을 처리할 때 실행될 뿐, 최초 누락 순간을 막지 않습니다.</p>
+<p>영향: 정상 종목의 스캐너 제외와 가짜 상장폐지 성과가 발생할 수 있습니다. <code>update_outcomes()</code>는 이미 기록된 horizon을 다시 계산하지 않으므로 나중에 GAP으로 철회되어도 잘못 기록한 성과의 별도 정정 경로가 필요합니다. 이번 테스트는 잘못된 delisted_at 기록까지 직접 재현했으며, 성과 오염 경로는 연결 코드 검토로 확인했습니다.</p>
+<p>수정 방향: 목록 누락은 우선 PENDING/UNRESOLVED로 두고, 거래 지속 여부와 독립된 종료 근거를 확인합니다. 불확실한 상태는 마지막 가격으로 성과를 확정하지 않습니다.</p>
+<h3 id="f06">F06 — 티커 재사용 시 새 회사 가격까지 이전 회사에 귀속</h3>
+<p>위치: <code>application/sync.py:run</code>의 일봉→유니버스 순서, <code>application/market_store.py:_archive_reused</code>.</p>
+<p>재현: 옛 ABC(CIK 111)의 100달러 일봉 뒤에 새 ABC(CIK 222)의 10달러 당일 일봉을 먼저 저장하고 유니버스를 동기화합니다. 현재 코드 순서 그대로입니다. 아카이브 시 날짜 조건 없이 모든 <code>PriceBarRow</code>를 이동하여 <strong>새 회사의 10달러 일봉이 <code>ABC~111</code>에 붙었습니다.</strong></p>
+<p>영향: 옛 회사가 90% 급락한 것처럼 보이는 이력이 만들어질 수 있습니다. 새 회사에서는 당일 가격이 빠집니다.</p>
+<p>수정 방향: 공급자에서 받은 일봉을 임시 보관한 뒤 종목 동일성을 확정하여 저장하거나, security ID와 유효 기간으로 귀속을 나눠야 합니다. 실제 변경일을 모르면 추측해서 두 회사를 연결하지 않아야 합니다.</p>
+<h3 id="f07">F07 — 앞부분이 없는 가격 이력을 완전한 응답처럼 반환</h3>
+<p>위치: <code>application/data_access.py:bars</code>, 약 114행.</p>
+<p>재현: 9월 1~25일을 요청했지만 저장소에는 25일 하나만 있습니다. 공급자는 요청 구간을 반환할 수 있도록 구성했습니다. 현재 코드는 끝 날짜가 최근이라는 이유만으로 공급자를 호출하지 않고 하루만 반환했습니다.</p>
+<p>이 문제는 신규 설치·부분 동기화와 과거 성과 조회에서 부족한 이력 회복을 막습니다. 스캐너의 60일 미만 제외는 일부 영향을 제한하지만, 데이터가 실제로 없는 것과 아직 안 받은 것을 구분하지 못합니다.</p>
+<p>수정 방향: 시작·끝 범위와 예상 세션 수, 실제 누락 구간을 확인합니다. 종목별 무제한 호출 대신 작업 예산 내 보충 수집으로 연결하고, 완전성 상태를 반환합니다.</p>
+<h3 id="f08">F08 — 작은 비중으로 줄여도 한도를 넘음</h3>
+<p>위치: <code>domain/portfolio.py:review_candidate</code>, 약 167행.</p>
+<p>재현: 자산 10만 달러 중 Technology 29.5%, 현금 70.5%, 업종 상한 30%입니다. 새 Technology 종목에 SMALL을 허용합니다. 설정상 SMALL은 자산의 1.25%이므로 <strong>합계 30.75%</strong>가 됩니다.</p>
+<p>수정 방향: 종목·업종·테마·현금·허용 손실 예산의 <strong>잔여 공간을 금액으로 계산한 뒤 가장 작은 값</strong>을 한도로 사용합니다. FULL/HALF/SMALL로 축소한 뒤에도 모든 한도를 재검사해야 합니다. 실제 적용할 금액과 주식 수를 UI와 모의투자에 같은 값으로 전달해야 합니다.</p>
+<h3 id="f09">F09 — 가이던스와 컨센서스의 회계분기가 다름</h3>
+<p>위치: <code>application/estimate_book.py:attach_guidance</code>, 약 146행.</p>
+<p>재현: Q1 발표가 제공한 Q3 매출 가이던스 200~220에 Q2 컨센서스 100이 붙었습니다. 현재 코드는 quarter 여부만 확인하고, 발표일보다 20일 이상 뒤인 가장 가까운 실적 일정의 수치를 선택합니다. Q3와 Q2가 맞는지 검증하지 않습니다.</p>
+<p>이 입력으로는 서로 다른 분기를 비교해 +110%라는 허위 가이던스 상회를 만들 수 있습니다. 반례에서는 잘못된 Q2 컨센서스 부착까지 직접 확인했습니다.</p>
+<p>수정 방향: fiscal year·fiscal quarter·period_end와 통화·GAAP 기준을 표준화하고 일치할 때만 비교합니다. 텍스트 기간을 확정하지 못하면 수치 추출 자체가 가능해도 비교값은 비워야 합니다.</p>
+<h3 id="f10">F10 — 티커 재사용 후 옛 회사 추천을 참조</h3>
+<p>위치: <code>application/services.py:_previous_lookup</code>, 약 164행.</p>
+<p>재현: 같은 티커에 대해 CIK 111→222 변경을 저장한 뒤 다음 분석의 이전 판단을 조회하면 CIK 111 시기의 digest와 action이 그대로 돌아옵니다. 성과 계산 일부는 <code>identity_on()</code>을 사용하지만, 이전 추천 조회는 ticker와 mode만 사용합니다.</p>
+<p>수정 방향: 추천·보유·경보·모의 포지션에 동일한 security ID를 사용해야 합니다. 다른 회사의 추천은 이전 판단으로 연결하지 말고 첫 분석으로 취급해야 합니다. 이 원칙을 화면 이력과 위원회 재사용에도 적용할 필요가 있습니다.</p>
+<h3 id="f11">F11 — 금리 동결을 금리 상승으로 해석</h3>
+<p>위치: <code>application/issue_engine.py:_effects</code>, 약 280행.</p>
+<p>입력: <code>Federal Reserve leaves interest rates unchanged</code> / <code>Policy remains unchanged.</code></p>
+<p>실제 결과: <code>MACRO:RATES direction=1.0</code>, 전달 경로 <strong>“금리 ↑ → 장기 성장주 멀티플 ↓”</strong>. 감성 방향이 0일 때 <code>pol &gt;= 0</code> 분기로 상승을 선택합니다.</p>
+<p>수정 방향: 방향 모름·동결·수준·변화·예상 대비 놀라움을 분리합니다. 판단이 안 되면 방향을 비워야 합니다. 뉴스 감성 점수와 금리·유가의 물리적 변화 방향은 같은 개념이 아닙니다. 이 값은 이슈 영향·촉매 점수로 이어지므로 단순 문구 오역보다 중요합니다.</p>
+<h3 id="f12-sell">F12 — 주식분할 때문에 잘못된 손절 SELL</h3>
+<p>위치: <code>application/pipeline.py:598–604</code>.</p>
+<p>재현: 이전 가격 1,000·손절 900, 이후 10:1 분할, 분할 후 종가 100입니다. 경제적으로 손절 90 위에 있는데 <strong>100 ≤ 900</strong>으로 비교해 “직전 추천의 손절 기준가 아래로 마감”이라는 SELL을 냅니다. 파이프라인 전체 실행으로 확인했습니다.</p>
+<p>수정 방향: 이전 계획·digest의 가격을 현재 가격과 같은 share basis로 변환합니다. 모의투자의 <code>_signal()</code>에 있는 분할 조정과 실제 결정 엔진이 서로 다른 규칙을 사용해서는 안 됩니다.</p>
+<h3 id="f13-eps">F13 — 분할 전 선행 EPS 캐시를 그대로 사용</h3>
+<p>위치: <code>application/data_access.py:estimates</code>, <code>application/estimate_book.py:build</code>.</p>
+<p>재현: 9월 23일 선행 EPS 10을 저장하고 24일 10:1 분할을 기록했습니다. 25일 조회 결과는 여전히 forward EPS 10입니다. 분할 후 기준이라면 1로 조정하거나 기준 불확실로 제외해야 합니다.</p>
+<p>영향: 가격 100이면 PER가 10배로 계산될 수 있지만 같은 기준 EPS 1을 쓰면 100배입니다. 재무 EPS 정규화가 있어도 AnalystSnapshot에는 별도 적용이 없습니다. 새 API 응답을 받기 전까지 캐시 기간 동안 이어질 수 있습니다.</p>
+<p>수정 방향: EPS·EPS revision·목표주가 등 주당 추정치에 share basis와 관측 시각을 저장합니다. 확실한 변환만 적용하고, 불확실하면 신규 분석 전에 해당 캐시를 무효화합니다.</p>
+<h3 id="f14-get">F14 — 읽기 GET이 분석을 실행하고 저장</h3>
+<p>위치: <code>api/routes.py:stock</code>, <code>api/app.py:local_guard</code>.</p>
+<p>재현: 토큰을 설정하지 않은 서버에 Origin·클라이언트 헤더 없이 <code>GET /api/stocks/NVDA?refresh=true</code>와 cross-site/no-cors Fetch Metadata를 보냈더니 추천 레코드 1개가 생성됐습니다. 신규 종목의 일반 GET도 분석을 실행할 수 있습니다. 응답을 읽지 못하더라도 부작용 자체는 일어날 수 있습니다.</p>
+<p>범위: <strong>토큰 없는 CLI/웹 서버 모드의 추가 조건이 필요한 문제</strong>입니다. Tauri 셸은 실행별 토큰을 주입하므로 이 반례를 그대로 Tauri에 적용할 수 없습니다. 실제 외부 웹사이트를 통한 브라우저 공격 성공이나 키 유출을 입증한 것은 아닙니다.</p>
+<p>수정 방향: 분석·재분석은 보호된 POST로 이동하고 GET은 조회 전용으로 둡니다. 기본 서버에도 토큰을 적용하고, Fetch Metadata 검증과 호출 예산을 함께 사용합니다. 신규 분석이 필요한 조회는 명시적인 상태를 반환해야 합니다.</p>
+<h2 id="4">4. 의뢰 범위를 넘어선 제품 전체 보강 제안</h2>
+<p>아래는 위의 실패 반례와 구분되는 <strong>설계·운영 개선 제안</strong>입니다. 해당 항목마다 장애를 직접 재현했다는 뜻은 아닙니다.</p>
+<h3 id="41">4.1 “미국 전체시장 스캔”과 “전체 종목을 동일 깊이로 분석”을 구분</h3>
+<p>현재 설정은 stage2 400 → stage3 150 → stage4 60 → 최종 40, 선행 추정치 신규 조회는 상위 20입니다. 그 전에 기존 추정치 유무가 순위에 영향을 줍니다. 먼저 데이터를 받은 종목이 계속 선발되는 선택 편향을 점검해야 합니다.</p>
+<p>권장 보강:</p>
+<ul>
+<li>유니버스 전체 수, 적격 수, 최신 일봉·재무·추정치 확보 수, 깊이 분석 수를 나란히 표시합니다.</li>
+<li>탈락 이유를 종목별로 검색 가능하게 만들고 “낮은 점수”와 “자료를 아직 못 받음”을 분리합니다.</li>
+<li>추정치 조회 예산 일부를 미조회 종목 순환에 배정하고, 핵심 후보 밖에서 누락된 좋은 종목이 얼마나 있는지 표본 검사합니다.</li>
+<li>기존 제한을 풀어 후보 3개를 억지로 만들지 않습니다. 유효 매수 후보가 없으면 관찰 후보와 다음 확인 조건을 제시합니다.</li>
+<li>클래스주 표기 및 동일 CIK의 여러 클래스는 종목 식별 설계에서 먼저 해결해야 합니다. 단순 문자열 치환만으로 충분하지 않습니다.</li>
+</ul>
+<h3 id="42">4.2 현재가 세션 표시는 있어도 장외시간 의사결정 능력은 별개</h3>
+<p>README는 실시간 호가·장외시간 시세를 제공하지 않는다고 명시합니다. 따라서 PRE/REGULAR/AFTER라는 표시는 현재 시세가 그 세션의 체결 가능 가격이라는 증거가 아닙니다.</p>
+<p>권장 보강: 분석 기준 세션, 시세 발생 세션, 시세 시각, 지연 여부, 실행 가능한 판단 범위를 한 카드에서 보여 줍니다. 검증된 장외 시세가 없으면 정규장 종가 기반 관찰로 제한합니다. 프리·정규·애프터 각각에서 표본 종목으로 신선도·스프레드·시세 공백을 측정하기 전에는 “지금 사도 됨”을 확장하지 않는 것이 좋습니다.</p>
+<h3 id="43">4.3 사용자에게 필요한 매수 계획은 가격 외에 금액·비중·수량도 포함</h3>
+<p>현재 UI의 “정상 비중 / 절반 비중 / 소량”만으로는 사용자가 얼마를 살지 결정하기 어렵습니다. 실전 포트폴리오 기본 full_position은 5%인데 paper는 기본 10만 달러 계좌에 1만 달러를 배정하는 등 두 경로의 sizing도 다릅니다.</p>
+<p>권장 보강: 총자산·가용현금·현재 보유·최대 허용 손실을 기반으로 <strong>추가 매수 최대 금액, 추가 주식 수, 매수 후 종목/업종 비중, 손절 시 예상 손실액</strong>을 계산합니다. F08 수정 후 하나의 계산 결과를 UI·AI·paper가 공유해야 합니다. 이 수치가 없으면 “내 포트폴리오에 적합”을 강하게 표현하지 않아야 합니다.</p>
+<h3 id="44">4.4 스윙 판단과 단타 판단의 제품 범위 확정</h3>
+<p>현재 핵심 가격 이력과 모의투자는 일봉이고, 추천 이후 첫 시가 진입이며, 20/60거래일 성과와 2~6주 영향 등을 사용합니다. 따라서 현재 구현은 <strong>스윙 중심 판단 보조</strong>에 더 가깝습니다. 실시간 단타·체결 최적화·옵션 감마를 계산한 시스템으로 설명하면 안 됩니다.</p>
+<p>권장 보강: 메인 화면에서 보유 기간, 분석 주기, 유효 세션과 데이터 범위를 먼저 명시합니다. 단타까지 지원하려면 호가·장중봉·실행비용·세션별 리스크 검증이 별도 필요하며, 이번 안전성 결함 해결보다 먼저 기능을 확장할 이유는 없습니다.</p>
+<h3 id="45">4.5 뉴스 영향은 검증된 인과 모델이 아니라 규칙 기반 추정</h3>
+<p>뉴스 제목·요약의 키워드와 제한된 관계 그래프가 중심입니다. <code>exposure_graph.toml</code>의 관계·가중치에는 일반적인 출처 설명은 있지만 각 관계마다 공시 URL·기준일·매출 의존도 근거가 붙어 있지는 않습니다. 이것을 모든 이슈와 근미래 영향을 계산했다고 표현할 수 없습니다.</p>
+<p>권장 보강: 사건 사실과 예상 영향을 분리하고, 영향 경로별 원문·작성 시점·근거 수준을 표시합니다. 기사 정정·철회·수치 변경·서로 모순된 독립 보도를 처리할 테스트가 필요합니다. 규칙이 분류하지 못한 중요 기사를 누락률로 측정합니다. F11처럼 중립을 방향성으로 바꾸는 로직을 우선 제거해야 합니다.</p>
+<h3 id="46">4.6 점수의 유효성과 데이터 정확성은 따로 검증</h3>
+<p>80점 이상이라는 기준, 항목 가중치, 기술적 목표가, 익스포저 강도는 구현되어 있다는 것만으로 수익 예측력이 증명되지 않습니다. 신뢰도도 성공 확률이 아니라 분류 여유·데이터 완전성에 가까운 수치입니다.</p>
+<p>권장 보강: 운영 전 기간을 고정한 표본 외 평가, SPY·동일 업종·단순 규칙과 비교, 거래비용 민감도, 점수 구간별 성과, 국면별 안정성, 불확실성 구간을 보고합니다. 순위를 만드는 표본과 검증 표본을 분리하고, 장기 수익률 중첩과 같은 날 종목 간 상관을 고려해야 합니다. 최소 100개 표본 규칙과 사람 승인만으로 통계적 타당성이 확보되는 것은 아닙니다.</p>
+<h3 id="47">4.7 모의투자와 화면의 손절 전략을 일치시켜야 성과를 설명할 수 있음</h3>
+<p>화면은 종가 기준 손절, paper는 장중 손절이라는 차이가 문서와 화면에 명시되어 있습니다. 정직하게 밝힌 점은 장점입니다. 그러나 paper의 승률을 그대로 실제 표시 전략의 승률로 이해하면 다른 전략을 비교하게 됩니다.</p>
+<p>권장 보강: 종가 판단→다음 시가 실행 모델과 장중 stop-order 모델을 별도 전략 ID로 나누거나, 사용자 선택 전략 하나와 일치시킵니다. 배당·합병 대가·거래정지·상장폐지 회수금의 지원 범위도 명시하고 가격수익률/총수익률을 구분합니다. 잘못된 원천 가격·종목 이력의 수정 후에는 성과를 버전으로 재계산할 수 있어야 합니다. 현재 재현(replay)은 저장된 입력의 재계산이지 저장 입력이 진실이었다는 검증은 아닙니다.</p>
+<h3 id="48-ui">4.8 초보자용 UI에서 “왜 지금 이 행동인가”를 더 명확히</h3>
+<p>한국어 안내, 쉽게 보기, 용어 설명, 결측 구분과 상태 폴링은 장점입니다. 다만 Settings는 읽기 전용이고 <code>.env</code>, TOML 직접 편집을 요구합니다. 데이터 준비 화면에도 개발자용 공급자명·상태 코드가 많이 남아 있습니다.</p>
+<p>권장 보강: 첫 실행에서 모의/실데이터 선택→필수 키 검사→남은 수집량→예상 대기→동기화 재개까지 연결합니다. 종목 페이지에는 <strong>지금 행동 / 최대 매수가 / 허용 금액 / 무효화 조건 / 다음 재확인 시각</strong>을 우선 배치합니다. “신뢰도 높음”에는 수익 확률이 아니라는 짧은 설명을 붙입니다. 화면 새로고침·일시 단절 시 이전 데이터의 날짜와 현재 상태를 계속 구분해야 합니다.</p>
+<p>이번에는 실제 브라우저를 띄우지 못했으므로, 시각적 완성도·터치 영역·색 대비·모바일 넘침을 직접 평가했다고 주장하지 않습니다. 화면 관련 평가는 컴포넌트 코드와 51개 프런트 테스트에 기반합니다.</p>
+<h3 id="49">4.9 비용·속도·중단 복구를 사용자 단위로 검증</h3>
+<p>구조상 상위 5개 FULL, 다음 15개 LIGHT를 검토합니다. 문서상의 호출 수를 적용하면 재사용이 없는 스캔에서 최대 145회 수준의 LLM 호출이 생길 수 있습니다. 금액은 선택 모델·입출력 토큰·실제 재사용에 따라 달라지므로 이번에 비용을 산정하지 않았습니다.</p>
+<p>권장 보강: 일일·스캔당 비용 상한, 실행 전 예상 범위, 취소, 종목별 중간 결과, 재개 체크포인트를 제공합니다. 실제 60종목 깊이 분석의 p50/p95 처리 시간, 부분 실패율, API 예산을 측정합니다. 단일 종목 분석과 전체 스캔이 겹칠 때 추정치 일일 예산·DB 쓰기가 안전한지도 부하 테스트해야 합니다. 현재 전체 스캔의 lock이 단일 종목 분석에는 동일하게 적용되지 않는 점은 추가 검증 대상입니다.</p>
+<h3 id="410">4.10 설치·백업·업데이트를 복구까지 시험</h3>
+<p>온라인 SQLite 백업과 integrity_check, 단일 인스턴스·부모 프로세스 감시, 로컬 Host/Origin 제한은 좋은 기반입니다. 반면 소스 ZIP만으로 Windows 설치 결과와 업그레이드 안전성을 보장할 수 없습니다.</p>
+<p>권장 보강: 깨끗한 Windows에서 설치·키 설정·최초 수집·강제 종료·재시작·버전 업그레이드·백업 복원·제거 후 데이터 유지까지 자동 검사합니다. DB 스키마 변경 전 백업과 실패 시 복구 절차를 갖춰야 합니다. 운영 로그·진단 패키지를 내보낼 때 자격증명과 사용자 보유내역을 분리하고 최소화해야 합니다.</p>
+<h3 id="411-ci">4.11 CI는 “동작했다”를 재현하는 환경까지 잠가야 함</h3>
+<p>프런트 job에서 빌드하더라도 backend job과 파일 시스템이 공유되지는 않습니다. 현재 backend E2E는 Playwright 또는 브라우저가 없으면 skip됩니다. Windows backend는 Linux lock 대신 의존성을 다시 해결하는 경로입니다.</p>
+<p>권장 보강: 필수 E2E 전용 job에서 frontend build와 Chromium 설치를 수행하고, 그 job에서는 필수 테스트 skip을 실패로 다룹니다. 이번 반례를 CI에 직접 포함합니다. OS별 의존성 잠금과 실제 설치 파일 해시를 기록하고, 테스트 통과 수·skip 이유를 평가서에 자동 반영합니다.</p>
+<h3 id="412">4.12 실데이터 검증은 응답 성공을 넘어 정답 대조로 확대</h3>
+<p>문서의 마지막 13/13 검증은 <code>4f3a663</code> 시점 기록입니다. 평가 대상 <code>2240992</code>와 동일한 실행인지, 수정 이후 동작이 모두 유지되는지는 원본 로그와 SHA로 확인해야 합니다. <code>live-verify</code>의 숫자 존재·유한성·날짜 확인은 유용하지만, 잘못된 9,000억 가이던스도 유한한 수라는 점을 생각해야 합니다.</p>
+<p>권장 보강: API 응답 성공과 계산 정확성을 별도 상태로 나눕니다. 다양한 회계연도·정정 공시·은행·적자기업·클래스주·분할·티커 변경 사례를 포함한 검증 세트를 고정하고, 수치마다 공식 원문과 자동/수동 대조 결과를 남깁니다. 무료 데이터 제약을 감추지 않는 대신 실제 지원 종목과 미지원 이유를 선명하게 제시해야 합니다.</p>
+<h2 id="5">5. 권장 수정 순서와 완료 조건</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>순서</th>
+<th>작업</th>
+<th>완료 증거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>F01·F02: 최종 행동 보호와 포지션 계획 수명 분리</td>
+<td>R1/R2/R10 통과, BUY→HOLD→손절 시나리오 통합 테스트</td>
+</tr>
+<tr>
+<td>2</td>
+<td>F05/F06/F10/F12/F13: 종목 동일성·분할 기준 통일</td>
+<td>변경 전후 같은 경제적 포지션에서 가짜 손익·SELL 없음</td>
+</tr>
+<tr>
+<td>3</td>
+<td>F03/F04/F09/F11: 시각·단위·기간·방향 검증</td>
+<td>모호한 값은 비교 제외, 정확한 원문 표본 대조</td>
+</tr>
+<tr>
+<td>4</td>
+<td>F07/F08/F14 및 데이터 복구</td>
+<td>부분 수집·한도 초과·토큰 없는 GET 반례 통과</td>
+</tr>
+<tr>
+<td>5</td>
+<td>UI 계획 금액, 초기 설정, 스캔 범위·비용 표시</td>
+<td>초보자가 설정 파일 편집 없이 상태와 제한을 이해하는 사용성 검증</td>
+</tr>
+<tr>
+<td>6</td>
+<td>실제 공급자·전체시장·Windows·E2E·표본 외 평가</td>
+<td>대상 SHA에 연결된 로그·정답 대조·설치/복원 결과</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>완료 기준은 점수 상승이 아니라 불변조건 통과입니다.</strong> 최종 매수는 현재 계획을 만족해야 하고, HOLD라도 활성 손절은 살아 있어야 하며, 회사가 바뀌면 과거 판단이 이어지면 안 됩니다. 같은 기업의 분할만으로 투자 성과나 판단이 바뀌어서도 안 됩니다. 새 기능이나 AI 분석가 추가보다 이 조건들을 먼저 닫는 것이 우선입니다.</p>
+<h2 id="6">6. 반례 실행 및 전달물</h2>
+<p>ZIP의 <code>evaluations/eval7</code>을 대상 저장소의 <code>evaluations/eval7</code>로 복사한 뒤 실행합니다. 기존 제품 코드는 수정하지 않습니다.</p>
+<pre><code class="language-bash">python -m pytest -q -o addopts=&quot;&quot; evaluations/eval7
+</code></pre>
+<p>별도 폴더에서 실행할 경우에는 저장소 절대 경로를 지정할 수 있습니다.</p>
+<pre><code class="language-bash">MARKETLENS_SOURCE_ROOT=/absolute/path/to/marketlens python -m pytest -q -o addopts=&quot;&quot; evaluations/eval7
+</code></pre>
+<p>Windows PowerShell에서는 <code>$env:MARKETLENS_SOURCE_ROOT = 'C:\path\to\marketlens'</code>로 지정한 뒤 pytest를 실행합니다. 테스트는 기존 <code>backend/tests/helpers.py</code>와 MOCK 서비스 fixture를 일부 재사용하므로 전체 대상 저장소가 필요합니다. 실제 공급자 호출이나 주문 실행은 하지 않습니다.</p>
+<p><code>2240992</code>에서의 기대 실행 결과는 <strong>15 failed</strong>입니다. 이는 결함이 재현됐다는 의미입니다. 수정 후에는 테스트의 요구 조건을 완화하지 않고 통과시켜야 합니다. 기간·단위·종목 ID 같은 스키마를 바꾸는 경우 입력 생성 부분은 새 계약에 맞게 이동하되 검증 의미를 보존해야 합니다.</p>
+<p>첨부에는 전체 반례 출력, 백엔드 최종 실행 결과, 이전 반례 실행 결과, 테스트 대응표를 포함했습니다. 원본 ZIP과 소스는 수정하지 않았으며 이번 작업은 평가와 개선 방향 제시까지입니다.</p><footer>평가 대상: 제출된 2240992 소스 ZIP · 2026-09-27</footer></main></body></html>

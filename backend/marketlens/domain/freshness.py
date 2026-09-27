@@ -228,9 +228,15 @@ def recommendation_freshness(
     age = now - as_of
     minutes = int(age.total_seconds() // 60)
     quote_ok = quote_price is not None and quote_ts is not None and timedelta(0) <= now - quote_ts <= pol.max_quote_age
-    # A fresh quote newer than the analysis is always checked against the plan — even for a young
-    # recommendation: ten minutes are enough for a price to fall through the stop.
-    if plan is not None and quote_ok and quote_ts is not None and quote_ts > as_of:
+    # A plan that does not hold at its own analysis price is never actionable (independent review F01: a stored
+    # BUY above its max buy price read as CURRENT right after it was made).
+    if plan is not None and plan.bullish and plan.rec_price:
+        own = _revalidate(plan, plan.rec_price, pol)
+        if own:
+            return RecommendationFreshness("PLAN_INVALIDATED", recorded_quality, n, f"{when}; 분석 시점 가격부터 조건 이탈: " + "; ".join(own), problems=tuple(own))
+    # A fresh quote as new as the analysis or newer is always checked against the plan — even for a young
+    # recommendation: ten minutes are enough for a price to fall through the stop (same timestamp included: F01).
+    if plan is not None and quote_ok and quote_ts is not None and quote_ts >= as_of:
         problems = _revalidate(plan, quote_price, pol)  # type: ignore[arg-type]
         if problems:
             return RecommendationFreshness("PLAN_INVALIDATED", recorded_quality, n, f"분석 후 {minutes}분 경과, 현재가 기준 조건 이탈: " + "; ".join(problems), problems=tuple(problems))

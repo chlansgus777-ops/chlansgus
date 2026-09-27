@@ -137,6 +137,30 @@ def _mid(r: object) -> float | None:
     return (lo + hi) / 2 if lo is not None and hi is not None else None
 
 
+_ORD = {"first": 1, "second": 2, "third": 3, "fourth": 4}
+
+
+def _named_quarter(label: str | None) -> tuple[int, int | None] | None:
+    """(quarter, fiscal year or None) named by a guidance period label ("third quarter of fiscal 2026", "Q4 FY2027")."""
+    import re
+
+    low = (label or "").lower()
+    m = re.search(r"(first|second|third|fourth)\s+(?:fiscal\s+)?quarter", low) or re.search(r"\bq([1-4])\b", low)
+    if m is None:
+        return None
+    q = _ORD.get(m.group(1)) or int(m.group(1))
+    y = re.search(r"(20\d\d)", low)
+    return q, int(y.group(1)) if y else None
+
+
+def _fiscal_quarter(period: str | None) -> tuple[int, int] | None:
+    """(quarter, fiscal year) of a consensus period key ("FQ2026Q2")."""
+    import re
+
+    m = re.fullmatch(r"FQ(20\d\d)Q([1-4])", period or "")
+    return (int(m.group(2)), int(m.group(1))) if m else None
+
+
 def attach_guidance(reports: Sequence[EarningsReport], rows: Sequence[object], history: Sequence[EstimateObservation], as_of: date) -> list[EarningsReport]:
     """Put the latest SEC-extracted guidance (filed on/before ``as_of``) on the earnings report released
     with it, next to the consensus that was known *before* the release (a snapshot observed earlier).
@@ -169,6 +193,16 @@ def attach_guidance(reports: Sequence[EarningsReport], rows: Sequence[object], h
               key=lambda h: (h.report_date or date.max, -h.observed_on.toordinal()), default=None)
     if nxt is not None:  # the latest snapshot of that period taken before the release
         nxt = max((h for h in before if h.provider == FINNHUB and h.period == nxt.period), key=lambda h: h.observed_on)
+    # the consensus must be for the quarter the guidance names (independent review F09: Q3 guidance was compared with
+    # the Q2 consensus because Q2 was the next report); a named quarter that the consensus period does not match —
+    # or cannot be matched against — is not compared
+    if nxt is not None:
+        cq = _fiscal_quarter(nxt.period)
+        for g_item in (q_rev, q_eps):
+            gq = _named_quarter(getattr(g_item, "period_label", None)) if g_item is not None else None
+            if gq is not None and (cq is None or gq[0] != cq[0] or (gq[1] is not None and gq[1] != cq[1])):
+                nxt = None
+                break
     used = [r for r in (q_rev, q_eps, fy_rev, fy_eps, gm) if r is not None]
     g = Guidance(
         next_q_revenue_low=getattr(q_rev, "low", None), next_q_revenue_high=getattr(q_rev, "high", None),

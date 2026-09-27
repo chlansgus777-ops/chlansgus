@@ -232,10 +232,11 @@ class MarketStore:
             arch = f"{base}.{k}"
         for model in (PriceBarRow, FundamentalVintageRow, CorporateActionRow, EstimateSnapshotRow, GuidanceRow):
             q = update(model).where(model.ticker == row.ticker)
-            if model is PriceBarRow and row.delisted_at is not None and event == "RETURN":
-                # the old interval ended at its delisting: bars from then on are the new interval's (trading that
-                # resumed before this sync saw the listing again) and stay with the live ticker
-                q = q.where(PriceBarRow.day < row.delisted_at)
+            if model is PriceBarRow:
+                # the old interval ended at its delisting, or — a reused ticker still listed yesterday — no later than
+                # today, when the listing names the new company: bars from then on are the new interval's (the day's
+                # grouped bars are stored before the universe step) and stay with the live ticker (independent review F06)
+                q = q.where(PriceBarRow.day < (row.delisted_at if row.delisted_at is not None else today))
             s.execute(q.values(ticker=arch).execution_options(synchronize_session=False))
         s.execute(delete(IngestionManifestRow).where(IngestionManifestRow.ticker == row.ticker, IngestionManifestRow.mode == self.mode))
         # the old company: delisted when its name was still in use until now; a renamed-away or earlier delisted

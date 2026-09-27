@@ -200,6 +200,12 @@ class MarketLensService:
             row = repo.latest_recommendation(s, ticker, before=as_of, mode=self.mode.value, inclusive=True)
             if row is None:
                 return None, None
+            # another company used this ticker when that recommendation was made (a reuse archived it since):
+            # its action, stop and baseline are not this company's history (independent review F10)
+            if self.store is not None:
+                then, now_key = to_ny(row.as_of).date(), to_ny(as_of).date()
+                if self.store.resolve(ticker, then, s) != self.store.resolve(ticker, now_key, s):
+                    return None, None
             digest = decode(AnalysisDigest, row.result["digest"])
             return digest, Action(row.deterministic_action)
 
