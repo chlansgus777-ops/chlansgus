@@ -32,9 +32,17 @@ TIMES = [_utc("2025-11-19T21:20:00"), _utc("2026-02-25T21:20:00"), _utc("2026-05
          _utc("2026-06-10T12:00:00")]  # a second Item 2.02 (e.g. an update) after Q1's release: not a new period
 
 
-def test_each_period_is_dated_by_its_first_8k_release_never_by_the_period_end():
-    reps = pair_with_releases(ROWS, TIMES, "finnhub+sec-8k")
+PERIODIC = [_utc("2025-11-19T21:40:00"), _utc("2026-02-26T21:00:00"), _utc("2026-05-28T20:00:00"), _utc("2026-08-27T20:00:00")]  # 10-Q / 10-K
+
+
+def test_each_period_is_dated_by_its_8k_release_never_by_the_period_end():
+    """CHANGED in round 6 (evaluation 6, K4), disclosed: the release is now the LAST Item 2.02 after the period
+    end and not after the period's own 10-Q/10-K (an earlier one is a pre-announcement). The update of 06-10 comes
+    after the Q1 10-Q, so Q1 keeps 05-27 — with the periodic filing times the result is the same as before."""
+    reps = pair_with_releases(ROWS, TIMES, "finnhub+sec-8k", PERIODIC)
     assert [r.report_date for r in reps] == [date(2025, 11, 19), date(2026, 2, 25), date(2026, 5, 27), date(2026, 8, 26)]
+    # without the periodic filing times the later update dates Q1: late, never early (no leak)
+    assert pair_with_releases(ROWS[2:3], TIMES, "x")[0].report_date == date(2026, 6, 10)
     assert reps[-1].eps_actual == 2.05 and reps[-1].eps_consensus == 1.98 and reps[-1].fiscal_label == "Q2 2027"
     assert all(r.source == "finnhub+sec-8k" for r in reps)
 

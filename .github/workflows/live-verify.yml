@@ -36,6 +36,9 @@ jobs:
           FINRA_API_SECRET: ${{ secrets.FINRA_API_SECRET }}
         run: |
           set +e
+          if [ -z "$SEC_USER_AGENT" ]; then
+            echo "::warning::SEC_USER_AGENT is empty: the 7 SEC categories (fundamentals, eps_ttm, ifrs, bank, earnings, guidance, insider) will be BLOCKED_BY_CREDENTIAL. Set the repository secret SEC_USER_AGENT or the sec_user_agent input to \"Name email\"."
+          fi
           marketlens live-verify --out live-verify-report.json > /dev/null
           code=$?
           echo "exit code: $code (0 = every category VERIFIED)"

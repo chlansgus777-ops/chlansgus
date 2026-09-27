@@ -119,7 +119,8 @@ def _parse(metric: str, s: str) -> tuple[float | None, float | None, str, bool, 
 _PROFIT = re.compile(r"(?<![a-z])(profit|profitable|profitability|net income|income|earnings|break-?\s?even|positive)(?![a-z])")
 # minus signs: hyphen, U+2212 minus, and the en / figure dashes typesetters use for minus ("–$0.10", "‒5%")
 _MINUS = "-−–‒"
-_NEG_MARK = re.compile(r"(?:^|(?<=[\s(]))[-−–‒](?=\s?\$?\s?\d)|\$\s?\(\s?\d|\(\s?\$\s?\d|(?<!or )minus\s+\$?\s?\d")
+_NEG_MARK = re.compile(r"(?:^|(?<=[\s(]))[-−–‒](?=\s?\$?\s?\d)|\$\s?\(\s?\d|\(\s?\$\s?\d|(?<!or )minus\s+\$?\s?\d"
+                       r"|\(\s?\d+(?:\.\d+)?\s?%\s?\)")  # accounting notation: "(3%)" is minus 3%
 _RANGE_LEFT = re.compile(r"(\d|%|billion|million|thousand|\bb|\bm)\s*$")
 
 
@@ -133,6 +134,13 @@ def _has_negative_number(low: str) -> bool:
     return False
 
 
+# an amount by which a metric CHANGES (a tariff / FX / acquisition impact, "decline by", "increase by") is not the
+# level of that metric — such a sentence never yields a guided level (evaluation 6, K1)
+_CHANGE = re.compile(r"(?<![a-z])(impact|impacts|impacted|impacting|headwinds?|tailwinds?|dilutive|accretive|dilution|accretion"
+                     r"|reduce|reduces|reduced|reducing|reduction|decline|declines|declining|decrease|decreases|decreasing"
+                     r"|increase|increases|increasing|(?:grow|grows|rise|rises|fall|falls|improve|improves|expand|expands|contract|contracts)\s+by)(?![a-z])")
+# a loss phrase that is negated or superseded: it says what is NOT expected ("instead of the net loss we expected")
+_NEGATED = re.compile(r"(?<![a-z])(instead of|contrary to|no longer|rather than|previously|prior outlook|earlier outlook|formerly)(?![a-z])")
 _LOSS_WORD = re.compile(r"(?<![a-z])(loss|losses|deficit|lose|loses|losing|lost)(?![a-z])")
 # the clear forms of loss guidance: "net loss (per share)", "loss per (diluted) share"
 _LOSS_EPS_FORM = re.compile(r"(?<![a-z])(net\s+loss|loss\s+per\s+(diluted\s+|basic\s+)?(common\s+)?share)(?![a-z])")
@@ -176,6 +184,8 @@ def _sign(metric: str, s: str, start: int) -> str:
     low = s.lower()
     if _has_negative_number(low) or re.search(r"(?<![a-z])negative(?![a-z])", low):
         return "UNCLEAR"
+    if _CHANGE.search(low):
+        return "UNCLEAR"  # a change / impact amount, not the guided level
     if _number_groups(low, metric) > 1:
         return "UNCLEAR"  # two amounts of the same unit (GAAP and non-GAAP, an excluded item, last year's value)
     if re.search(r"(?<![a-z])respectively(?![a-z])|gaap and non-gaap|gaap and adjusted|non-gaap and gaap", low):
@@ -184,6 +194,8 @@ def _sign(metric: str, s: str, start: int) -> str:
         return "UNCLEAR"  # "breakeven to $0.05": one end of the range is not a written number
     if not _LOSS_WORD.search(low):
         return "POS"
+    if _NEGATED.search(low):
+        return "UNCLEAR"  # "instead of the net loss per share we previously expected, we now expect $0.05": the loss is not the guide
     if metric != "eps" or start < 0:
         return "UNCLEAR"  # revenue / margins / capex next to a loss word: something else is being discussed
     form = None

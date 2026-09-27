@@ -278,19 +278,31 @@ def assess_revisions(
 RELEASE_MAX_DAYS = 75  # 10-Q deadline is 40–45 days; an earnings release more than 75 days after the period is not its release
 
 
-def pair_with_releases(rows: Sequence[Mapping[str, Any]], release_times: Sequence[datetime], source: str) -> list[EarningsReport]:
+def pair_with_releases(rows: Sequence[Mapping[str, Any]], release_times: Sequence[datetime], source: str,
+                       periodic_times: Sequence[datetime] = ()) -> list[EarningsReport]:
     """Fiscal-period EPS results (period end, actual, consensus) + the real announcement times (SEC 8-K Item
-    2.02 acceptance times) → reports dated by their announcement. Each period takes the FIRST release after its
-    end within ``RELEASE_MAX_DAYS``; one release belongs to one period. A period without a release is dropped —
-    the period end is never used as a report date (it would make results visible weeks before they were public)."""
+    2.02 acceptance times) → reports dated by their announcement.
+
+    A period takes the LAST Item 2.02 release after its end, within ``RELEASE_MAX_DAYS`` and not after the
+    period's own 10-Q / 10-K (``periodic_times``, when known): results are released before or with the periodic
+    report, while an earlier Item 2.02 in the same window is a preliminary update (evaluation 6, K4: a January
+    pre-announcement dated the full release 3.5 weeks early and made its EPS "known" too soon). Dating late is
+    safe; dating early leaks. One release belongs to one period. A period without a release is dropped — the
+    period end is never used as a report date."""
     times = sorted(release_times)
+    periodic = sorted(periodic_times)
     used: set[datetime] = set()
     out: list[EarningsReport] = []
     for r in sorted(rows, key=lambda x: x["period"]):
         end: date = r["period"]
-        t = next((x for x in times if x not in used and end < to_ny(x).date() <= end + timedelta(days=RELEASE_MAX_DAYS)), None)
-        if t is None:
+        limit = end + timedelta(days=RELEASE_MAX_DAYS)
+        own_report = next((to_ny(p).date() for p in periodic if to_ny(p).date() > end), None)
+        if own_report is not None and own_report <= limit:
+            limit = own_report
+        cands = [x for x in times if x not in used and end < to_ny(x).date() <= limit]
+        if not cands:
             continue
+        t = cands[-1]
         used.add(t)
         q, y = r.get("quarter"), r.get("year")
         out.append(EarningsReport(report_date=to_ny(t).date(), fiscal_label=f"Q{q} {y}" if q and y else end.isoformat(), source=source,

@@ -65,6 +65,7 @@ class MarketSync:
             fundamentals_refresh: timedelta = FUNDAMENTALS_REFRESH) -> SyncReport:
         rep = SyncReport()
         today = last_completed_session(now)
+        unloaded: set[date] = set()
         # 1) bars via grouped daily (before the universe step, see 2a)
         grouped = _find(self.reg, "price", "get_grouped_daily")
         if grouped is not None:
@@ -78,12 +79,14 @@ class MarketSync:
                     wanted.append(d)
                 d -= timedelta(days=1)
             rep.bar_days_missing = len(wanted)
+            unloaded = set(wanted)  # sessions without market data yet: no evidence for the universe step (2a)
             for d in wanted[:max_bar_calls]:  # newest first; older history fills in over later runs
                 try:
                     bars = grouped.get_grouped_daily(d)
                 except ProviderError as e:
                     rep.errors.append(f"bars {d}: {e}")
                     break
+                unloaded.discard(d)
                 if bars:
                     self.store.save_grouped(d, bars, grouped.name)
                     rep.bar_days_loaded += 1
@@ -96,7 +99,7 @@ class MarketSync:
         #     arriving is a data gap, not a delisting) and before splits (rename links decide which bars a split rescales)
         try:
             secs = self.reg.chain("universe").call("list_securities", None).value
-            rep.universe = self.store.sync_universe(secs, today)
+            rep.universe = self.store.sync_universe(secs, today, unloaded)
         except ProviderError as e:
             rep.errors.append(f"universe: {e}")
         # 2b) stock splits (one bulk request) → rescale stored bars fetched before the split
