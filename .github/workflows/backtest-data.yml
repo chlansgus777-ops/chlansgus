@@ -1,0 +1,35 @@
+name: backtest-data
+# Backtest data (docs/backtest): stage 0 probes how far back each free source answers; later tasks collect the
+# point-in-time data into a SEPARATE database that is uploaded as an artifact (never committed; its SHA-256 is).
+# Keys come from repository secrets and are never printed. Rate limits: Polygon 5/min, SEC 10/s.
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "probe | collect"
+        required: true
+        default: "probe"
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend (lock file)
+        run: pip install -r backend/requirements.lock && pip install --no-deps -e ./backend
+      - name: Probe source coverage
+        if: inputs.task == 'probe'
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: python scripts/backtest/probe_coverage.py --out probe.json
+      - uses: actions/upload-artifact@v4
+        if: inputs.task == 'probe'
+        with:
+          name: backtest-probe
+          path: probe.json
