@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date
-from typing import Sequence
+from typing import Iterable, Sequence
 
 from marketlens.domain.fundamentals import QuarterlyFinancials
 
@@ -88,7 +88,7 @@ def encoded_split_keys(encoded: Sequence[object] | None) -> frozenset[str] | Non
     return frozenset(out)
 
 
-def analysis_basis(as_of: date, applied: Sequence[str] | None) -> ShareBasis:
+def analysis_basis(as_of: date, applied: Iterable[str] | None) -> ShareBasis:
     """The basis of an analysis (or a stored recommendation / paper signal made from one): the splits it recorded, else
     — records from before the field existed — its date."""
     return ShareBasis(as_of, frozenset(applied) if applied is not None else None)

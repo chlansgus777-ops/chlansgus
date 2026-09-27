@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
-from typing import Any
+from datetime import date, timedelta
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -351,6 +351,72 @@ def set_portfolio(req: Request, body: PortfolioIn) -> dict[str, Any]:
             repo.upsert_holding(ss, _ticker(h.ticker), h.quantity, h.cost_basis)
         ss.commit()
     return portfolio(req)
+
+
+class TradeIn(BaseModel):
+    ticker: str = Field(min_length=1, max_length=10)
+    day: date
+    kind: Literal["BUY", "SELL", "DIVIDEND", "SPLIT"]
+    quantity: float = Field(default=0.0, ge=0, le=1e12, allow_inf_nan=False)
+    price: float = Field(default=0.0, ge=0, le=1e9, allow_inf_nan=False)
+    fees: float = Field(default=0.0, ge=0, le=1e9, allow_inf_nan=False)
+    amount: float = Field(default=0.0, ge=0, le=1e12, allow_inf_nan=False)
+    split_from: float = Field(default=0.0, ge=0, le=1e6, allow_inf_nan=False)
+    split_to: float = Field(default=0.0, ge=0, le=1e6, allow_inf_nan=False)
+    note: str = Field(default="", max_length=200)
+
+
+def _ledger_view(s: MarketLensService) -> dict[str, Any]:
+    with s.sf() as ss:
+        groups = s.ledger(ss)
+    out = []
+    realized = dividends = 0.0
+    for g in groups:
+        pos = g["position"]
+        if pos is not None:
+            realized += pos.realized_pnl
+            dividends += pos.dividends
+        out.append({
+            "security": g["security"], "ticker": g["ticker"], "last_ticker": g["last"].ticker, "error": g["error"],
+            "position": None if pos is None else {"quantity": pos.quantity, "avg_cost": pos.avg_cost, "cost_basis": pos.cost_basis, "realized_pnl": pos.realized_pnl,
+                                                  "dividends": pos.dividends, "fees": pos.fees, "splits_applied": list(pos.splits_applied)},
+            "trades": [{"id": r.id, "ticker": r.ticker, "day": r.day.isoformat(), "kind": r.kind, "quantity": r.quantity, "price": r.price, "fees": r.fees,
+                        "amount": r.amount, "split_from": r.split_from, "split_to": r.split_to, "note": r.note} for r in sorted(g["rows"], key=lambda r: (r.day, r.id))],
+        })
+    return {"securities": out, "realized_pnl": round(realized, 2), "dividends": round(dividends, 2),
+            "note": "거래 기록이 있는 종목의 보유(수량·평단)는 거래 기록에서 계산합니다. 주식분할은 실행일 개장 전에 적용되므로 그날의 체결은 분할 후 기준으로 적으세요."}
+
+
+@router.get("/transactions")
+def get_transactions(req: Request) -> dict[str, Any]:
+    return _ledger_view(svc(req))
+
+
+@router.post("/transactions")
+def add_transaction(req: Request, body: TradeIn) -> dict[str, Any]:
+    """Records one trade; the client re-reads /transactions and /portfolio (the response carries only the new id)."""
+    from marketlens.domain.ledger import LedgerError
+
+    s = svc(req)
+    try:
+        tid = s.add_transaction(_ticker(body.ticker), body.day, body.kind, body.quantity, body.price, body.fees, body.amount, body.split_from, body.split_to, body.note)
+    except LedgerError as e:
+        raise HTTPException(400, str(e)) from None
+    return {"added": tid}
+
+
+@router.delete("/transactions/{tid}")
+def delete_transaction(req: Request, tid: int) -> dict[str, Any]:
+    from marketlens.domain.ledger import LedgerError, LedgerNotFound
+
+    s = svc(req)
+    try:
+        s.delete_transaction(tid)
+    except LedgerNotFound as e:
+        raise HTTPException(404, str(e)) from None
+    except LedgerError as e:
+        raise HTTPException(400, str(e)) from None
+    return {"deleted": tid}
 
 
 @router.get("/watchlist")

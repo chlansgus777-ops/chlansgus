@@ -1,7 +1,8 @@
 """Invariant: everything follows the COMPANY, never the ticker label. After a rename (same CIK, new ticker), a reuse (the
 ticker now names another CIK) and a relisting (the same CIK back after a delisting), bars, fundamentals, the
 recommendation history, the previous recommendation and paper trading join exactly the records of the same company.
-One function decides "same company": MarketStore.company_id(ticker, day)."""
+One function decides "same security": MarketStore.security_id(ticker, day) — the rename/relisting line of the storage key
+(round 10 code review: a CIK is a company, and two share classes of one company are two securities)."""
 
 from __future__ import annotations
 
@@ -66,7 +67,7 @@ def world(tmp_path):  # noqa: ANN001, ANN201
 
 def test_one_function_says_which_company(world):
     svc, _ = world
-    cid = svc.store.company_id
+    cid = svc.store.security_id
     assert cid("OLD", D1) == cid("NEW", D4)            # rename: the same company
     assert cid("ABC", D1) != cid("ABC", D4)            # reuse: another company
     assert cid("REL", D1) == cid("REL", D4)            # relisted: the same company
@@ -114,3 +115,40 @@ def test_paper_exits_follow_the_company(world):
         b_rec = repo.get_recommendation(s, ids["abc_b"])
         later_b = svc.company_recommendations(s, "ABC", datetime.combine(D4, time(16), tzinfo=UTC), on=D1)
         assert b_rec is not None and all(r.id == ids["abc_b"] for r in later_b)  # C's recommendations never close B's position
+
+
+def test_two_share_classes_of_one_company_are_two_securities(tmp_path):
+    """BRK-A and BRK-B share a CIK but are different securities (1,500x apart in price): the history, the previous
+    recommendation (its stop) and the trade records of one class never become the other's (round 10 code review)."""
+    svc = _svc(tmp_path)
+    st = svc.store
+    st.save_grouped(D1, {"BRK-A": Bar(D1, 700000, 700000, 700000, 700000, 1e3), "BRK-B": Bar(D1, 470, 470, 470, 470, 1e6)}, "polygon")
+    st.sync_universe([_sec("BRK-A", 1067983), _sec("BRK-B", 1067983)], D1)
+    a = _rec(svc, "BRK-A", D1, "BUY", stop=650000.0)
+    with svc.sf() as s:
+        assert svc.store.security_id("BRK-A", D1, s) != svc.store.security_id("BRK-B", D1, s)
+        look = svc._previous_lookup(s)
+        d_b, a_b = look("BRK-B", datetime.combine(D2, time(16), tzinfo=UTC))
+        hist_b = [r.id for r in svc.company_recommendations(s, "BRK-B", datetime.combine(D2, time(16), tzinfo=UTC))]
+    assert d_b is None and a_b is None and a not in hist_b  # BRK-A's 650,000 stop is not BRK-B's
+
+
+def test_paper_trading_treats_a_renamed_security_as_one_holding(world):
+    """A BUY on OLD opened a paper position; the same security's BUY published under NEW is a repeat BUY of a held
+    name (skipped), not a second position in the same security (round 10: paper grouping follows security_id)."""
+    from marketlens.application.evaluation_service import EvaluationService
+    from marketlens.infrastructure.db.models import PaperPositionRow
+
+    svc, ids = world
+    second = _rec(svc, "NEW", D2, "BUY", stop=5.0)
+    with svc.sf() as s:
+        for rid, t, day in ((ids["old"], "OLD", D1), (second, "NEW", D2)):
+            at = datetime.combine(day, time(10), tzinfo=UTC)
+            s.add(PaperPositionRow(recommendation_id=rid, ticker=t, recommended_at=at, status="PENDING", score=85, confidence=70, action="BUY", regime="r",
+                                   sector="Tech", stop=5.0, target1=100.0, target2=200.0, max_buy=50.0, notional=10000, thesis="t", model_version="m", updated_at=at))
+        s.commit()
+    EvaluationService(svc).update_paper(datetime.combine(D4, time(21), tzinfo=UTC))
+    with svc.sf() as s:
+        st = {p.ticker: p.status for p in s.query(PaperPositionRow)}
+        why = {p.ticker: p.skip_reason for p in s.query(PaperPositionRow)}
+    assert st["OLD"] == "OPEN" and st["NEW"] == "SKIPPED" and "반복 매수" in (why["NEW"] or ""), (st, why)

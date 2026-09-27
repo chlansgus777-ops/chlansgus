@@ -18,12 +18,16 @@ class Holding:
     themes: tuple[str, ...] = ()  # e.g. ("AI",)
     rate_sensitivity: float = 0.0
     split_adjusted: float = 1.0  # share multiplier of splits executed after the holding was entered (quantity ×, cost ÷)
+    source: str = "manual"  # "manual" (one entered line) or "ledger" (computed from the trade records, domain.ledger)
+    realized_pnl: float = 0.0  # ledger only: realized result of the sales
+    dividends: float = 0.0  # ledger only
 
 
 @dataclass(frozen=True, slots=True)
 class Portfolio:
     holdings: tuple[Holding, ...]
     cash: float
+    notes: tuple[str, ...] = ()  # e.g. a trade record set that could not be computed (never silently dropped)
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +229,9 @@ class HoldingValuation:
     weight: float | None
     sector: str
     split_adjusted: float = 1.0  # the entered quantity/cost were put on today's share basis by this multiplier
+    source: str = "manual"
+    realized_pnl: float = 0.0
+    dividends: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,7 +260,7 @@ def portfolio_snapshot(pf: Portfolio, closes: Mapping[str, Mapping[date, float]]
     """Consistent valuation: all holdings at the close of the latest session for which EVERY holding has a
     price (so weights never mix today's and last week's prices). Returns/beta/correlations use only the
     trading dates common to the series involved (inner join), never positional alignment."""
-    notes: list[str] = []
+    notes: list[str] = list(pf.notes)
     tickers = [h.ticker for h in pf.holdings]
     have = [set(closes[t]) for t in tickers if closes.get(t)]
     val_day, _prices, missing = common_valuation(closes, tickers)
@@ -273,7 +280,8 @@ def portfolio_snapshot(pf: Portfolio, closes: Mapping[str, Mapping[date, float]]
             invested += mv
             unreal += pnl or 0.0
         rows.append(HoldingValuation(h.ticker, h.quantity, h.cost_basis, px, val_day if px is not None else None, mv, pnl,
-                                     (px / h.cost_basis - 1) if px is not None and h.cost_basis > 0 else None, None, h.sector, h.split_adjusted))
+                                     (px / h.cost_basis - 1) if px is not None and h.cost_basis > 0 else None, None, h.sector, h.split_adjusted,
+                                     h.source, h.realized_pnl, h.dividends))
     nav = pf.cash + invested
     rows = [replace_weight(r, nav) for r in rows]
     sector_w: dict[str, float] = {}

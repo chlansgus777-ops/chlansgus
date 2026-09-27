@@ -249,6 +249,27 @@ def test_portfolio_input_gives_a_plain_reading(page, server):
     assert page.get_by_role("img", name="비중 도넛 차트").is_visible()
 
 
+def test_a_trade_record_becomes_the_holding(page, server):
+    """Round 10 feature a): a BUY recorded on the screen is the holding, marked as computed from the records."""
+    t = _rows(page, server)[1]["ticker"]
+    page.goto(f"{server}/#/portfolio")
+    page.get_by_role("heading", name="거래 기록").wait_for()
+    page.get_by_label("체결일").fill("2026-09-01")
+    page.get_by_label("거래 종목 코드").fill(t)
+    page.get_by_label("거래 수량").fill("3")
+    page.get_by_label("체결 가격").fill("50")
+    page.get_by_role("button", name="기록", exact=True).click()
+    page.get_by_text("보유 3주 · 평단").wait_for()
+    page.get_by_label("거래 수량").fill("4")  # selling more than held is refused with the reason
+    page.get_by_label("거래 종류").select_option("SELL")
+    page.get_by_label("체결일").fill("2026-09-02")
+    page.get_by_label("거래 종목 코드").fill(t)
+    page.get_by_label("거래 수량").fill("4")
+    page.get_by_label("체결 가격").fill("60")
+    page.get_by_role("button", name="기록", exact=True).click()
+    page.get_by_text("보유 3주보다 많이 매도할 수 없음").wait_for()
+
+
 def test_provider_error_is_explained_with_a_retry(page, server):
     page.route("**/api/dashboard", lambda route: route.fulfill(status=503, content_type="application/json", body='{"detail": "upstream down"}'))
     try:

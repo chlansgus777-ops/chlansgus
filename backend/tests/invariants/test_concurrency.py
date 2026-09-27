@@ -24,7 +24,7 @@ def _join(name: str) -> None:
 
 
 def _locks_free(svc) -> None:  # noqa: ANN001
-    for lk in (svc._lock, svc._sync_lock, svc._sync_run):
+    for lk in (svc._lock, svc._sync_lock, svc._sync_run, svc._ledger_lock):
         assert lk.acquire(blocking=False), lk
         lk.release()
 

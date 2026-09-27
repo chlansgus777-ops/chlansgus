@@ -11,6 +11,12 @@ export function num(v: number | null | undefined, digits = 2): string {
   return v.toLocaleString("ko-KR", { maximumFractionDigits: digits, minimumFractionDigits: digits });
 }
 
+/** A share count: whole shares without decimals, fractional shares with up to 4. */
+export function shares(v: number | null | undefined): string {
+  if (!isNum(v)) return dash;
+  return v.toLocaleString("ko-KR", { maximumFractionDigits: 4 });
+}
+
 export function pct(v: number | null | undefined, digits = 1, signed = true): string {
   if (!isNum(v)) return dash;
   const s = (v * 100).toFixed(digits);

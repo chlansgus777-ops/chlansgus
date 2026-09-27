@@ -31,6 +31,7 @@ from marketlens.domain.freshness import PlanCheck, RecommendationFreshness, reco
 from marketlens.domain.corporate_actions import ShareBasis, analysis_basis, encoded_split_keys, share_multiplier
 from marketlens.domain.market_calendar import UTC, to_ny
 from marketlens.domain.paper import position_notional
+from marketlens.domain.ledger import LedgerError, LedgerNotFound, Trade, check_delete, check_new, positions
 from marketlens.domain.portfolio import Holding, Portfolio
 from marketlens.domain.what_changed import AnalysisDigest
 from marketlens.infrastructure.db import repository as repo
@@ -42,6 +43,11 @@ from marketlens.providers.llm.base import LLMProvider, UnavailableLLM
 log = logging.getLogger("marketlens.service")
 DEFAULT_CASH = 100_000.0
 COMMITTEE_OK = ("COMPLETED", "PARTIAL", "REUSED")
+
+
+def ledger_trade(r: Any) -> Trade:
+    """A stored trade record as the ledger's Trade (the one conversion)."""
+    return Trade(int(r.id), r.day, r.kind, float(r.quantity), float(r.price), float(r.fees), float(r.amount), float(r.split_from), float(r.split_to))
 
 
 def build_llm(settings: Settings) -> LLMProvider:
@@ -151,6 +157,7 @@ class MarketLensService:
         self.data = DataAccess(self.registry, self.base_cfg.cache_ttl, store=self.store, now_fn=self.now)
         self._lock = threading.Lock()
         self._sync_lock = threading.Lock()  # the background preparation job (taken by start_sync, freed by the job)
+        self._ledger_lock = threading.Lock()  # one trade-record change at a time (check and write together)
         self._sync_run = threading.Lock()  # one sync_market() at a time, whoever calls it (9th evaluation H5)
         self.last_scan_context: ScanContext | None = None
         self._check_db_environment()
@@ -190,20 +197,104 @@ class MarketLensService:
         return load_model_config(CONFIG_DIR, weights_override=dict(prod.weights), scoring_version_override=prod.version)
 
     def portfolio(self, s: Session) -> Portfolio:
-        rows = repo.holdings(s)
+        """The user's holdings, one per SECURITY (MarketStore.security_id). A security whose trade records include a
+        buy is computed from them (domain.ledger — splits, sales and dividends by one rule); otherwise its entered line
+        is used, put on today's share basis. Anything left out or overridden is said in the notes, never dropped
+        silently. Every holding is labelled with the ticker the security uses today."""
         cash = float(repo.get_setting(s, "portfolio_cash", str(DEFAULT_CASH)) or DEFAULT_CASH)
-        hs = []
         today = to_ny(self.now()).date()
-        for r in rows:
-            sec = (self.last_scan_context.securities.get(r.ticker) if self.last_scan_context else None)
+        hs: list[Holding] = []
+        notes: list[str] = []
+        ledgers = {g["security"]: g for g in self.ledger(s, today)}
+
+        def profile(ticker: str) -> tuple[str, tuple[str, ...], float]:
+            sec = (self.last_scan_context.securities.get(ticker) if self.last_scan_context else None)
             exp = self.seed.macro_exposure(sec) if sec else None
+            return (sec.sector if sec else "Unknown", ("AI",) if exp and exp.ai >= 0.4 else (), exp.rates if exp else 0.0)
+
+        def decides(g: dict[str, Any] | None) -> bool:  # records with a buy decide the holding (a lone dividend does not)
+            return g is not None and g["position"] is not None and any(t.kind == "BUY" for t in g["trades"])
+
+        rows = repo.holdings(s)
+        entered = {r.ticker: to_ny(r.updated_at if r.updated_at.tzinfo is not None else r.updated_at.replace(tzinfo=UTC)).date() for r in rows}
+        sids = self.data.securities_of([(r.ticker, entered[r.ticker]) for r in rows], s)
+        manual: dict[str, Any] = {}
+        for r in sorted(rows, key=lambda r: entered[r.ticker]):
+            sid = sids[(r.ticker, entered[r.ticker])]
+            if sid in manual:
+                notes.append(f"{manual[sid].ticker}: 같은 종목의 수동 입력 줄이 둘 — 나중에 저장한 {r.ticker} 줄을 씁니다")
+            manual[sid] = r
+        for sid, r in manual.items():
+            if decides(ledgers.get(sid)):
+                notes.append(f"{r.ticker}: 수동 입력 줄({r.quantity:g}주)은 쓰지 않습니다 — 이 종목의 보유는 거래 기록 기준입니다")
+                continue
+            label = self.data.current_label(sid, r.ticker, s)
+            if label is None:
+                notes.append(f"{r.ticker}: 입력한 종목의 티커가 지금은 다른 종목의 것입니다(티커 재사용) — 가격이 없어 평가에서 빠짐. 줄을 고치세요")
+                continue
             # a holding entered before a split is on the old share basis: the split multiplies the quantity and divides
             # the average cost, as the broker does, so it is valued with today's split-adjusted closes (9th evaluation H4)
-            entered = r.updated_at if r.updated_at.tzinfo is not None else r.updated_at.replace(tzinfo=UTC)
-            f = share_multiplier(self.data.splits(r.ticker), ShareBasis(to_ny(entered).date()), today) or 1.0
-            hs.append(Holding(r.ticker, r.quantity * f, r.cost_basis / f, sec.sector if sec else "Unknown", ("AI",) if exp and exp.ai >= 0.4 else (),
-                              exp.rates if exp else 0.0, split_adjusted=f))
-        return Portfolio(tuple(hs), cash)
+            f = share_multiplier(self.data.security_splits(sid, s), ShareBasis(entered[r.ticker]), today) or 1.0
+            sector, themes, rates = profile(label)
+            hs.append(Holding(label, r.quantity * f, r.cost_basis / f, sector, themes, rates, split_adjusted=f))
+        for sid, g in ledgers.items():
+            label = g["ticker"] or g["last"].ticker
+            pos = g["position"]
+            if pos is None:
+                fallback = " 수동 입력 줄을 대신 씁니다." if sid in manual else " 이 종목은 보유와 한도 계산에서 빠져 있으니 기록을 고치세요."
+                notes.append(f"{label}: 거래 기록으로 보유를 계산할 수 없음 — {g['error']}.{fallback}")
+                continue
+            if not decides(g) or pos.quantity <= 0:
+                continue  # dividends only, or fully sold: the result is in the trade records' summary
+            if g["ticker"] is None:
+                notes.append(f"{label}: 이 거래 기록의 종목은 지금 쓰는 티커를 알 수 없음(티커가 다른 종목에 재사용됨 등) — 가격이 없어 평가에서 빠짐")
+                continue
+            sector, themes, rates = profile(g["ticker"])
+            hs.append(Holding(g["ticker"], pos.quantity, pos.avg_cost, sector, themes, rates, source="ledger",
+                              realized_pnl=pos.realized_pnl, dividends=pos.dividends))
+        return Portfolio(tuple(hs), cash, tuple(notes))
+
+    def ledger(self, s: Session, today: date | None = None) -> list[dict[str, Any]]:
+        """Per security: its trade records, today's ticker, its splits and the holding computed by
+        domain.ledger.positions (None with the reason when the records cannot be computed — never clamped)."""
+        today = today or to_ny(self.now()).date()
+        out = []
+        for g in self.data.ledger_securities(s, repo.transactions(s)):
+            trades = [ledger_trade(r) for r in g["rows"]]
+            try:
+                pos, err = positions(trades, g["splits"], today), None
+            except LedgerError as e:
+                pos, err = None, str(e)
+            out.append(g | {"trades": trades, "position": pos, "error": err})
+        return out
+
+    def add_transaction(self, ticker: str, day: date, kind: str, quantity: float = 0.0, price: float = 0.0, fees: float = 0.0,
+                        amount: float = 0.0, split_from: float = 0.0, split_to: float = 0.0, note: str = "") -> int:
+        """Record one trade after checking it against the security's whole record (a back-dated trade may not make a
+        later sale exceed the holding). Serialized: two submissions cannot both pass the check. Raises LedgerError."""
+        with self._ledger_lock, self.sf() as s:
+            today = to_ny(self.now()).date()
+            sid = self.data.security_of(ticker, day, s)
+            group = next((g for g in self.data.ledger_securities(s, repo.transactions(s)) if g["security"] == sid), None)
+            trades = [ledger_trade(r) for r in group["rows"]] if group else []
+            splits = group["splits"] if group else self.data.security_splits(sid, s)
+            new = Trade(max((t.id for t in trades), default=0) + 1, day, kind, quantity, price, fees, amount, split_from, split_to)
+            check_new(trades, new, splits, today)
+            row = repo.add_transaction(s, ticker=ticker, day=day, kind=kind, quantity=quantity, price=price, fees=fees, amount=amount,
+                                       split_from=split_from, split_to=split_to, note=note[:200])
+            s.commit()
+            return int(row.id)
+
+    def delete_transaction(self, tid: int) -> None:
+        """Delete one trade record unless that makes a sale exceed the holding. Raises LedgerError / LedgerNotFound."""
+        with self._ledger_lock, self.sf() as s:
+            today = to_ny(self.now()).date()
+            group = next((g for g in self.data.ledger_securities(s, repo.transactions(s)) if any(r.id == tid for r in g["rows"])), None)
+            if group is None:
+                raise LedgerNotFound(f"거래 {tid}을(를) 찾을 수 없음")
+            check_delete([ledger_trade(r) for r in group["rows"]], tid, group["splits"], today)
+            repo.delete_transaction(s, tid)
+            s.commit()
 
     def company_recommendations(self, s: Session, ticker: str, before: datetime | None = None, on: date | None = None, limit: int = 500,
                                 inclusive: bool = True, exclude_id: int | None = None) -> list[RecommendationRow]:

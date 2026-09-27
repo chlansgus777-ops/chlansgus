@@ -315,25 +315,72 @@ class MarketStore:
                                                      TickerHistoryRow.effective > on).order_by(TickerHistoryRow.effective).limit(1)).first()
         return ev.archived_as if ev is not None and ev.archived_as else ticker
 
-    def company_id(self, ticker: str, on: date, session: Session | None = None) -> str:
-        """THE answer to "which company": the CIK of the company that used ``ticker`` on ``on`` (a reuse archived the
-        earlier holder; a rename keeps the CIK; a relisting is the same CIK). Without a CIK, the storage key."""
+    def security_id(self, ticker: str, on: date, session: Session | None = None) -> str:
+        """THE answer to "which security": the storage key that held ``ticker`` on ``on`` (a later reuse archived the
+        earlier holder), followed back through its rename / relisting links to the first key of that line. A rename
+        and a relisting keep the id; a reuse starts a new one; two share classes of one company (BRK-A / BRK-B, one
+        CIK) are two securities, and an unlinked (ambiguous) rename is conservatively a new one."""
         if session is not None:
-            return self._company_id(session, ticker, on)
+            return self.security_ids([(ticker, on)], session)[(ticker, on)]
         with self.sf() as s:
-            return self._company_id(s, ticker, on)
+            return self.security_ids([(ticker, on)], s)[(ticker, on)]
 
-    def _company_id(self, s: Session, ticker: str, on: date) -> str:
-        key = self._resolve(s, ticker, on)
-        row = s.get(SecurityRow, key)
-        return f"cik:{row.cik}" if row is not None and row.cik else f"key:{key}"
+    def security_ids(self, pairs: Iterable[tuple[str, date]], s: Session) -> dict[tuple[str, date], str]:
+        """security_id for many (ticker, day) pairs with two queries (the ticker history and the rename links)."""
+        pairs = list(dict.fromkeys(pairs))
+        tickers = sorted({t for t, _ in pairs})
+        archives: dict[str, list[tuple[date, str]]] = {}
+        for ev in s.scalars(select(TickerHistoryRow).where(TickerHistoryRow.mode == self.mode, TickerHistoryRow.ticker.in_(tickers),
+                                                          TickerHistoryRow.archived_as.is_not(None))):
+            archives.setdefault(ev.ticker, []).append((ev.effective, str(ev.archived_as)))
+        preds = self._rename_links(s)[0]
+        out: dict[tuple[str, date], str] = {}
+        for t, on in pairs:
+            later = sorted(e for e in archives.get(t, []) if e[0] > on)
+            key = later[0][1] if later else t  # as _resolve: the first archive made after that day
+            seen = {key}
+            while preds.get(key) and preds[key] not in seen:
+                key = preds[key]
+                seen.add(key)
+            out[(t, on)] = f"sec:{key}"
+        return out
 
-    def company_labels(self, company: str, session: Session) -> set[str]:
-        """Every ticker label the company was published under (its own rows, renamed-away rows, archives of it)."""
-        if company.startswith("cik:"):
-            cik = int(company[4:])
-            return {r.ticker.split("~")[0] for r in session.scalars(select(SecurityRow).where(SecurityRow.mode == self.mode, SecurityRow.cik == cik))}
-        return {company[4:].split("~")[0]}
+    def _rename_links(self, s: Session) -> tuple[dict[str, str], dict[str, str]]:
+        """(predecessor of, successor of) for every storage key with a rename / relisting link."""
+        preds: dict[str, str] = {}
+        succs: dict[str, str] = {}
+        for r in s.scalars(select(SecurityRow).where(SecurityRow.mode == self.mode, (SecurityRow.predecessor.is_not(None)) | (SecurityRow.successor.is_not(None)))):
+            if r.predecessor:
+                preds[r.ticker] = r.predecessor
+            if r.successor:
+                succs[r.ticker] = r.successor
+        return preds, succs
+
+    def security_line(self, security: str, s: Session) -> list[str]:
+        """The storage keys of a security from its first key forward through its renames (the last is where it is now)."""
+        succs = self._rename_links(s)[1]
+        key = security[4:]
+        out = [key]
+        while succs.get(key) and succs[key] not in out:
+            key = succs[key]
+            out.append(key)
+        return out
+
+    def security_splits(self, security: str, s: Session) -> list[SplitEvent]:
+        """The splits stored under every key of the security's line (the ledger applies one split per date and ratio)."""
+        keys = self.security_line(security, s)
+        rows = s.scalars(select(CorporateActionRow).where(CorporateActionRow.ticker.in_(keys), CorporateActionRow.kind == "SPLIT"))
+        return sorted((SplitEvent(r.ticker, r.execution_date, r.split_from, r.split_to, r.source) for r in rows), key=lambda e: (e.execution_date, e.source))
+
+    def security_labels(self, security: str, s: Session) -> set[str]:
+        """Every ticker label the security was published under (its keys without the archive suffix)."""
+        return {k.split("~")[0] for k in self.security_line(security, s)}
+
+    def current_label(self, security: str, s: Session) -> str | None:
+        """The ticker the security uses now: the last key of its line — None when that key is an archive (the ticker
+        now names another security) or the id has no stored record at all but was archived."""
+        last = self.security_line(security, s)[-1]
+        return None if "~" in last else last
 
     def aliases(self, ticker: str) -> list[tuple[str, date | None, date | None]]:
         """(storage ticker, from, until) covering one company across renames: its own rows, a predecessor's

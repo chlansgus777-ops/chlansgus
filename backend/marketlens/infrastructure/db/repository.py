@@ -26,6 +26,7 @@ from marketlens.infrastructure.db.models import (
     RecommendationRow,
     ScanRunRow,
     SecurityRow,
+    TransactionRow,
     WatchlistRow,
 )
 
@@ -210,6 +211,25 @@ def upsert_holding(s: Session, ticker: str, quantity: float, cost_basis: float) 
         s.add(HoldingRow(ticker=ticker, quantity=quantity, cost_basis=cost_basis, updated_at=now()))
     else:
         row.quantity, row.cost_basis, row.updated_at = quantity, cost_basis, now()
+
+
+def transactions(s: Session) -> list[TransactionRow]:
+    return list(s.scalars(select(TransactionRow).order_by(TransactionRow.day, TransactionRow.id)))
+
+
+def add_transaction(s: Session, **fields: object) -> TransactionRow:
+    row = TransactionRow(created_at=now(), **fields)
+    s.add(row)
+    s.flush()
+    return row
+
+
+def delete_transaction(s: Session, tid: int) -> bool:
+    row = s.get(TransactionRow, tid)
+    if row is None:
+        return False
+    s.delete(row)
+    return True
 
 
 def get_setting(s: Session, key: str, default: str | None = None) -> str | None:

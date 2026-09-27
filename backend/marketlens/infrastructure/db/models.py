@@ -392,6 +392,26 @@ class HoldingRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class TransactionRow(Base):
+    """A trade the user made at their broker (MarketLens never trades): the holdings of a company are computed from
+    these (domain.ledger). ``ticker`` is the symbol on ``day``; the company is resolved from it (a later reuse or
+    rename is applied when read, never frozen at entry)."""
+
+    __tablename__ = "portfolio_transactions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    day: Mapped[date] = mapped_column(Date)
+    kind: Mapped[str] = mapped_column(String(10))
+    quantity: Mapped[float] = mapped_column(Float, default=0.0)
+    price: Mapped[float] = mapped_column(Float, default=0.0)
+    fees: Mapped[float] = mapped_column(Float, default=0.0)
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    split_from: Mapped[float] = mapped_column(Float, default=0.0)
+    split_to: Mapped[float] = mapped_column(Float, default=0.0)
+    note: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class WatchlistRow(Base):
     __tablename__ = "watchlist"
     ticker: Mapped[str] = mapped_column(String(16), primary_key=True)

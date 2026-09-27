@@ -15,7 +15,10 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
+
+if TYPE_CHECKING:
+    from marketlens.domain.annual import AnnualFinancials
 from xml.etree import ElementTree
 
 from marketlens.domain.enums import DataMode, Exchange

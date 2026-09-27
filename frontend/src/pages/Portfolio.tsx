@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { api } from "../api";
 import { Card, Donut, Empty, Err, Loading, Notice, Term } from "../components/ui";
+import { Ledger } from "../components/Ledger";
 import { useApi } from "../components/useApi";
-import { day, num, pct, price, usdWithKo } from "../format";
+import { day, num, pct, price, shares, usdWithKo } from "../format";
 import { More } from "../mode";
 
-interface HoldingV { ticker: string; quantity: number; cost_basis: number; price: number | null; price_day: string | null; market_value: number | null; unrealized_pnl: number | null; unrealized_pct: number | null; weight: number | null; sector: string; split_adjusted?: number }
+interface HoldingV { ticker: string; quantity: number; cost_basis: number; price: number | null; price_day: string | null; market_value: number | null; unrealized_pnl: number | null; unrealized_pct: number | null; weight: number | null; sector: string; split_adjusted?: number; source?: "manual" | "ledger"; realized_pnl?: number; dividends?: number }
 interface Pf {
   valuation_day: string | null; cash: number; invested_value: number; nav: number; unrealized_pnl: number; holdings: HoldingV[];
   sector_weights: Record<string, number>; theme_weights: Record<string, number>; hhi: number; beta: number | null;
@@ -30,6 +31,11 @@ export function interpret(x: Pf): { tone: "info" | "warn"; text: string }[] {
   if (x.beta !== null) out.push({ tone: "info", text: `시장이 1% 움직일 때 이 포트폴리오는 평균 약 ${num(x.beta, 2)}% 움직였습니다.` });
   if (out.every((o) => o.tone === "info")) out.unshift({ tone: "info", text: "업종·종목 쏠림 없이 비교적 고르게 분산되어 있습니다." });
   return out;
+}
+
+/** New York calendar date (trades are dated by the exchange's day). */
+export function nyToday(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
 
 export default function Portfolio() {
@@ -69,7 +75,7 @@ export default function Portfolio() {
             <div key={s} style={{ marginBottom: 8 }}><div className="row spread"><span>{s}</span><b className={w > 0.3 ? "warn" : ""}>{pct(w, 1, false)}</b></div><div className="bar"><div style={{ width: `${Math.min(100, w * 100)}%`, background: w > 0.3 ? "var(--warn)" : undefined }} /></div></div>
           )) : <Empty>없음</Empty>}
         </Card>
-        <Card title="보유 종목 추가·수정" explain="수량 0을 입력하면 삭제됩니다. MarketLens는 실제 주문을 넣지 않습니다.">
+        <Card title="보유 종목 추가·수정" explain="수량 0을 입력하면 삭제됩니다. 거래 기록이 있는 종목은 이 줄 대신 거래 기록으로 계산합니다. MarketLens는 실제 주문을 넣지 않습니다.">
           <form className="stack" onSubmit={(e) => {
             e.preventDefault();
             const q = Number(row.quantity), c = Number(row.cost);
@@ -88,10 +94,11 @@ export default function Portfolio() {
           </form>
         </Card>
       </div>
+      <Ledger today={nyToday()} onChange={p.reload} />
       <More title="보유 종목 상세" hint="모든 종목을 같은 거래일 종가로 평가">
         {x.holdings.length ? (
           <table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th></tr></thead>
-            <tbody>{x.holdings.map((h) => <tr key={h.ticker}><td>{h.ticker}</td><td>{num(h.quantity, 0)}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{price(h.price)} <span className="caption">{day(h.price_day)}</span></td>
+            <tbody>{x.holdings.map((h) => <tr key={h.ticker}><td>{h.ticker}</td><td>{h.source === "ledger" ? shares(h.quantity) : num(h.quantity, 0)}{h.source === "ledger" ? <span className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}> 거래 기록 기준</span> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{price(h.price)} <span className="caption">{day(h.price_day)}</span></td>
               <td>{price(h.market_value)}</td><td className={(h.unrealized_pnl ?? 0) >= 0 ? "pos" : "neg"}>{price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</td><td>{pct(h.weight, 1, false)}</td><td>{h.sector}</td></tr>)}</tbody></table>
         ) : <Empty>보유 종목이 없습니다.</Empty>}
         {x.correlations.length > 0 && <div className="caption" style={{ marginTop: 8 }}><Term k="correlation">상관계수</Term>: {x.correlations.map(([a, b, c]) => `${a}↔${b} ${num(c, 2)}`).join(" · ")}</div>}

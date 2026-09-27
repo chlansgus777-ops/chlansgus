@@ -150,29 +150,60 @@ class DataAccess:
 
     def company_recommendations(self, s: Any, ticker: str, mode: str, before: datetime | None, on: date, limit: int = 500,
                                 inclusive: bool = True, exclude_id: int | None = None) -> list[Any]:
-        """The recommendations of the COMPANY that uses ``ticker`` on ``on``, newest first — across renames, never
-        across a reuse (round 10 identity invariant). Every "previous", "latest" and "history" lookup goes through
-        here; "which company" is MarketStore.company_id."""
+        """The recommendations of the SECURITY that uses ``ticker`` on ``on``, newest first — across renames and
+        relistings, never across a reuse or to another share class (round 10 identity invariant). Every "previous",
+        "latest" and "history" lookup goes through here; "which security" is MarketStore.security_id."""
         from sqlalchemy import desc, select
 
         from marketlens.domain.market_calendar import to_ny
         from marketlens.infrastructure.db.models import RecommendationRow as R
 
-        cid = self.store.company_id(ticker, on, s) if self.store is not None else None
-        labels = (self.store.company_labels(cid, s) | {ticker}) if self.store is not None and cid is not None else {ticker}
+        sid = self.security_of(ticker, on, s)
+        labels = (self.store.security_labels(sid, s) | {ticker}) if self.store is not None else {ticker}
         q = select(R).where(R.ticker.in_(sorted(labels)), R.mode == mode)
         if before is not None:
             q = q.where(R.as_of <= before if inclusive else R.as_of < before)
         if exclude_id is not None:
             q = q.where(R.id != exclude_id)
-        out: list[Any] = []
-        for r in s.scalars(q.order_by(desc(R.as_of), desc(R.id))):
-            if cid is not None and self.store is not None and self.store.company_id(r.ticker, to_ny(r.as_of).date(), s) != cid:
-                continue  # the label belonged to another company then
-            out.append(r)
-            if len(out) >= limit:
-                break
-        return out
+        rows = list(s.scalars(q.order_by(desc(R.as_of), desc(R.id))))
+        ids = self.securities_of([(r.ticker, to_ny(r.as_of).date()) for r in rows], s)
+        # a label that belonged to another security then (a reuse, another class) is not this one's history
+        return [r for r in rows if ids[(r.ticker, to_ny(r.as_of).date())] == sid][:limit]
+
+    def security_of(self, ticker: str, on: date, s: Any) -> str:
+        return self.securities_of([(ticker, on)], s)[(ticker, on)]
+
+    def securities_of(self, pairs: list[tuple[str, date]], s: Any) -> dict[tuple[str, date], str]:
+        """MarketStore.security_ids; without a store (MOCK) the ticker is the security."""
+        if self.store is not None:
+            return self.store.security_ids(pairs, s)
+        return {(t, d): f"sec:{t}" for t, d in pairs}
+
+    def ledger_securities(self, s: Any, rows: list[Any]) -> list[dict[str, Any]]:
+        """Trade records grouped by SECURITY — each record belongs to the security that used its ticker on its day
+        (resolved when read, so a reuse found later re-attributes it) — with the ticker the security uses today (None:
+        its ticker now names another security) and its splits (every key of its line)."""
+        ids = self.securities_of([(r.ticker, r.day) for r in rows], s)
+        groups: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            sid = ids[(r.ticker, r.day)]
+            g = groups.setdefault(sid, {"security": sid, "rows": [], "last": r})
+            g["rows"].append(r)
+            if (r.day, r.id) >= (g["last"].day, g["last"].id):
+                g["last"] = r
+        for sid, g in groups.items():
+            if self.store is None:
+                g["ticker"], g["splits"] = g["last"].ticker, []
+            else:
+                g["ticker"], g["splits"] = self.store.current_label(sid, s), self.store.security_splits(sid, s)
+        return sorted(groups.values(), key=lambda g: (g["ticker"] is None, g["ticker"] or g["last"].ticker))
+
+    def current_label(self, security: str, fallback: str, s: Any) -> str | None:
+        """The ticker the security uses today (MarketStore.current_label); without a store the entered ticker."""
+        return self.store.current_label(security, s) if self.store is not None else fallback
+
+    def security_splits(self, security: str, s: Any) -> list[Any]:
+        return self.store.security_splits(security, s) if self.store is not None else []
 
     def identity_on(self, t: str, d: date, session: Any = None) -> str:
         """Storage key of the company that used ticker ``t`` on day ``d`` (a later reuse archives it)."""

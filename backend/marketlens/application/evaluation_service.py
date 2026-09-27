@@ -114,7 +114,7 @@ class EvaluationService:
 
     # ------------------------------------------------------------------ paper trading (one account)
     def _signal(self, pos: PaperPositionRow, spread_bps: float | None, basis_date: date | None = None, key: str | None = None,
-                applied: frozenset[str] | None = None) -> PaperSignal:
+                applied: frozenset[str] | None = None, group: str | None = None) -> PaperSignal:
         """The plan's price levels expressed on the share basis of the stored bars. Levels were set on the
         basis of the recommendation day; every split executed after it (and already applied to the bars,
         i.e. on/before ``basis_date``) divides them, so a 10:1 split does not turn a normal entry into a
@@ -123,8 +123,9 @@ class EvaluationService:
         if basis_date is not None:
             # the splits the recommendation's bars already reflected (9th evaluation H1), else the date rule
             f = share_multiplier(self.svc.data.splits(key or pos.ticker), analysis_basis(to_ny(pos.recommended_at).date(), applied), basis_date) or 1.0
-        # the signal is keyed by the COMPANY (identity key), not the ticker label: a reused ticker is another company
-        return PaperSignal(key or pos.ticker, pos.recommended_at, pos.action, pos.score, pos.confidence, pos.stop / f, pos.target1 / f, pos.target2 / f,
+        # the signal is keyed by the SECURITY (MarketStore.security_id), not the ticker label: a reused ticker is another
+        # security, a renamed one the same (a repeat BUY after a rename is a repeat); ``key`` is where its data is stored
+        return PaperSignal(group or key or pos.ticker, pos.recommended_at, pos.action, pos.score, pos.confidence, pos.stop / f, pos.target1 / f, pos.target2 / f,
                            pos.thesis, pos.model_version, pos.regime, pos.sector, spread_bps, pos.max_buy / f if pos.max_buy is not None else None)
 
     def update_paper(self, as_of: datetime | None = None) -> dict[str, Any]:
@@ -134,7 +135,10 @@ class EvaluationService:
         cfg: PaperConfig = self.svc.base_cfg.paper
         with self.svc.sf() as s:
             positions = [p for p in repo.all_paper_positions(s) if p.recommended_at <= as_of]
-            keys = {p.id: self.svc.data.identity_on(p.ticker, to_ny(p.recommended_at).date(), s) for p in positions}
+            keys = {p.id: self.svc.data.identity_on(p.ticker, to_ny(p.recommended_at).date(), s) for p in positions}  # data location
+            sids = self.svc.data.securities_of([(p.ticker, to_ny(p.recommended_at).date()) for p in positions], s)
+            group = {p.id: sids[(p.ticker, to_ny(p.recommended_at).date())] for p in positions}  # which security
+            latest_key = {group[p.id]: keys[p.id] for p in sorted(positions, key=lambda p: p.recommended_at)}
             items: list[AccountItem] = []
             bars_by: dict[str, list[Bar]] = {}
             committee_skips: list[PaperPositionRow] = []
@@ -155,10 +159,11 @@ class EvaluationService:
                 key = keys[pos.id]
                 # later recommendations under the same ticker count only if they are about the same company
                 applied = encoded_split_keys((rec.inputs or {}).get("splits")) if rec is not None and isinstance(rec.inputs, dict) else None
-                items.append(AccountItem(str(pos.id), self._signal(pos, spread_bps, to_ny(as_of).date(), key, applied), tuple(exit_events_for(later, pos.recommended_at))))
-                if key not in bars_by:
-                    first = min(to_ny(p.recommended_at).date() for p in positions if keys[p.id] == key)
-                    bars_by[key] = self._bars(key, first - timedelta(days=5), today)
+                g = group[pos.id]
+                items.append(AccountItem(str(pos.id), self._signal(pos, spread_bps, to_ny(as_of).date(), key, applied, g), tuple(exit_events_for(later, pos.recommended_at))))
+                if g not in bars_by:
+                    first = min(to_ny(p.recommended_at).date() for p in positions if group[p.id] == g)
+                    bars_by[g] = self._bars(latest_key[g], first - timedelta(days=5), today)  # the latest key's series covers its renames
             acct = simulate_account(items, bars_by, cfg, today)
             by_id = {str(p.id): p for p in positions}
             counts = {"opened": 0, "closed": 0, "open": 0, "skipped": 0, "pending": 0}
