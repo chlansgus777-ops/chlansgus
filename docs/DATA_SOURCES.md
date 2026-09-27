@@ -86,11 +86,14 @@ manual). Results so far:
 | 2026-09-27 | 36308453708 | Commit 7292d51 (independent review of 2240992, F01–F14: plan validity at its own price, HOLD stop, reuse bar cut, history gaps, sector room, guidance quarter, identity of the previous recommendation, rate direction, cross-site requests): **all 13 categories VERIFIED**; same real values as run 36298323921 |
 | 2026-09-27 | 36310862631 | Commit 19c7e79 (evaluation 9 H1–H5): **all 13 categories VERIFIED** |
 | 2026-09-27 | 36316695650 | Commit e8978ff (round 10: one share-basis conversion, invariant suites, guidance corpus, trade records, security identity): **all 13 categories VERIFIED**; the same real values as run 36298323921 (TTM EPS NVDA 7.91, AAPL 8.71, MSFT 17.95; release dates 08-26, 07-30; guidance NVDA 2 items from q2fy27pr.htm) |
+| 2026-09-27 | 36322163063 | Commit 69a838d, **no workflow input: the User-Agent came from the repository secret `SEC_USER_AGENT`**: all 13 categories VERIFIED, the same real values as run 36316695650 |
 
-Reproducing a run: the SEC categories need a User-Agent with a contact e-mail. The runs above passed it as the
-workflow input `sec_user_agent`; the repository has no `SEC_USER_AGENT` secret yet, so a run with the default
-(empty) input reports the 7 SEC categories BLOCKED_BY_CREDENTIAL (the evaluator's re-run 36255567036 on
-f80c460: the 6 other categories reproduced the same values). Either add the secret or fill in the input.
+Reproducing a run: the SEC categories need a User-Agent with a contact e-mail. The runs up to 36316695650 passed it
+as the workflow input `sec_user_agent`. The repository secret `SEC_USER_AGENT` now exists: run 36322163063 (commit
+69a838d, 2026-09-27) used the default (empty) input, read the User-Agent from the secret and reported **all 13
+categories VERIFIED**. Earlier, before the secret was added, a run with the empty input reported the 7 SEC categories
+BLOCKED_BY_CREDENTIAL (the evaluator's re-run 36255567036 on f80c460: the 6 other categories reproduced the same
+values).
 
 To verify the rest: add the repository secrets `SEC_USER_AGENT` ("Your Name your@email"), `FINNHUB_API_KEY`,
 `POLYGON_API_KEY`, `FRED_API_KEY`, `ALPHAVANTAGE_API_KEY` (all free tiers) and run the workflow.
