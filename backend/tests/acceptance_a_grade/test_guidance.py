@@ -44,8 +44,12 @@ def test_unclear_and_withdrawn_guidance_are_not_turned_into_numbers():
     items = extract(text)
     assert [i.status for i in items] == ["GUIDANCE_UNCLEAR", "NO_GUIDANCE"]
     assert all(i.low is None and i.high is None for i in items)
+    # changed in round 10 (guidance corpus of real 8-K sentences): a sentence naming two metrics is judged clause by
+    # clause — each metric keeps only its own amount; two amounts of ONE metric in one sentence stay unclear
     mixed = extract("We expect revenue of $10 billion and EPS of $2.00 for fiscal 2027.")
-    assert mixed[0].status == "GUIDANCE_UNCLEAR"  # two metrics in one sentence → not guessed apart
+    assert [(i.metric, i.status, i.low) for i in mixed] == [("revenue", "EXTRACTED", 10e9), ("eps", "EXTRACTED", 2.00)]
+    two = extract("We expect GAAP EPS of $1.00 and non-GAAP EPS of $2.00 for fiscal 2027.")
+    assert [i.status for i in two] == ["GUIDANCE_UNCLEAR"]
 
 
 def test_guidance_is_compared_only_with_the_consensus_known_before_the_release():

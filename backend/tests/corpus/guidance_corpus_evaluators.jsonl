@@ -1,0 +1,88 @@
+{"id": "eval3-1", "source": "eval3", "sentence": "For the full year 2027, we expect adjusted diluted EPS of $2.40 to $2.50, which excludes the loss on the sale of our European business.", "expect": [{"metric": "eps", "low": 2.4, "high": 2.5}], "sign": null}
+{"id": "eval3-2", "source": "eval3", "sentence": "For fiscal 2027, the Company expects diluted EPS of $1.10 to $1.20, compared with a net loss of $0.50 per diluted share in fiscal 2026.", "expect": [{"metric": "eps", "low": 1.1, "high": 1.2}], "sign": null}
+{"id": "eval3-3", "source": "eval3", "sentence": "For the full year 2027, we expect EPS of $4.10 to $4.30, reflecting higher expected credit losses.", "expect": [{"metric": "eps", "low": 4.1, "high": 4.3}], "sign": null}
+{"id": "eval3-4", "source": "eval3", "sentence": "For the full year 2027, we expect operating margin of 12% to 13%, excluding restructuring losses.", "expect": [{"metric": "operating_margin", "low": 0.12, "high": 0.13}], "sign": null}
+{"id": "eval4-1", "source": "eval4", "sentence": "Net loss per share for fiscal 2027 is expected to be in the range of $1.10 to $1.20.", "expect": null, "sign": "neg"}
+{"id": "eval4-2", "source": "eval4", "sentence": "For fiscal 2027, GAAP net loss per share for the full year is expected to be $1.10 to $1.20.", "expect": null, "sign": "neg"}
+{"id": "eval4-3", "source": "eval4", "sentence": "We expect a net loss for the fourth quarter of fiscal 2026 of $1.10 to $1.20 per share.", "expect": null, "sign": "neg"}
+{"id": "eval4-4", "source": "eval4", "sentence": "For the fourth quarter of fiscal 2026, we expect a loss per diluted share, on a GAAP basis, of $1.10 to $1.20.", "expect": null, "sign": "neg"}
+{"id": "eval4-5", "source": "eval4", "sentence": "For the fourth quarter of fiscal 2026, we expect GAAP loss per share to range from $1.10 to $1.20.", "expect": null, "sign": "neg"}
+{"id": "eval4-6", "source": "eval4", "sentence": "For fiscal 2027, loss per share is now expected to be $1.10 to $1.20.", "expect": null, "sign": "neg"}
+{"id": "eval4-7", "source": "eval4", "sentence": "For fiscal 2027, we expect loss per share to widen to $1.10 to $1.20.", "expect": null, "sign": "neg"}
+{"id": "eval5-1", "source": "eval5", "sentence": "For the fourth quarter, we expect a GAAP net loss and non-GAAP EPS of $0.10 to $0.15.", "expect": null, "sign": "pos"}
+{"id": "eval5-2", "source": "eval5", "sentence": "While we expect a GAAP net loss for fiscal 2027, we expect adjusted EPS of $0.40 to $0.50.", "expect": null, "sign": "pos"}
+{"id": "eval5-3", "source": "eval5", "sentence": "After a net loss in fiscal 2026, the Company expects diluted EPS of $1.10 to $1.20 in fiscal 2027.", "expect": null, "sign": "pos"}
+{"id": "eval5-4", "source": "eval5", "sentence": "We expect to narrow the net loss and deliver diluted EPS of $0.05 to $0.10 in the fourth quarter.", "expect": null, "sign": "pos"}
+{"id": "eval5-5", "source": "eval5", "sentence": "The Company expects to lose between $0.10 and $0.12 per share in the fourth quarter.", "expect": null, "sign": "neg"}
+{"id": "eval5-6", "source": "eval5", "sentence": "For the fourth quarter, we expect diluted EPS of approximately –$0.10.", "expect": null, "sign": "neg"}
+{"id": "eval5-7", "source": "eval5", "sentence": "For fiscal 2027, we expect operating margin of approximately –5%.", "expect": null, "sign": "neg"}
+{"id": "eval6-1", "source": "eval6", "sentence": "We expect new tariffs to reduce fourth quarter EPS by approximately $0.10.", "expect": [], "sign": null}
+{"id": "eval6-2", "source": "eval6", "sentence": "The outlook includes an expected $0.12 per share impact from new tariffs in the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval6-3", "source": "eval6", "sentence": "We expect the acquisition to be dilutive to diluted EPS by $0.05 to $0.10 in fiscal 2027.", "expect": [], "sign": null}
+{"id": "eval6-4", "source": "eval6", "sentence": "We expect foreign currency to negatively impact fourth quarter revenue by approximately $150 million.", "expect": [], "sign": null}
+{"id": "eval6-5", "source": "eval6", "sentence": "We expect fourth quarter revenue to decline by $50 million to $60 million sequentially.", "expect": [], "sign": null}
+{"id": "eval6-6", "source": "eval6", "sentence": "We expect fiscal 2027 revenue to increase by $1.0 billion to $1.2 billion.", "expect": [], "sign": null}
+{"id": "eval6-7", "source": "eval6", "sentence": "We expect gross margin in the fourth quarter to decrease 1% to 2% sequentially.", "expect": [], "sign": null}
+{"id": "eval6-8", "source": "eval6", "sentence": "Instead of the net loss per share we previously expected, we now expect $0.05 to $0.10 per share for fiscal 2027.", "expect": null, "sign": "pos"}
+{"id": "eval6-9", "source": "eval6", "sentence": "Contrary to our prior outlook of a net loss per share, we now expect $0.05 to $0.10 per share for fiscal 2027.", "expect": null, "sign": "pos"}
+{"id": "eval7-1", "source": "eval7", "sentence": "We expect new tariffs to lower fourth quarter EPS by approximately $0.10.", "expect": [], "sign": null}
+{"id": "eval7-2", "source": "eval7", "sentence": "We expect tariffs to cost approximately $0.10 per share in the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval7-3", "source": "eval7", "sentence": "We expect a $0.10 per share hit from tariffs in the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval7-4", "source": "eval7", "sentence": "Tariffs are expected to weigh on fourth quarter EPS by about $0.10.", "expect": [], "sign": null}
+{"id": "eval7-5", "source": "eval7", "sentence": "We expect the stronger dollar to shave approximately $0.05 off fourth quarter EPS.", "expect": [], "sign": null}
+{"id": "eval7-6", "source": "eval7", "sentence": "We expect the acquisition to add $0.05 to $0.10 to fiscal 2027 EPS.", "expect": [], "sign": null}
+{"id": "eval7-7", "source": "eval7", "sentence": "We expect fourth quarter EPS to be down $0.05 to $0.10 year over year.", "expect": [], "sign": null}
+{"id": "eval7-8", "source": "eval7", "sentence": "We expect foreign exchange to be a drag of approximately $150 million on fourth quarter revenue.", "expect": [], "sign": null}
+{"id": "eval7-9", "source": "eval7", "sentence": "We expect the acquisition to contribute approximately $200 million of revenue in the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval7-10", "source": "eval7", "sentence": "We expect fourth quarter revenue to be up $50 million to $60 million sequentially.", "expect": [], "sign": null}
+{"id": "eval7-11", "source": "eval7", "sentence": "We expect fiscal 2027 revenue growth of $2.0 billion to $2.5 billion.", "expect": [], "sign": null}
+{"id": "eval7-12", "source": "eval7", "sentence": "We expect tariffs to pressure gross margin by approximately 1.5% in the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval7-13", "source": "eval7", "sentence": "We expect restructuring charges of $0.10 to $0.15 per share in the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval7-14", "source": "eval7", "sentence": "We expect stock-based compensation expense of approximately $0.45 per share for fiscal 2027.", "expect": [], "sign": null}
+{"id": "eval7-15", "source": "eval7", "sentence": "We expect amortization of acquired intangibles of approximately $0.35 per share in fiscal 2027.", "expect": [], "sign": null}
+{"id": "eval7-16", "source": "eval7", "sentence": "The Board expects to maintain the quarterly dividend of $0.26 per share in the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval7-17", "source": "eval7", "sentence": "The transaction, valued at $25.00 per share in cash, is expected to close in the fourth quarter of 2026.", "expect": [], "sign": null}
+{"id": "eval8-1", "source": "eval8", "sentence": "We expect fourth quarter EPS to be $0.10 higher than the prior-year quarter.", "expect": [], "sign": null}
+{"id": "eval8-2", "source": "eval8", "sentence": "We expect fourth quarter EPS to be $0.05 to $0.08 lower than last year.", "expect": [], "sign": null}
+{"id": "eval8-3", "source": "eval8", "sentence": "We expect fiscal 2027 EPS of $0.40 more than fiscal 2026.", "expect": [], "sign": null}
+{"id": "eval8-4", "source": "eval8", "sentence": "We expect fiscal 2027 revenue to be $2.0 billion higher than fiscal 2026.", "expect": [], "sign": null}
+{"id": "eval8-5", "source": "eval8", "sentence": "We expect fourth quarter revenue to be $50 million to $60 million above the third quarter.", "expect": [], "sign": null}
+{"id": "eval8-6", "source": "eval8", "sentence": "We expect fourth quarter revenue to be approximately $150 million below the prior year.", "expect": [], "sign": null}
+{"id": "eval8-7", "source": "eval8", "sentence": "We expect gross margin for the fourth quarter to be 1.5% lower than the prior year.", "expect": [], "sign": null}
+{"id": "eval8-8", "source": "eval8", "sentence": "We expect data center revenue of approximately $40.0 billion in the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval8-9", "source": "eval8", "sentence": "We expect subscription revenue of $1.20 billion to $1.25 billion for the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval8-10", "source": "eval8", "sentence": "For the fourth quarter, we expect services revenue of approximately $300 million.", "expect": [], "sign": null}
+{"id": "eval8-11", "source": "eval8", "sentence": "We expect interest income of approximately $0.05 per share in the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval8-12", "source": "eval8", "sentence": "We expect equity earnings of $0.05 to $0.07 per share in the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval8-13", "source": "eval8", "sentence": "We expect services gross margin of approximately 70% in the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval8-14", "source": "eval8", "sentence": "We expect hardware gross margin to be in the range of 30% to 32% for fiscal 2027.", "expect": [], "sign": null}
+{"id": "eval9-1", "source": "eval9", "sentence": "We expect revenue of approximately $500 million from the acquired business in fiscal 2027.", "expect": [], "sign": null}
+{"id": "eval9-2", "source": "eval9", "sentence": "For the fourth quarter, we expect revenue of $1.2 billion from our data center products.", "expect": [], "sign": null}
+{"id": "eval9-3", "source": "eval9", "sentence": "Revenue is expected to be approximately $30 billion in the Data Center segment for the third quarter of fiscal 2027.", "expect": [], "sign": null}
+{"id": "eval9-4", "source": "eval9", "sentence": "We expect revenue of $1.2 billion in the Americas for the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval9-5", "source": "eval9", "sentence": "We expect adjusted EPS of $0.25 from the acquired business in fiscal 2027.", "expect": [], "sign": null}
+{"id": "eval9-6", "source": "eval9", "sentence": "Data center net revenue is expected to be $30 billion for the third quarter of fiscal 2027.", "expect": [], "sign": null}
+{"id": "eval9-7", "source": "eval9", "sentence": "The Company expects Cloud segment adjusted operating margin of approximately 21% for fiscal 2027.", "expect": [], "sign": null}
+{"id": "eval9-8", "source": "eval9", "sentence": "We expect Services GAAP gross margin of 75% for the fourth quarter.", "expect": [], "sign": null}
+{"id": "eval9-9", "source": "eval9", "sentence": "Revenue for the fourth quarter is expected to be $50 million, or 5%, higher than the prior year.", "expect": [], "sign": null}
+{"id": "eval9-10", "source": "eval9", "sentence": "Full-year revenue is expected to be $120 million, or 4 percent, lower than fiscal 2026.", "expect": [], "sign": null}
+{"id": "eval9-11", "source": "eval9", "sentence": "Revenue for fiscal 2027 is expected to be $200 million or 3% above fiscal 2026.", "expect": [], "sign": null}
+{"id": "eval9-12", "source": "eval9", "sentence": "Adjusted EPS for fiscal 2027 is expected to be $0.15 per share, or 6%, above fiscal 2026.", "expect": [], "sign": null}
+{"id": "eval9-13", "source": "eval9", "sentence": "Adjusted EPS is expected to be $0.10 a share higher than last year.", "expect": [], "sign": null}
+{"id": "eval9-14", "source": "eval9", "sentence": "The Company is forecasting revenue of $2.10 billion to $2.20 billion for fiscal 2027.", "expect": [{"metric": "revenue", "low": 2100000000.0, "high": 2200000000.0}], "sign": null}
+{"id": "eval9-15", "source": "eval9", "sentence": "We are projecting revenue of $5.0 billion to $5.2 billion for fiscal 2027.", "expect": [{"metric": "revenue", "low": 5000000000.0, "high": 5200000000.0}], "sign": null}
+{"id": "eval9-16", "source": "eval9", "sentence": "The Company expects to report revenue of $1.10 billion to $1.15 billion for the fourth quarter.", "expect": [{"metric": "revenue", "low": 1100000000.0, "high": 1150000000.0}], "sign": null}
+{"id": "eval9-17", "source": "eval9", "sentence": "We expect to generate revenue of $5.0 billion to $5.2 billion in fiscal 2027.", "expect": [{"metric": "revenue", "low": 5000000000.0, "high": 5200000000.0}], "sign": null}
+{"id": "eval9-18", "source": "eval9", "sentence": "The Company's revenue for the fourth quarter is expected to be $1.10 billion to $1.15 billion.", "expect": [{"metric": "revenue", "low": 1100000000.0, "high": 1150000000.0}], "sign": null}
+{"id": "eval9-19", "source": "eval9", "sentence": "We expect annual revenue of $5.0 billion to $5.2 billion for fiscal 2027.", "expect": [{"metric": "revenue", "low": 5000000000.0, "high": 5200000000.0}], "sign": null}
+{"id": "eval9-20", "source": "eval9", "sentence": "For the fourth quarter, we expect a record quarter, with revenue of $1.10 billion to $1.15 billion.", "expect": [{"metric": "revenue", "low": 1100000000.0, "high": 1150000000.0}], "sign": null}
+{"id": "eval9-21", "source": "eval9", "sentence": "The Company now expects this year's revenue to be $5.0 billion to $5.2 billion.", "expect": [{"metric": "revenue", "low": 5000000000.0, "high": 5200000000.0}], "sign": null}
+{"id": "eval9-22", "source": "eval9", "sentence": "We are updating revenue guidance to $5.0 billion to $5.2 billion for fiscal 2027.", "expect": [{"metric": "revenue", "low": 5000000000.0, "high": 5200000000.0}], "sign": null}
+{"id": "eval9-23", "source": "eval9", "sentence": "We are maintaining revenue guidance of $5.0 billion to $5.2 billion for fiscal 2027.", "expect": [{"metric": "revenue", "low": 5000000000.0, "high": 5200000000.0}], "sign": null}
+{"id": "eval9-24", "source": "eval9", "sentence": "The Company expects to deliver revenue of $5.0 billion to $5.2 billion in fiscal 2027.", "expect": [{"metric": "revenue", "low": 5000000000.0, "high": 5200000000.0}], "sign": null}
+{"id": "eval9-25", "source": "eval9", "sentence": "The Company expects to report EPS of $1.10 to $1.20 for the fourth quarter.", "expect": [{"metric": "eps", "low": 1.1, "high": 1.2}], "sign": null}
+{"id": "eval9-26", "source": "eval9", "sentence": "The Company's EPS for fiscal 2027 is expected to be $4.10 to $4.30.", "expect": [{"metric": "eps", "low": 4.1, "high": 4.3}], "sign": null}
+{"id": "eval9-27", "source": "eval9", "sentence": "We are projecting EPS of $4.10 to $4.30 for fiscal 2027.", "expect": [{"metric": "eps", "low": 4.1, "high": 4.3}], "sign": null}
+{"id": "eval9-28", "source": "eval9", "sentence": "We expect annual EPS of $4.10 to $4.30 for fiscal 2027.", "expect": [{"metric": "eps", "low": 4.1, "high": 4.3}], "sign": null}
+{"id": "eval9-29", "source": "eval9", "sentence": "The Company's gross margin for the fourth quarter is expected to be 45% to 46%.", "expect": [{"metric": "gross_margin", "low": 0.45, "high": 0.46}], "sign": null}
+{"id": "eval9-30", "source": "eval9", "sentence": "We are projecting gross margin of 45% to 46% for the fourth quarter.", "expect": [{"metric": "gross_margin", "low": 0.45, "high": 0.46}], "sign": null}

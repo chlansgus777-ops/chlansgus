@@ -114,7 +114,12 @@ def opportunities(req: Request) -> dict[str, Any]:
 
 @router.post("/scan")
 def run_scan(req: Request, committee: bool = True) -> dict[str, Any]:
-    return encode(svc(req).run_scan(run_committee=committee))
+    from marketlens.application.services import ScanRefused
+
+    try:
+        return encode(svc(req).run_scan(run_committee=committee))
+    except ScanRefused as e:
+        raise HTTPException(409, str(e)) from None
 
 
 # ---------------------------------------------------------------- stock detail
@@ -129,10 +134,17 @@ def scan_status(req: Request) -> dict[str, Any]:
 def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
     s = svc(req)
     t = _ticker(ticker)
+    # analysing stores a recommendation: a GET may do that only for the app itself (the client header a cross-site
+    # image, link or no-cors fetch cannot send) — round 10 security invariant; without it the stored result is read
+    may_write = req.headers.get("x-marketlens-client") is not None
+    if refresh and not may_write:
+        raise HTTPException(403, "재분석은 앱 화면에서만 요청할 수 있습니다(X-MarketLens-Client 헤더 필요)")
     if refresh:
         s.analyze(t, run_committee=False, persist=True)
     with s.sf() as ss:
         row = s.latest_company_recommendation(ss, t)
+        if row is None and not may_write:
+            raise HTTPException(404, f"{t}: 저장된 분석이 없습니다 — 앱 화면에서 분석을 요청하세요")
         if row is None:
             try:
                 s.analyze(t, run_committee=False, persist=True)

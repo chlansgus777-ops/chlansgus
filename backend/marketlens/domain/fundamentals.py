@@ -49,6 +49,26 @@ FIRST_REPORTED = "FIRST_REPORTED"
 LATEST_KNOWN_AS_OF = "LATEST_KNOWN_AS_OF"
 
 
+def known_on(quarters: Sequence[QuarterlyFinancials], d: date) -> list[QuarterlyFinancials]:
+    """The same records with everything published after ``d`` removed — periods filed later, fields first reported
+    later, later restatements — and nothing else changed (the main fields keep their first-reported values). What an
+    analysis stores as its inputs (round 10 point-in-time invariant: a 10-Q filed the day after the analysis was in its
+    stored inputs, although the pipeline's ``as_of`` never used it)."""
+    from dataclasses import replace
+
+    out: list[QuarterlyFinancials] = []
+    for q in quarters:
+        if q.filed_date > d:
+            continue
+        hidden = {k for k, fd in q.field_filed.items() if fd > d}
+        revs = {k: tuple((fd, v) for fd, v in obs if fd <= d) for k, obs in q.revisions.items()}
+        revs = {k: v for k, v in revs.items() if v}
+        if hidden or revs != dict(q.revisions):
+            q = replace(q, **{k: None for k in hidden}, field_filed={k: fd for k, fd in q.field_filed.items() if fd <= d}, revisions=revs)
+        out.append(q)
+    return out
+
+
 def as_of(quarters: Sequence[QuarterlyFinancials], d: date, basis: str = LATEST_KNOWN_AS_OF) -> list[QuarterlyFinancials]:
     """The fundamentals an investor could have known on day ``d``.
 

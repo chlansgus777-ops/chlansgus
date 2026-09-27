@@ -130,6 +130,10 @@ def assert_db_environment(settings: Settings) -> None:
                                     f"MARKETLENS_DATABASE_URL을 모드별로 분리하세요.")
 
 
+class ScanRefused(RuntimeError):
+    """A scan request that must not run now (another scan, or the data preparation, is running)."""
+
+
 class MarketLensService:
     def __init__(self, settings: Settings, session_factory: sessionmaker[Session], registry: ProviderRegistry | None = None, llm: LLMProvider | None = None, cfg: ModelConfig | None = None, now_fn: Any = None, use_store: bool | None = None) -> None:
         self.settings = settings
@@ -365,7 +369,20 @@ class MarketLensService:
 
     # ------------------------------------------------------------------ use cases
     def run_scan(self, run_committee: bool = True, only: list[str] | None = None) -> ScanSummary:
-        with self._lock, self.sf() as s:
+        """One scan at a time: a second request while one runs is refused, not queued behind it (it would repeat the
+        whole scan and its AI calls); a scan while the data preparation runs is refused too (it would judge
+        half-prepared data). Round 10 concurrency invariant."""
+        if self._sync_lock.locked():
+            raise ScanRefused("데이터를 준비하는 중에는 스캔할 수 없습니다 — 준비가 끝난 뒤 다시 시도하세요")
+        if not self._lock.acquire(blocking=False):
+            raise ScanRefused("이미 전체 시장 스캔이 진행 중입니다 — 끝나면 결과가 화면에 나옵니다")
+        try:
+            return self._run_scan_locked(run_committee, only)
+        finally:
+            self._lock.release()
+
+    def _run_scan_locked(self, run_committee: bool, only: list[str] | None) -> ScanSummary:
+        with self.sf() as s:
             cfg = self.model_config()
             as_of = self.now()
             pf = self.portfolio(s)
@@ -384,38 +401,52 @@ class MarketLensService:
             total = len(result.candidates)
             self._scan_state(s, {"scan_id": scan.id, "status": "RUNNING", "started_at": as_of.isoformat(), "saved": 0, "total": total})
             s.commit()  # the scan row exists even if the process stops mid-way
-            if self.store is None:  # the LIVE store is maintained by the sync job
-                # full listing history incl. delisted names (the scan itself only sees the as-of universe)
-                repo.upsert_securities(s, self.data.securities(None).value or ctx.securities.values(), self.mode.value)
-                for r in result.candidates:
-                    inp = result.inputs[r.ticker]
-                    repo.store_fundamental_vintages(s, r.ticker, inp.quarters)
-                    repo.store_bars(s, r.ticker, inp.bars, inp.source_map.get("bars", "unknown"))
-            if ctx.issues:
-                repo.upsert_issues(s, [(i.issue_id, i.category.value, i.importance, encode(i) | {"injection_flagged": any(n in ctx.issues.injection_flags for n in i.news_ids)}) for i in ctx.issues.issues])
-            committee_run = 0
-            paper = 0
-            top_n, full_n = cfg.scanner.ai_committee_top_n, cfg.scanner.committee_full_top_n
-            for rank, r in enumerate(result.candidates, start=1):
-                committee = None
-                if run_committee and self.settings.enable_ai_committee and rank <= top_n:
-                    committee = self._reusable_committee(r, s) if r.decision.action != Action.DATA_INSUFFICIENT else None
-                    if committee is None:
-                        committee = self.run_committee(r, ctx, s, depth="FULL" if rank <= full_n else "LIGHT")
-                    committee_run += committee.status not in ("SKIPPED", "REUSED")
-                row = self._persist(s, r, result.inputs[r.ticker], cfg, scan.id, rank, committee)
-                if Action(row.final_action) in BULLISH_ACTIONS and self.settings.enable_paper_trading:
-                    paper += 1
-                # saved one by one: an interrupted scan keeps what it finished (and the AI committee results
-                # already paid for are reused by the next scan) instead of losing the whole run
-                self._scan_state(s, {"scan_id": scan.id, "status": "RUNNING", "started_at": as_of.isoformat(), "saved": rank, "total": total})
-                s.commit()
-            repo.snapshot_health(s, [h.as_dict() for h in self.health.all()])
-            coverage = scan_coverage(result, repo.llm_usage(s, since=scan.created_at))
-            repo.set_setting(s, "last_scan_coverage", json.dumps(coverage | {"scan_id": scan.id, "as_of": as_of.isoformat()}))
-            self._scan_state(s, {"scan_id": scan.id, "status": "COMPLETE", "started_at": as_of.isoformat(), "saved": total, "total": total})
+            try:
+                return self._scan_rest(s, result, cfg, scan, as_of, total, run_committee)
+            except Exception as e:  # a failure half-way: the state says FAILED and what was saved (then the error propagates)
+                s.rollback()
+                with self.sf() as s2:
+                    st = json.loads(repo.get_setting(s2, "scan_state", "") or "null") or {}
+                    saved = int(st.get("saved", 0)) if st.get("scan_id") == scan.id else 0
+                    self._scan_state(s2, {"scan_id": scan.id, "status": "FAILED", "started_at": as_of.isoformat(), "saved": saved, "total": total,
+                                          "error": f"{type(e).__name__}: {str(e)[:200]}"})
+                    s2.commit()
+                raise
+
+    def _scan_rest(self, s: Session, result: ScanResult, cfg: ModelConfig, scan: ScanRunRow, as_of: datetime, total: int, run_committee: bool) -> ScanSummary:
+        ctx = result.context
+        if self.store is None:  # the LIVE store is maintained by the sync job
+            # full listing history incl. delisted names (the scan itself only sees the as-of universe)
+            repo.upsert_securities(s, self.data.securities(None).value or ctx.securities.values(), self.mode.value)
+            for r in result.candidates:
+                inp = result.inputs[r.ticker]
+                repo.store_fundamental_vintages(s, r.ticker, inp.quarters)
+                repo.store_bars(s, r.ticker, inp.bars, inp.source_map.get("bars", "unknown"))
+        if ctx.issues:
+            repo.upsert_issues(s, [(i.issue_id, i.category.value, i.importance, encode(i) | {"injection_flagged": any(n in ctx.issues.injection_flags for n in i.news_ids)}) for i in ctx.issues.issues])
+        committee_run = 0
+        paper = 0
+        top_n, full_n = cfg.scanner.ai_committee_top_n, cfg.scanner.committee_full_top_n
+        for rank, r in enumerate(result.candidates, start=1):
+            committee = None
+            if run_committee and self.settings.enable_ai_committee and rank <= top_n:
+                committee = self._reusable_committee(r, s) if r.decision.action != Action.DATA_INSUFFICIENT else None
+                if committee is None:
+                    committee = self.run_committee(r, ctx, s, depth="FULL" if rank <= full_n else "LIGHT")
+                committee_run += committee.status not in ("SKIPPED", "REUSED")
+            row = self._persist(s, r, result.inputs[r.ticker], cfg, scan.id, rank, committee)
+            if Action(row.final_action) in BULLISH_ACTIONS and self.settings.enable_paper_trading:
+                paper += 1
+            # saved one by one: an interrupted scan keeps what it finished (and the AI committee results
+            # already paid for are reused by the next scan) instead of losing the whole run
+            self._scan_state(s, {"scan_id": scan.id, "status": "RUNNING", "started_at": as_of.isoformat(), "saved": rank, "total": total})
             s.commit()
-            return ScanSummary(scan.id, as_of, len(result.candidates), committee_run, paper)
+        repo.snapshot_health(s, [h.as_dict() for h in self.health.all()])
+        coverage = scan_coverage(result, repo.llm_usage(s, since=scan.created_at))
+        repo.set_setting(s, "last_scan_coverage", json.dumps(coverage | {"scan_id": scan.id, "as_of": as_of.isoformat()}))
+        self._scan_state(s, {"scan_id": scan.id, "status": "COMPLETE", "started_at": as_of.isoformat(), "saved": total, "total": total})
+        s.commit()
+        return ScanSummary(scan.id, as_of, len(result.candidates), committee_run, paper)
 
     @staticmethod
     def _scan_state(s: Session, state: dict[str, Any]) -> None:

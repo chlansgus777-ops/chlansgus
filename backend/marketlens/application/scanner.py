@@ -32,7 +32,7 @@ from marketlens.domain.enums import Action, DataMode, Horizon
 from marketlens.domain.exposure_graph import ExposureGraph
 from marketlens.domain.freshness import check_age, rules_from_config
 from marketlens.domain.fundamentals import as_of as pit_quarters
-from marketlens.domain.fundamentals import compute_metrics
+from marketlens.domain.fundamentals import compute_metrics, known_on
 from marketlens.domain.indicators import compute_technicals
 from marketlens.domain.issues import Issue, aggregate_issue_score, compute_issue_impacts
 from marketlens.domain.macro import MacroSnapshot
@@ -200,11 +200,13 @@ class Scanner:
         bars = take("bars", self.data.bars(t, d - timedelta(days=HISTORY_CALENDAR_DAYS), d, fill_gaps=False)) or []
         # stage 3 (full=False, the ~150 stage-2 names) reads only what the sync ingested; the final names may
         # fetch a missing filing (bounded by the manifest back-off)
-        quarters = take("fundamentals", self.data.quarters(t, allow_fetch=full)) or []
+        # only what was public at the analysis time goes into the inputs (and so into the stored snapshot)
+        vis = filing_visibility_day(ctx.as_of)
+        quarters = known_on(take("fundamentals", self.data.quarters(t, allow_fetch=full)) or [], vis)
         annuals = []
         if not quarters and full:  # foreign private issuer (20-F, IFRS): annual statements only
             af = self.data.annuals(t)
-            annuals = af.value or []
+            annuals = [y for y in (af.value or []) if y.filed_date <= vis]
         extras_obj = take("extras", self.data.extras(t))
         analyst = take("analyst", self.data.estimates(t, d))
         earnings = (take("earnings", self.data.earnings(t)) or []) if full else []

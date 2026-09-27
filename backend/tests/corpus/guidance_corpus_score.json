@@ -1,0 +1,5 @@
+{
+ "note": "CI fails if the score falls below these numbers. Raise them when a rule change (measured on the corpus) improves them.",
+ "real_8k": {"wrong": 0, "matched": 219, "expected": 235, "min_recall": 0.90},
+ "evaluators": {"wrong": 0, "matched": 17, "expected": 21}
+}
