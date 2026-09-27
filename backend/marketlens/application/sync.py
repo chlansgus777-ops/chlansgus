@@ -23,6 +23,9 @@ from marketlens.providers.contracts import ProviderError
 log = logging.getLogger("marketlens.sync")
 PROFILE_MAX_AGE = timedelta(days=30)
 FUNDAMENTALS_REFRESH = timedelta(days=7)  # look for a new 10-Q/10-K weekly; stored vintages never expire
+# an empty grouped-daily answer for a session this recent is "not published yet", not "outside the provider's history
+# window": it is asked again at the next sync instead of being recorded as empty for good (8th evaluation I3)
+RECENT_EMPTY = timedelta(days=7)
 
 
 @dataclass
@@ -31,6 +34,7 @@ class SyncReport:
     bar_days_loaded: int = 0
     bar_days_missing: int = 0
     bar_days_empty: int = 0  # trading days the provider returned no rows for (outside its history window)
+    bar_days_pending: int = 0  # recent sessions the provider has not published yet (asked again next sync)
     shares_updated: int = 0
     market_caps: int = 0
     profiles_updated: int = 0
@@ -45,7 +49,7 @@ class SyncReport:
     @property
     def complete(self) -> bool:
         """Every wanted price day was loaded and no step failed. A partial sync is NOT scanner-ready."""
-        return not self.errors and self.bar_days_loaded + self.bar_days_empty >= self.bar_days_missing
+        return not self.errors and self.bar_days_loaded + self.bar_days_empty + self.bar_days_pending >= self.bar_days_missing
 
 
 def _find(registry: ProviderRegistry, kind: str, attr: str) -> Any:
@@ -90,6 +94,8 @@ class MarketSync:
                 if bars:
                     self.store.save_grouped(d, bars, grouped.name)
                     rep.bar_days_loaded += 1
+                elif d >= today - RECENT_EMPTY:
+                    rep.bar_days_pending += 1  # not published yet: asked again next time, not an error
                 else:
                     empty.add(d)
                     rep.bar_days_empty += 1

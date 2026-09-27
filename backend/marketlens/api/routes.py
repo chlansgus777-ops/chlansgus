@@ -74,6 +74,7 @@ def _row_summary(r: Any, s: MarketLensService | None = None, fetch_quote: bool =
     er = res.get("event_risk") or {}
     nxt = (er.get("nearest") or {})
     status = s.recommendation_status(r, fetch_quote=fetch_quote) if s is not None else None
+    lv = s.levels_now(r) if s is not None else None  # after a split: the levels on today's share basis
     bullish = r.final_action in {a.value for a in BULLISH_ACTIONS}
     return {
         "current_status": status.status if status else None,  # CURRENT | AGING | EXPIRED (re-judged now)
@@ -86,11 +87,11 @@ def _row_summary(r: Any, s: MarketLensService | None = None, fetch_quote: bool =
         "valuation_price_basis": res.get("valuation_price_basis"),
         "sector_known": res.get("sector_known", True),
         "id": r.id, "rank": r.rank, "ticker": r.ticker, "company": res["security"]["company_name"], "sector": r.sector,
-        "sector_model": r.sector_model, "price": r.price, "session": r.session, "price_timestamp": r.price_timestamp.isoformat() if r.price_timestamp else None,
+        "sector_model": r.sector_model, "price": lv["price"] if lv else r.price, "split_factor_since": lv["split_factor"] if lv else 1.0, "session": r.session, "price_timestamp": r.price_timestamp.isoformat() if r.price_timestamp else None,
         "price_source": r.price_source, "price_quality": r.price_quality, "score": r.score, "confidence": r.confidence,
         "action": r.final_action, "deterministic_action": r.deterministic_action, "committee_status": r.committee_status,
-        "ideal_entry": entry.get("ideal_entry"), "max_buy": entry.get("max_buy"), "target": entry.get("target1"),
-        "stop": entry.get("stop"), "downside": entry.get("downside_pct"), "rr": entry.get("rr_at_current"),
+        "ideal_entry": lv["ideal_entry"] if lv else entry.get("ideal_entry"), "max_buy": lv["max_buy"] if lv else entry.get("max_buy"),
+        "target": lv["target1"] if lv else entry.get("target1"), "stop": lv["stop"] if lv else entry.get("stop"), "downside": entry.get("downside_pct"), "rr": entry.get("rr_at_current"),
         "catalyst": nxt.get("title"), "catalyst_date": nxt.get("event_date"), "risk": er.get("level"),
         "data_quality": r.data_quality, "mode": r.mode, "vetoes": res["decision"]["vetoes"], "as_of": r.as_of.isoformat(),
         "version": getattr(r, "version", 1) or 1, "supersedes_id": getattr(r, "supersedes_id", None),
@@ -171,9 +172,8 @@ def _position_plan(s: MarketLensService, ss: Any, row: Any, summary: dict[str, A
     nav = portfolio_snapshot(pf, closes).nav if entered else None
     price = summary.get("revalidated_price") or summary.get("price")  # the re-checked current price when there is one
     current = next((h.quantity * price for h in pf.holdings if h.ticker == row.ticker), 0.0) if price else 0.0
-    entry = (row.result or {}).get("entry") or {}
     size_cap = ((row.result or {}).get("decision") or {}).get("size_limit")
-    p = position_plan(row.final_action, size_cap, nav, price, entry.get("stop"), current, s.model_config().portfolio)
+    p = position_plan(row.final_action, size_cap, nav, price, summary.get("stop"), current, s.model_config().portfolio)  # stop on today's share basis
     if p is None:
         why = ("포트폴리오(현금·보유 종목)를 입력하면 매수 금액과 수량을 계산합니다" if not nav else "매수 판정이 아니거나 현재가가 없어 계산하지 않음")
         return {"available": False, "reason": why}

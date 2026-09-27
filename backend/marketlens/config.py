@@ -89,7 +89,7 @@ def _load_dotenv() -> None:
         return
     env_path = env_file_path()
     if env_path.exists():
-        load_dotenv(env_path, override=False)
+        load_dotenv(env_path, override=False, interpolate=False)  # a saved value is used as written: no ${…} expansion
 
 
 # what the first-run setup screen may write (nothing else: no path, URL or code setting is reachable from the UI)
@@ -134,6 +134,12 @@ def _keychain_set(name: str, value: str) -> bool:
         return False
 
 
+def _dotenv_quote(v: str) -> str:
+    """Inside double quotes python-dotenv decodes backslash escapes: escape them so the value read back is the
+    value written ("ab\\tc" stays a backslash and a t)."""
+    return v.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def save_setup(values: dict[str, str], env_path: Path | None = None) -> dict[str, str]:
     """Store first-run settings without editing files by hand. Secrets go to the OS keychain when ``keyring`` is
     installed (Windows Credential Manager), else to the private ``.env`` of this installation; other settings go to
@@ -147,12 +153,17 @@ def save_setup(values: dict[str, str], env_path: Path | None = None) -> dict[str
             continue
         to_file[k] = v
         where[k] = ".env"
-    if to_file:
-        path = env_path or env_file_path()
+    path = env_path or env_file_path()
+    if to_file or path.exists():
+        # every saved name loses its old .env line — also one saved to the keychain: .env is loaded into the
+        # environment at startup and would win over the keychain (8th evaluation I5)
         path.parent.mkdir(parents=True, exist_ok=True)
         lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-        kept = [ln for ln in lines if ln.split("=", 1)[0].strip() not in to_file]
-        kept += [f'{k}="{v}"' for k, v in to_file.items()]
+        kept = [ln for ln in lines if ln.split("=", 1)[0].strip().removeprefix("export ").strip() not in clean]
+        if to_file:
+            kept += [f'{k}="{_dotenv_quote(v)}"' for k, v in to_file.items()]
+        if kept == lines:
+            return where
         tmp = path.with_suffix(".tmp")
         tmp.write_text("\n".join(kept) + "\n", encoding="utf-8")
         if os.name != "nt":

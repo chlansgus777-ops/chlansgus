@@ -28,7 +28,8 @@ from marketlens.application.theses import ThesisBook
 from marketlens.config import AGENT_PROMPT_VERSION, CONFIG_DIR, SCHEMA_VERSION, ModelConfig, Settings, code_version, load_model_config
 from marketlens.domain.enums import BULLISH_ACTIONS, Action, DataMode
 from marketlens.domain.freshness import PlanCheck, RecommendationFreshness, recommendation_freshness
-from marketlens.domain.market_calendar import UTC
+from marketlens.domain.corporate_actions import split_factor
+from marketlens.domain.market_calendar import UTC, to_ny
 from marketlens.domain.paper import position_notional
 from marketlens.domain.portfolio import Holding, Portfolio
 from marketlens.domain.what_changed import AnalysisDigest
@@ -211,14 +212,27 @@ class MarketLensService:
         names = sorted({p.name for ch in self.registry.chains.values() for p in ch.providers})
         return f"{self.mode.value}:{__version__}:" + ",".join(names)[:100]
 
+    def levels_now(self, row: RecommendationRow) -> dict[str, Any]:
+        """A stored recommendation's price levels on today's share basis: a split executed after the analysis
+        divides them by its ratio, as the paper trades and the next analysis do (8th evaluation I1) — the current
+        quote is on the new basis."""
+        entry = (row.result or {}).get("entry") or {}
+        f = split_factor(self.data.splits(row.ticker), to_ny(row.as_of).date(), to_ny(self.now()).date())
+
+        def adj(v: Any) -> float | None:
+            return None if v is None else float(v) / f
+
+        return {"split_factor": f, "price": adj(row.price), "ideal_entry": adj(entry.get("ideal_entry")), "max_buy": adj(entry.get("max_buy")),
+                "stop": adj(entry.get("stop")), "target1": adj(entry.get("target1"))}
+
     def recommendation_status(self, row: RecommendationRow, fetch_quote: bool = False) -> RecommendationFreshness:
         """Is this stored recommendation still current NOW (not just: was it fresh when it was made)?
 
         Same-session recommendations are re-checked against a current quote (max buy, stop, reward/risk,
         move since analysis). Listings only use an already cached quote; the stock page may fetch one."""
-        entry = (row.result or {}).get("entry") or {}
+        lv = self.levels_now(row)
         bullish = row.final_action in {a.value for a in BULLISH_ACTIONS}
-        plan = PlanCheck(row.price, entry.get("max_buy"), entry.get("stop"), entry.get("target1"), self.base_cfg.decision.min_rr, bullish)
+        plan = PlanCheck(lv["price"], lv["max_buy"], lv["stop"], lv["target1"], self.base_cfg.decision.min_rr, bullish)
         f = self.data.peek_quote(row.ticker)
         if f is None and fetch_quote:
             f = self.data.quote(row.ticker)
