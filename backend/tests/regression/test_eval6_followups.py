@@ -16,6 +16,9 @@ UTC = timezone.utc
     ("For the fourth quarter, we expect revenue of $10.2 billion to $10.4 billion.", "revenue", 10.2e9),
     ("For fiscal 2027, we expect diluted EPS of $1.10 to $1.20.", "eps", 1.10),
     ("We expect fourth quarter gross margin of 45% to 46%.", "gross_margin", 0.45),
+    # CHANGED in round 7 (evaluation 7, J1), disclosed: was in the "never a level" list below. The level governed by
+    # "revenue of" comes first; the growth note after it does not make the level a change.
+    ("We expect revenue of $10.2 billion to $10.4 billion, an increase of 12% year over year.", "revenue", 10.2e9),
 ])
 def test_a_plain_level_is_still_extracted(sentence, metric, lo):
     from marketlens.domain.guidance import extract
@@ -25,12 +28,11 @@ def test_a_plain_level_is_still_extracted(sentence, metric, lo):
 
 
 @pytest.mark.parametrize("sentence", [
-    "We expect revenue of $10.2 billion to $10.4 billion, an increase of 12% year over year.",  # a level with a change note
     "We expect a foreign exchange headwind to fourth quarter revenue of $80 million.",
     "The acquisition is expected to be accretive to fiscal 2027 EPS by $0.05.",
 ])
 def test_a_sentence_carrying_a_change_is_never_a_level(sentence):
-    """Conservative by design: a level written together with a change is left out (value missing, never wrong)."""
+    """A change or an impact before the amount is never a level (value missing, never wrong)."""
     from marketlens.domain.guidance import extract
 
     assert all(i.status != "EXTRACTED" for i in extract(sentence))
@@ -54,6 +56,10 @@ def test_a_reverse_split_inside_the_year_puts_the_quarters_on_the_annual_basis()
     fy = ("2024-12-31", "2024-01-01", "2025-02-15", "10-K")
     eps = [_fact(v, *p) for v, p in zip((0.20, 1.0, 1.0), q)] + [_fact(4.0, *fy)]
     sh = [_fact(v, *p) for v, p in zip((500.0, 100.0, 100.0), q)] + [_fact(100.0, *fy)]
+    # CHANGED in round 7 (evaluation 7, J2), disclosed: a split is only accepted with the filings' own evidence —
+    # the Q2 10-Q restates the prior-year Q2 comparative on the new basis (EPS × 5, shares ÷ 5)
+    eps += [_fact(0.18, "2023-06-30", "2023-04-01", "2023-08-01"), _fact(0.90, "2023-06-30", "2023-04-01", "2024-08-01")]
+    sh += [_fact(500.0, "2023-06-30", "2023-04-01", "2023-08-01"), _fact(100.0, "2023-06-30", "2023-04-01", "2024-08-01")]
     rev = [_fact(10.0, *p) for p in q] + [_fact(40.0, *fy)]
     qs = parse_company_facts({"facts": {"us-gaap": {"Revenues": {"units": {"USD": rev}}, "EarningsPerShareDiluted": {"units": {"USD/shares": eps}},
                                                     "WeightedAverageNumberOfDilutedSharesOutstanding": {"units": {"shares": sh}}}}}, "R")
@@ -72,10 +78,23 @@ def test_an_unclear_share_basis_leaves_q4_eps_empty_instead_of_guessing():
 
 
 def test_the_nvidia_split_year_gives_the_reported_q4_eps():
+    """CHANGED in round 7 (evaluation 7, J2), disclosed: the split is confirmed by the filings — as in NVIDIA's real
+    Q2 FY2025 10-Q, the prior-year Q2 comparative is restated on the post-split basis (EPS 2.48 → 0.25). Without
+    that evidence (the evaluator's K2 input alone) Q4 EPS stays empty."""
+    from marketlens.domain.corporate_actions import SplitEvent, normalize_quarters
+    from marketlens.domain.fundamentals import as_of
+    from marketlens.providers.live.sec_edgar import parse_company_facts
     from tests.acceptance_a_grade.test_evaluation6_counterexamples import _nvda_view_on
 
-    q4 = next(q for q in _nvda_view_on(date(2025, 3, 15)) if q.period_end == date(2025, 1, 26))
+    f = _nvda_fy2025_facts()
+    g = f["facts"]["us-gaap"]
+    g["EarningsPerShareDiluted"]["units"]["USD/shares"] += [_fact(2.48, "2023-07-30", "2023-05-01", "2023-08-28"),
+                                                          _fact(0.248, "2023-07-30", "2023-05-01", "2024-08-28")]
+    day = date(2025, 3, 15)
+    pit, _ = normalize_quarters(as_of(parse_company_facts(f, "NVDA"), day), [SplitEvent("NVDA", date(2024, 6, 10), 1, 10, "polygon")], day)
+    q4 = next(q for q in pit if q.period_end == date(2025, 1, 26))
     assert q4.eps_diluted == pytest.approx(0.89, abs=0.01)  # NVIDIA reported 0.89
+    assert next(q for q in _nvda_view_on(day) if q.period_end == date(2025, 1, 26)).eps_diluted is None  # no evidence
 
 
 def test_a_recast_10k_keeps_the_quarter_listed_with_unknown_values():
@@ -92,14 +111,17 @@ def test_a_recast_10k_keeps_the_quarter_listed_with_unknown_values():
 
 
 # ---------------------------------------------------------------- K3 concept choice
-def test_the_first_reported_concept_owns_a_period_and_later_comparatives_do_not_mix_in():
+def test_the_first_reported_concept_owns_a_period_and_a_later_comparative_is_a_later_vintage():
     from marketlens.domain.fundamentals import as_of
     from tests.acceptance_a_grade.test_evaluation6_counterexamples import _concept_switch_facts
     from marketlens.providers.live.sec_edgar import parse_company_facts
 
     qs = parse_company_facts(_concept_switch_facts(), "T")
+    # CHANGED in round 7 (evaluation 7, J3), disclosed: the comparative filed only under the new concept is a later
+    # vintage (90 from 2025-05-01); the view before that day keeps 100 (K3)
     later = {q.period_end: q for q in as_of(qs, date(2025, 6, 1))}
-    assert later[date(2024, 3, 31)].revenue == 100.0 and later[date(2025, 3, 31)].revenue == 110.0
+    assert later[date(2024, 3, 31)].revenue == 90.0 and later[date(2025, 3, 31)].revenue == 110.0
+    assert {q.period_end: q for q in as_of(qs, date(2025, 3, 1))}[date(2024, 3, 31)].revenue == 100.0
 
 
 # ---------------------------------------------------------------- K4 release date

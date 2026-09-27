@@ -279,26 +279,34 @@ RELEASE_MAX_DAYS = 75  # 10-Q deadline is 40–45 days; an earnings release more
 
 
 def pair_with_releases(rows: Sequence[Mapping[str, Any]], release_times: Sequence[datetime], source: str,
-                       periodic_times: Sequence[datetime] = ()) -> list[EarningsReport]:
+                       periodic_times: Sequence[datetime | tuple[date, datetime]] = ()) -> list[EarningsReport]:
     """Fiscal-period EPS results (period end, actual, consensus) + the real announcement times (SEC 8-K Item
     2.02 acceptance times) → reports dated by their announcement.
 
-    A period takes the LAST Item 2.02 release after its end, within ``RELEASE_MAX_DAYS`` and not after the
-    period's own 10-Q / 10-K (``periodic_times``, when known): results are released before or with the periodic
-    report, while an earlier Item 2.02 in the same window is a preliminary update (evaluation 6, K4: a January
-    pre-announcement dated the full release 3.5 weeks early and made its EPS "known" too soon). Dating late is
-    safe; dating early leaks. One release belongs to one period. A period without a release is dropped — the
-    period end is never used as a report date."""
+    A period takes the LAST Item 2.02 release after its end and not after the period's own 10-Q / 10-K: results
+    are released before or with the periodic report, while an earlier Item 2.02 in the same window is a
+    preliminary update (evaluation 6, K4). The period's own report is the one whose report period matches
+    (``(report_date, accepted)`` pairs from the SEC submissions) or, without report periods, the first periodic
+    filing after the period end not already taken by an earlier period — so a late 10-K belongs to the year it
+    reports, not to the next quarter (evaluation 7, J6). Without any periodic report the window is
+    ``RELEASE_MAX_DAYS``. Dating late is safe; dating early leaks. One release belongs to one period; a period
+    without a release is dropped — the period end is never used as a report date."""
     times = sorted(release_times)
-    periodic = sorted(periodic_times)
+    reports: list[tuple[date | None, date]] = sorted(
+        ((p[0], to_ny(p[1]).date()) if isinstance(p, tuple) else (None, to_ny(p).date()) for p in periodic_times), key=lambda x: x[1])
     used: set[datetime] = set()
+    taken: set[int] = set()
     out: list[EarningsReport] = []
     for r in sorted(rows, key=lambda x: x["period"]):
         end: date = r["period"]
-        limit = end + timedelta(days=RELEASE_MAX_DAYS)
-        own_report = next((to_ny(p).date() for p in periodic if to_ny(p).date() > end), None)
-        if own_report is not None and own_report <= limit:
-            limit = own_report
+        own = next((i for i, (rd, _f) in enumerate(reports) if rd is not None and abs((rd - end).days) <= 15 and i not in taken), None)
+        if own is None:
+            own = next((i for i, (rd, f) in enumerate(reports) if rd is None and f > end and (f - end).days <= 150 and i not in taken), None)
+        if own is not None:
+            taken.add(own)
+            limit = reports[own][1]
+        else:
+            limit = end + timedelta(days=RELEASE_MAX_DAYS)
         cands = [x for x in times if x not in used and end < to_ny(x).date() <= limit]
         if not cands:
             continue

@@ -129,14 +129,14 @@ class SecEdgarProvider:
         oldest first — the candidate announcement times of the earnings releases (one submissions request)."""
         return self.filing_times(ticker, since)[0]
 
-    def filing_times(self, ticker: str, since: date) -> tuple[list[datetime], list[datetime]]:
-        """(Item 2.02 8-K acceptance times, 10-Q/10-K acceptance times) since ``since``, oldest first, from one
-        submissions request. The periodic reports bound which Item 2.02 is a period's earnings release."""
+    def filing_times(self, ticker: str, since: date) -> tuple[list[datetime], list[tuple[date, datetime] | datetime]]:
+        """(Item 2.02 8-K acceptance times, 10-Q/10-K as (report period, acceptance time)) since ``since``, oldest
+        first, from one submissions request. The periodic reports bound which Item 2.02 is a period's release."""
         self._require()
         cik = self.cik_for(ticker)
         recent = self._data.get_json(f"/submissions/CIK{cik:010d}.json").get("filings", {}).get("recent", {})
         releases: list[datetime] = []
-        periodic: list[datetime] = []
+        periodic: list[tuple[date, datetime] | datetime] = []
         for i, form in enumerate(recent.get("form", [])):
             is_release = form == "8-K" and "2.02" in str((recent.get("items") or [""] * (i + 1))[i])
             if not is_release and form not in ("10-Q", "10-K"):
@@ -149,8 +149,15 @@ class SecEdgarProvider:
                 t = datetime.fromisoformat(str(acc).replace("Z", "+00:00")) if acc else datetime.combine(fdate, datetime.min.time(), tzinfo=timezone.utc)
             except (KeyError, IndexError, ValueError):
                 continue
-            (releases if is_release else periodic).append(t)
-        return sorted(releases), sorted(periodic)
+            if is_release:
+                releases.append(t)
+            else:
+                rd = (recent.get("reportDate") or [None] * (i + 1))[i]
+                try:
+                    periodic.append((date.fromisoformat(str(rd)), t) if rd else t)
+                except ValueError:
+                    periodic.append(t)
+        return sorted(releases), periodic
 
     def earnings_releases(self, ticker: str, since: date, max_n: int = 2) -> list[dict[str, Any]]:
         """Recent 8-K filings with Item 2.02 (results of operations) and their Exhibit 99 press release.
@@ -410,7 +417,7 @@ def _pick_concept(gaap: dict[str, Any], names: tuple[str, ...], unit_pref: tuple
     (evaluation 6, K3: a 2025 comparative under the new concept erased Q1 2024 from the view as of 2025-03-01).
     One period is never mixed from two concepts, so its vintages stay comparable. Only 10-Q/10-K facts count
     (the caller reads nothing else)."""
-    by_key: dict[tuple[Any, Any], tuple[str, int, list[dict[str, Any]]]] = {}
+    by_key: dict[tuple[Any, Any], list[tuple[int, str, list[dict[str, Any]]]]] = defaultdict(list)
     for rank, n in enumerate(names):
         c = gaap.get(n)
         if not c:
@@ -424,11 +431,25 @@ def _pick_concept(gaap: dict[str, Any], names: tuple[str, ...], unit_pref: tuple
             if it.get("form") in QUARTERLY_FORMS:
                 groups[(it.get("start"), it.get("end"))].append(it)
         for key, its in groups.items():
-            first = min(str(it.get("filed", "")) for it in its)
-            cur = by_key.get(key)
-            if cur is None or (first, rank) < (cur[0], cur[1]):
-                by_key[key] = (first, rank, its)
-    return [it for _, _, its in by_key.values() for it in its]
+            by_key[key].append((rank, min(str(it.get("filed", "")) for it in its), its))
+    out: list[dict[str, Any]] = []
+    for cands in by_key.values():
+        owner = min(cands, key=lambda c: (c[1], c[0]))
+        out += owner[2]
+        # a later filing that reports the period ONLY under another concept (the company switched tags and restated
+        # the comparative on the new definition) is a later vintage of the period, visible from its filing date —
+        # never a replacement of what was public before (K3), and the same definition for year-over-year from then
+        # on (evaluation 7, J3). A filing that also reports the owner concept keeps the owner's value.
+        taken = {str(it.get("filed", "")) for it in owner[2]}
+        for rank, _first, its in sorted(cands, key=lambda c: c[0]):
+            if rank == owner[0]:
+                continue
+            for it in its:
+                f = str(it.get("filed", ""))
+                if f not in taken:
+                    out.append(it)
+            taken |= {str(it.get("filed", "")) for it in its}
+    return out
 
 
 QUARTERLY_FORMS = ("10-Q", "10-K", "10-Q/A", "10-K/A")
@@ -539,9 +560,13 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
             if pk not in first_val:
                 first_val[pk] = (str(item["filed"]), float(item["val"]))
                 continue
-            v0 = first_val[pk][1]
-            if item["filed"] > first_val[pk][0] and abs(float(item["val"]) - v0) > 0.01 * max(1.0, abs(v0)):
+            # compared with the value filed just before (not the first one): a 10-K that repeats last year's recast
+            # figures unchanged is not itself a recast (evaluation 7, J4)
+            f0, v0 = first_val[pk]
+            if item["filed"] > f0 and abs(float(item["val"]) - v0) > 0.01 * max(1.0, abs(v0)):
                 changed.append((item["start"], item["end"], item["filed"], days >= ANNUAL_MIN_DAYS))
+            if item["filed"] > f0:
+                first_val[pk] = (str(item["filed"]), float(item["val"]))
         for st_s, end_s, f_s, is_annual in changed:
             # a restatement that also restates the year's quarters in the same filing keeps one basis
             if is_annual and not any(not a and f == f_s and st_s <= q_st and q_end <= end_s for q_st, q_end, f, a in changed):
@@ -583,6 +608,7 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
 
     eps_annual: tuple[dict[date, tuple[date, float, date]], dict[date, list[tuple[date, float]]]] = ({}, {})
     shares_annual: dict[date, tuple[date, float, date]] = {}
+    shares_annual_vintages: Mapping[date, list[tuple[date, float]]] = {}
     for field_name, concepts in CONCEPTS.items():
         unit_pref = ("USD/shares",) if field_name == "eps_diluted" else ("shares",) if field_name == "shares_diluted" else ("USD",)
         items = _pick_concept(gaap, concepts, unit_pref)
@@ -610,6 +636,7 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
             eps_annual = (annual, annual_vintages)  # Q4 EPS is decided once the diluted share counts are known
         elif field_name == "shares_diluted":
             shares_annual = annual
+            shares_annual_vintages = annual_vintages
         elif field_name in FLOW_FIELDS:
             q4_from_annual(field_name, annual, annual_vintages)
 
@@ -627,13 +654,37 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
         r = fy[1] / q_sh
         if 1 / 1.2 <= r <= 1.2:
             return 1.0
+        # a share count that moved by a whole multiple is a split ONLY when the filings say so: a split restates the
+        # comparatives already on file (earlier EPS divided, earlier share counts multiplied by the same ratio). A
+        # merger or a large issue changes the count without restating anything (evaluation 7, J2: a stock-for-stock
+        # merger took the count from 100M to 233M and was read as a 2-for-1 split).
+        q_filed = field_filed[q_end]["shares_diluted"]
         n = round(r)
-        if n >= 2 and abs(r - n) / n <= 0.06:
+        if n >= 2 and abs(r - n) / n <= 0.06 and any(q_filed < fd <= F and abs(x - n) / n <= 0.03 for fd, x in split_evidence):
             return 1.0 / n  # the quarter was reported before an n-for-1 split: its EPS is n times the annual basis
         m = round(1 / r)
-        if m >= 2 and abs(1 / r - m) / m <= 0.06:
+        if m >= 2 and abs(1 / r - m) / m <= 0.06 and any(q_filed < fd <= F and abs(1 / x - m) / m <= 0.03 for fd, x in split_evidence if x > 0):
             return float(m)  # before a 1-for-m reverse split
         return None
+
+    # (filing date, split ratio) from restated comparatives: EPS old/new and share count new/old of the same period
+    split_evidence: list[tuple[date, float]] = []
+
+    def _ratios(first: tuple[date, float], later: list[tuple[date, float]], per_share: bool) -> None:
+        prev = first[1]
+        for fd, v in later:
+            if prev and v and (prev > 0) == (v > 0):
+                split_evidence.append((fd, prev / v if per_share else v / prev))
+            prev = v
+
+    for e, fields in per_period.items():
+        for fname, per_share in (("eps_diluted", True), ("shares_diluted", False)):
+            if fname in fields and revisions[e].get(fname):
+                _ratios((field_filed[e][fname], fields[fname]), revisions[e][fname], per_share)
+    for vint, per_share in ((eps_annual[1], True), (shares_annual_vintages, False)):
+        for vs in vint.values():
+            if len(vs) > 1:
+                _ratios(vs[0], vs[1:], per_share)
 
     # Q4 diluted EPS. Preferred: Q4 net income / Q4 diluted shares (below, when the 10-K tags the Q4 share
     # count). Most 10-Ks tag only the full-year weighted shares, which would leave Q4 EPS — and with it TTM EPS

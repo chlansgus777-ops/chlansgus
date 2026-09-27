@@ -172,6 +172,45 @@ def _number_groups(low: str, metric: str) -> int:
     return groups
 
 
+# words that may stand between the metric and its guided amount ("revenue for the fourth quarter is expected to be
+# in the range of $X", "GAAP diluted EPS of $X"). Anything else there ("EPS BY $0.10", "revenue to be UP $50 million",
+# "revenue GROWTH of $2 billion", "gross margin to DECREASE 1%") means the amount is not the metric's level.
+_GAP_OK = frozenset("""for the a an this that fourth first second third quarter quarters fiscal full year years of gaap non adjusted
+    diluted basic is are will would be expected expect we to in range between approximately about around roughly at from projected
+    anticipated forecast forecasted our its total net per share come now currently estimated target targeted guidance outlook and
+    within fy on basis reported comparable attributable common stockholders shareholders holders""".split())
+
+
+_EPS_HEADS = ("earnings per share", "earnings per diluted share", "earnings", "eps", "net income", "income", "net loss", "loss",
+              "losses", "lose", "loss per share")
+_TO_LEVEL = re.compile(r"(?<![a-z])(improve|increase|decline|decrease|grow|rise|fall|narrow|reach|total)s?\s+to\s*(approximately\s+|about\s+|between\s+|a range of\s+)?$")
+
+
+def _governed(metric: str, low: str, start: int) -> bool:
+    """Is the amount at ``start`` the metric's own level? The metric must be named BEFORE the amount, joined to it
+    only by allowed words, and nothing before the amount may describe a change or an impact ("tariffs to lower EPS
+    by", "a headwind to revenue of"). A structural rule rather than a list of forbidden change words (J1)."""
+    if start < 0:
+        return False
+    # a per-share amount is EPS only when earnings / net income / a loss leads it — "per share" alone is also a
+    # charge, an expense, a dividend or a deal price (J1)
+    words = _EPS_HEADS if metric == "eps" else dict(METRICS)[metric]
+    last = None
+    for w in words:
+        for m in re.finditer(r"(?<![a-z])" + re.escape(w) + r"s?(?![a-z])", low[:start]):
+            if last is None or m.end() > last.end():
+                last = m
+    if last is None:
+        return False  # the amount comes before the metric: "$0.05 off EPS", "$150 million on revenue"
+    gap = low[last.end():start]
+    to_level = _TO_LEVEL.search(gap)  # "is expected to improve to $0.10": the new level, not a change
+    head = low[:last.end() + (to_level.start() if to_level else len(gap))]
+    if _CHANGE.search(head):
+        return False
+    toks = re.findall(r"[a-z]+|\d+", gap[: to_level.start()] if to_level else gap)
+    return all(t in _GAP_OK or re.fullmatch(r"20\d\d|q[1-4]", t) for t in toks)
+
+
 def _sign(metric: str, s: str, start: int) -> str:
     """POS | NEG | UNCLEAR for the guided number that starts at ``start``. Conservative by construction —
     a wrong sign is worse than no value:
@@ -184,8 +223,8 @@ def _sign(metric: str, s: str, start: int) -> str:
     low = s.lower()
     if _has_negative_number(low) or re.search(r"(?<![a-z])negative(?![a-z])", low):
         return "UNCLEAR"
-    if _CHANGE.search(low):
-        return "UNCLEAR"  # a change / impact amount, not the guided level
+    if not _governed(metric, low, start):
+        return "UNCLEAR"  # a change / impact amount, or an amount not tied to the metric: not the guided level
     if _number_groups(low, metric) > 1:
         return "UNCLEAR"  # two amounts of the same unit (GAAP and non-GAAP, an excluded item, last year's value)
     if re.search(r"(?<![a-z])respectively(?![a-z])|gaap and non-gaap|gaap and adjusted|non-gaap and gaap", low):

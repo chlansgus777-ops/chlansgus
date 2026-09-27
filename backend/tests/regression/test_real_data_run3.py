@@ -74,7 +74,10 @@ def _providers(earnings_rows: Any, calendar_rows: list[dict[str, Any]]) -> Any:
     recent = {"form": ["8-K", "10-Q", "8-K", "8-K", "8-K"], "items": ["2.02,9.01", "", "5.02", "2.02,9.01", "2.02"],
               "filingDate": ["2026-08-26", "2026-08-26", "2026-06-01", "2026-05-27", "2026-02-25"],
               "accessionNumber": ["a1", "a2", "a3", "a4", "a5"],
-              "acceptanceDateTime": ["2026-08-26T20:21:19.000Z", "2026-08-26T20:30:00.000Z", "2026-06-01T12:00:00.000Z", "2026-05-27T20:21:00.000Z", "2026-02-25T21:20:00.000Z"]}
+              "acceptanceDateTime": ["2026-08-26T20:21:19.000Z", "2026-08-26T20:30:00.000Z", "2026-06-01T12:00:00.000Z", "2026-05-27T20:21:00.000Z", "2026-02-25T21:20:00.000Z"],
+              # CHANGED in round 7, disclosed: the real submissions JSON carries the report period of each filing; the
+              # 10-Q of Q2 says so. (Without it, the only 10-Q on file was taken as Q1's own report — see J6.)
+              "reportDate": ["2026-08-26", "2026-07-26", "2026-06-01", "2026-05-27", "2026-02-25"]}
 
     def sec(req: httpx.Request) -> httpx.Response:
         if req.url.path.endswith("company_tickers_exchange.json"):
