@@ -153,6 +153,13 @@ class MarketStore:
                         s.add(TickerHistoryRow(mode=self.mode, event="UNRESOLVED", ticker=t, cik=row.cik, effective=today, observed_at=_now()))
                         n["unresolved"] += 1
                         continue
+                    traded_today = s.scalars(select(PriceBarRow.day).where(PriceBarRow.ticker == t, PriceBarRow.day == today).limit(1)).first() is not None
+                    if traded_today:
+                        # missing from the SEC file but it traded in the session this listing describes (the day's
+                        # bars are stored before this step): a gap in the listing, not a delisting (new evaluator)
+                        s.add(TickerHistoryRow(mode=self.mode, event="LISTING_GAP", ticker=t, cik=row.cik, effective=today, observed_at=_now()))
+                        n["listing_gap"] = n.get("listing_gap", 0) + 1
+                        continue
                     row.active, row.delisted_at = False, today
                     n["delisted"] += 1
             s.commit()
@@ -224,7 +231,12 @@ class MarketStore:
             k += 1
             arch = f"{base}.{k}"
         for model in (PriceBarRow, FundamentalVintageRow, CorporateActionRow, EstimateSnapshotRow, GuidanceRow):
-            s.execute(update(model).where(model.ticker == row.ticker).values(ticker=arch).execution_options(synchronize_session=False))
+            q = update(model).where(model.ticker == row.ticker)
+            if model is PriceBarRow and row.delisted_at is not None and event == "RETURN":
+                # the old interval ended at its delisting: bars from then on are the new interval's (trading that
+                # resumed before this sync saw the listing again) and stay with the live ticker
+                q = q.where(PriceBarRow.day < row.delisted_at)
+            s.execute(q.values(ticker=arch).execution_options(synchronize_session=False))
         s.execute(delete(IngestionManifestRow).where(IngestionManifestRow.ticker == row.ticker, IngestionManifestRow.mode == self.mode))
         # the old company: delisted when its name was still in use until now; a renamed-away or earlier delisted
         # company keeps its own record

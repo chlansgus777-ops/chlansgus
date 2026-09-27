@@ -96,6 +96,14 @@ def delisted_on(s: Session, ticker: str, mode: str) -> date | None:
     row = s.get(SecurityRow, ticker)
     if row is None or row.mode != mode:
         return None
+    if row.delisted_at is not None:
+        from sqlalchemy import select
+
+        from marketlens.infrastructure.db.models import PriceBarRow
+
+        traded_after = s.scalars(select(PriceBarRow.day).where(PriceBarRow.ticker == ticker, PriceBarRow.day >= row.delisted_at).limit(1)).first()
+        if traded_after is not None:
+            return None  # it kept trading after it left the listing: not (yet) a delisting — never close at a "last price"
     return row.delisted_at
 
 

@@ -110,6 +110,9 @@ class EarningsReport:
     call_highlights: tuple[str, ...] = ()
     pre_earnings_run_pct: float | None = None  # 20d return into the print
     price_reaction_pct: float | None = None  # next-session reaction
+    # when the results became public (the SEC 8-K acceptance time), if known: an after-hours release on the report
+    # date is not public at the close of that day
+    released_at: datetime | None = None
 
 
 def _surprise(actual: float | None, cons: float | None) -> float | None:
@@ -314,5 +317,5 @@ def pair_with_releases(rows: Sequence[Mapping[str, Any]], release_times: Sequenc
         used.add(t)
         q, y = r.get("quarter"), r.get("year")
         out.append(EarningsReport(report_date=to_ny(t).date(), fiscal_label=f"Q{q} {y}" if q and y else end.isoformat(), source=source,
-                                  eps_actual=r.get("actual"), eps_consensus=r.get("estimate")))
+                                  eps_actual=r.get("actual"), eps_consensus=r.get("estimate"), released_at=t))
     return out

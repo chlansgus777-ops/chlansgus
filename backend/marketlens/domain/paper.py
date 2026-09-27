@@ -6,7 +6,9 @@ Rules that keep simulated results achievable:
   the stop (gap down), the trade is skipped.
 - Exits triggered by later recommendations (thesis invalidation / downgrade) keep their full
   timestamp and fill at the first open strictly after the signal time.
-- Only bars up to ``as_of`` are visible. Within a bar the stop is checked before targets (conservative).
+- Only bars up to ``as_of`` are visible. Stop rule (``PaperConfig.stop_rule``): "close" (default, the
+  recommendation's rule: a close at/below the stop exits at the next open) or "intraday" (a resting stop order;
+  within a bar the stop is checked before targets).
 - MAE/MFE only include price action up to the exit fill, never after it.
 - Position size follows the action: BUY = 1.0, BUY SMALL / ADD = 0.5 of the base notional.
 - Account level (:func:`simulate_account`): entries need real cash, a repeated BUY for a ticker that is
@@ -38,6 +40,10 @@ class PaperConfig:
     starting_capital: float = 100_000.0
     max_position_weight: float = 0.10  # post-trade weight of one ticker in account equity
     max_open_positions: int = 25
+    # "close": the recommendation's own rule — a session CLOSING at/below the stop, exit at the next open (what the
+    # screen tells a holder to do; the new evaluator found paper and screen used different stop rules).
+    # "intraday": a resting stop order (fills at the stop, or the open on a gap).
+    stop_rule: str = "close"
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,10 +137,19 @@ def simulate(
     hi_px = entry_px
     sell_cost = (cfg.slippage_bps + half_spread) / 10_000
     last_day = first.day
-    notes: list[str] = ["모의투자 손절은 장중 손절 주문(가격 도달 시 체결, 갭 하락은 시가 체결)을 가정합니다 — 추천 판단의 '종가 기준 이탈'과 다름"]
+    close_rule = cfg.stop_rule == "close"
+    notes: list[str] = (["모의투자 손절은 추천 화면과 같은 종가 기준입니다: 종가가 손절가 이하로 마감하면 다음 거래일 시가에 청산"] if close_rule
+                        else ["모의투자 손절은 장중 손절 주문(가격 도달 시 체결, 갭 하락은 시가 체결)을 가정합니다 — 추천 판단의 '종가 기준 이탈'과 다름"])
+    stop_hit = False  # close rule: the previous session closed at/below the stop
 
     for b in usable:
         last_day = b.day
+        if stop_hit and remaining > 0:
+            px = b.open * (1 - sell_cost)
+            lo_px, hi_px = min(lo_px, b.open), max(hi_px, b.open)
+            exits.append(Fill(b.day, round(px, 4), remaining, ExitReason.STOP))
+            remaining = 0
+            break
         due = [e for e in exit_days if e[0] <= b.day]
         if due and remaining > 0:  # exit_days already point to the first open strictly after the signal
             px = b.open * (1 - sell_cost)
@@ -142,6 +157,31 @@ def simulate(
             exits.append(Fill(b.day, round(px, 4), remaining, due[0][1]))
             remaining = 0
             break
+        if close_rule:
+            if not t1_done and b.high >= signal.target1:
+                part = remaining * cfg.t1_exit_fraction
+                fill = max(b.open, signal.target1)
+                exits.append(Fill(b.day, round(fill * (1 - sell_cost), 4), part, ExitReason.TARGET_1))
+                remaining -= part
+                t1_done = True
+                if cfg.move_stop_to_breakeven_after_t1:
+                    stop = max(stop, entry_px)
+            if t1_done and b.high >= signal.target2 and remaining > 0:
+                fill = max(b.open, signal.target2)
+                lo_px, hi_px = min(lo_px, b.low), max(hi_px, fill)
+                exits.append(Fill(b.day, round(fill * (1 - sell_cost), 4), remaining, ExitReason.TARGET_2))
+                remaining = 0
+                break
+            lo_px = min(lo_px, b.low)
+            hi_px = max(hi_px, b.high)
+            if b.close <= stop:
+                stop_hit = True  # exit at the next session's open (not before the close is known)
+                continue
+            if trading_days_between(entry.day, b.day) >= cfg.max_holding_days and remaining > 0:
+                exits.append(Fill(b.day, round(b.close * (1 - sell_cost), 4), remaining, ExitReason.TIME_EXIT))
+                remaining = 0
+                break
+            continue
         # stop first (conservative): a gap below the stop fills at the open
         if b.low <= stop and not t1_done and b.high >= signal.target1:
             notes.append(f"{b.day.isoformat()}: 같은 날 1차 목표가와 손절가가 모두 도달 — 일봉으로는 순서를 알 수 없어 손절 우선(보수적) 처리")

@@ -106,8 +106,17 @@ def _parse(metric: str, s: str) -> tuple[float | None, float | None, str, bool, 
         return c * (1 - p), c * (1 + p), unit, True, m.start()
     m = re.search(r"\$\s?" + _NUM + scale_word + r"\s*(?:to|and|-|–)\s*\$?\s?" + _NUM + scale_word, low)
     if m:
-        sc = _SCALE.get(m.group(6) or m.group(3) or "", 1.0) if metric != "eps" else 1.0
-        return _val(m.group(1), m.group(2)) * sc, _val(m.group(4), m.group(5)) * sc, unit, True, m.start()
+        if metric == "eps":
+            lo_v, hi_v = _val(m.group(1), m.group(2)), _val(m.group(4), m.group(5))
+        else:
+            # each end keeps its own scale word ("$900 million to $1.1 billion"); a bare end takes the other one's
+            # ("$3.2 to $3.4 billion") — the new evaluator's case: 900 million was read as 900 billion
+            sc_hi = _SCALE.get(m.group(6) or m.group(3) or "", 1.0)
+            sc_lo = _SCALE.get(m.group(3) or m.group(6) or "", 1.0)
+            lo_v, hi_v = _val(m.group(1), m.group(2)) * sc_lo, _val(m.group(4), m.group(5)) * sc_hi
+        if lo_v > hi_v:
+            return None, None, unit, False, -1  # not a range that reads low → high: never guess
+        return lo_v, hi_v, unit, True, m.start()
     ms = list(re.finditer(r"\$\s?" + _NUM + scale_word, low))
     if len(ms) == 1:
         sc = _SCALE.get(ms[0].group(3) or "", 1.0) if metric != "eps" else 1.0

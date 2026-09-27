@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Sequence
+from typing import Any, Sequence
 
 from marketlens.domain.earnings import AnalystSnapshot, EarningsReport
 from marketlens.domain.estimates import WINDOWS, CrossCheck, EstimateObservation, RevisionValue, cross_check, ntm_eps, provider_revision, same_quarter, self_revision
@@ -38,8 +38,30 @@ def _latest_day(hist: Sequence[EstimateObservation], provider: str, as_of: date)
     return max(days) if days else None
 
 
-def build(ticker: str, history: Sequence[EstimateObservation], as_of: date) -> EstimateReport:
-    hist = [h for h in history if h.observed_on <= as_of]  # point in time: never a later snapshot
+def on_price_basis(history: Sequence[EstimateObservation], splits: Sequence[Any], as_of: date) -> list[EstimateObservation]:
+    """Per-share estimates on the share basis of the (split-adjusted) price bars at ``as_of``: a consensus observed
+    before a split executed on/before ``as_of`` is divided by the split ratio (the new evaluator: after a split,
+    forward P/E mixed a post-split price with a pre-split consensus, and the split read as a −90% revision)."""
+    if not splits:
+        return list(history)
+    from dataclasses import replace
+
+    from marketlens.domain.corporate_actions import split_factor
+
+    out: list[EstimateObservation] = []
+    for h in history:
+        f = split_factor(splits, h.observed_on, as_of)
+        if f == 1.0:
+            out.append(h)
+            continue
+        revs = {k: (v / f if v is not None and k.startswith("eps_") else v) for k, v in h.provider_revisions.items()}
+        out.append(replace(h, eps=h.eps / f if h.eps is not None else None, eps_high=h.eps_high / f if h.eps_high is not None else None,
+                           eps_low=h.eps_low / f if h.eps_low is not None else None, provider_revisions=revs))
+    return out
+
+
+def build(ticker: str, history: Sequence[EstimateObservation], as_of: date, splits: Sequence[Any] = ()) -> EstimateReport:
+    hist = on_price_basis([h for h in history if h.observed_on <= as_of], splits, as_of)  # point in time: never a later snapshot
     notes: list[str] = []
     av_day = _latest_day(hist, AV, as_of)
     fh_day = _latest_day(hist, FINNHUB, as_of)
