@@ -129,21 +129,20 @@ def scan_status(req: Request) -> dict[str, Any]:
 def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
     s = svc(req)
     t = _ticker(ticker)
-    mode = s.mode.value
     if refresh:
         s.analyze(t, run_committee=False, persist=True)
     with s.sf() as ss:
-        row = repo.latest_recommendation(ss, t, mode=mode)
+        row = s.latest_company_recommendation(ss, t)
         if row is None:
             try:
                 s.analyze(t, run_committee=False, persist=True)
             except KeyError:
                 raise HTTPException(404, f"{t}: 분석 시점의 유니버스에 없는 종목") from None
-            row = repo.latest_recommendation(ss, t, mode=mode)
+            row = s.latest_company_recommendation(ss, t)
         if row is None:
             raise HTTPException(404, f"{t}: 분석 결과 없음")
         com = repo.committee_for(ss, row.id)
-        history = [{"id": h.id, "as_of": h.as_of.isoformat(), "score": h.score, "action": h.final_action} for h in repo.recommendation_history(ss, t, 30, mode=mode)]
+        history = [{"id": h.id, "as_of": h.as_of.isoformat(), "score": h.score, "action": h.final_action} for h in s.company_recommendations(ss, t, limit=30)]
         bars = (row.inputs or {}).get("bars") or []
         summary = _row_summary(row, s, fetch_quote=True)
         return {
@@ -273,7 +272,7 @@ def dashboard(req: Request) -> dict[str, Any]:
     with s.sf() as ss:
         pf = s.portfolio(ss)
         for w in repo.watchlist(ss):
-            rec = repo.latest_recommendation(ss, w.ticker, mode=s.mode.value)
+            rec = s.latest_company_recommendation(ss, w.ticker)
             if rec is None:
                 alerts.append({"ticker": w.ticker, "level": "info", "text": "아직 분석하지 않은 관심 종목입니다."})
                 continue
@@ -348,7 +347,7 @@ def get_watchlist(req: Request) -> list[dict[str, Any]]:
     with s.sf() as ss:
         out = []
         for w in repo.watchlist(ss):
-            rec = repo.latest_recommendation(ss, w.ticker, mode=s.mode.value)
+            rec = s.latest_company_recommendation(ss, w.ticker)
             out.append({"ticker": w.ticker, "note": w.note, "added_at": w.added_at.isoformat(), "latest": _row_summary(rec, s) if rec else None})
         return out
 

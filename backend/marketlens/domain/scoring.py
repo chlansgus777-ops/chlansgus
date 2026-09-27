@@ -345,7 +345,7 @@ def _entry(inp: ScoringInputs) -> Calc:
     if e.in_buy_zone:
         zone = 1.0
     elif atr:
-        zone = max(0.0, 1 - (e.current_price - e.max_buy) / (2 * atr))
+        zone = max(0.0, 1 - (e.current_price - e.max_buy_level) / (2 * atr))
     else:
         zone = 0.0
     sub = 0.7 * rr + 0.3 * zone

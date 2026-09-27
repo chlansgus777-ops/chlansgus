@@ -7,7 +7,7 @@
   "components": {
    "catalyst": 0.3437,
    "earnings_revision": 0.2419,
-   "entry_rr": 0.706,
+   "entry_rr": 0.7046,
    "fundamental": 0.2191,
    "macro": 0.4359,
    "risk": 0.5548,
@@ -24,8 +24,8 @@
    "ISSUE_EXPORT_CONTROL_eb52d2cd": -2.59
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-2.0.0",
-  "total": 43.13,
+  "scoring_model_version": "scoring-2.0.1",
+  "total": 43.11,
   "vetoes": [
    "INSUFFICIENT_MODEL_COVERAGE"
   ]
@@ -38,7 +38,7 @@
   "components": {
    "catalyst": 0.4086,
    "earnings_revision": 0.2776,
-   "entry_rr": 0.2327,
+   "entry_rr": 0.2326,
    "fundamental": 0.4161,
    "macro": 0.5761,
    "risk": 0.7949,
@@ -55,7 +55,7 @@
    "ISSUE_INFLATION_e80d95bf": 3.97
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-2.0.0",
+  "scoring_model_version": "scoring-2.0.1",
   "total": 51.36,
   "vetoes": [
    "THESIS_INVALIDATED"
@@ -87,7 +87,7 @@
    "ISSUE_EXPORT_CONTROL_eb52d2cd": -30.39
   },
   "raw_action": "WAIT",
-  "scoring_model_version": "scoring-2.0.0",
+  "scoring_model_version": "scoring-2.0.1",
   "total": 73.36,
   "vetoes": []
  },
@@ -99,7 +99,7 @@
   "components": {
    "catalyst": 0.4633,
    "earnings_revision": 0.2915,
-   "entry_rr": 0.477,
+   "entry_rr": 0.481,
    "fundamental": 0.3544,
    "macro": 0.5897,
    "risk": 0.7976,
@@ -117,8 +117,8 @@
    "ISSUE_EXPORT_CONTROL_eb52d2cd": -17.4
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-2.0.0",
-  "total": 51.0,
+  "scoring_model_version": "scoring-2.0.1",
+  "total": 51.05,
   "vetoes": []
  },
  "XOM": {
@@ -146,7 +146,7 @@
    "ISSUE_OIL_b0d427e2": 9.68
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-2.0.0",
+  "scoring_model_version": "scoring-2.0.1",
   "total": 65.06,
   "vetoes": []
  }

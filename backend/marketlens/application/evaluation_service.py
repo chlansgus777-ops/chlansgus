@@ -145,7 +145,8 @@ class EvaluationService:
                 if rec is not None and Action(rec.final_action) not in BULLISH_ACTIONS:
                     committee_skips.append(pos)  # the final (post-committee) action is no longer bullish
                     continue
-                later = repo.recommendation_history(s, pos.ticker, 500, mode=self.svc.mode.value, until=as_of)
+                # the company's later recommendations, whatever ticker they were published under (round 10 identity)
+                later = self.svc.data.company_recommendations(s, pos.ticker, self.svc.mode.value, as_of, to_ny(pos.recommended_at).date())
                 spread_bps = None
                 if rec is not None:
                     q = (rec.inputs or {}).get("quote") or {}
@@ -153,7 +154,6 @@ class EvaluationService:
                         spread_bps = (q["ask"] - q["bid"]) / ((q["ask"] + q["bid"]) / 2) * 1e4
                 key = keys[pos.id]
                 # later recommendations under the same ticker count only if they are about the same company
-                later = [r for r in later if self.svc.data.identity_on(r.ticker, rec_session_day(r.as_of), s) == key]
                 applied = encoded_split_keys((rec.inputs or {}).get("splits")) if rec is not None and isinstance(rec.inputs, dict) else None
                 items.append(AccountItem(str(pos.id), self._signal(pos, spread_bps, to_ny(as_of).date(), key, applied), tuple(exit_events_for(later, pos.recommended_at))))
                 if key not in bars_by:

@@ -7,7 +7,7 @@ import json
 import logging
 import threading
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Mapping
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -201,18 +201,24 @@ class MarketLensService:
                               exp.rates if exp else 0.0, split_adjusted=f))
         return Portfolio(tuple(hs), cash)
 
+    def company_recommendations(self, s: Session, ticker: str, before: datetime | None = None, on: date | None = None, limit: int = 500,
+                                inclusive: bool = True, exclude_id: int | None = None) -> list[RecommendationRow]:
+        """See DataAccess.company_recommendations (the one implementation)."""
+        return self.data.company_recommendations(s, ticker, self.mode.value, before, on or to_ny(before or self.now()).date(), limit, inclusive, exclude_id)
+
+    def latest_company_recommendation(self, s: Session, ticker: str, before: datetime | None = None, inclusive: bool = True,
+                                      exclude_id: int | None = None) -> RecommendationRow | None:
+        rows = self.company_recommendations(s, ticker, before, limit=1, inclusive=inclusive, exclude_id=exclude_id)
+        return rows[0] if rows else None
+
     def _previous_lookup(self, s: Session) -> Any:
         def lookup(ticker: str, as_of: datetime) -> tuple[AnalysisDigest | None, Action | None]:
             # recommendations already stored when this analysis runs (same timestamp included)
-            row = repo.latest_recommendation(s, ticker, before=as_of, mode=self.mode.value, inclusive=True)
+            # the company's latest recommendation — under an earlier ticker after a rename, never another company's
+            # after a reuse (independent review F10; round 10 identity invariant)
+            row = self.latest_company_recommendation(s, ticker, before=as_of)
             if row is None:
                 return None, None
-            # another company used this ticker when that recommendation was made (a reuse archived it since):
-            # its action, stop and baseline are not this company's history (independent review F10)
-            if self.store is not None:
-                then, now_key = to_ny(row.as_of).date(), to_ny(as_of).date()
-                if self.store.resolve(ticker, then, s) != self.store.resolve(ticker, now_key, s):
-                    return None, None
             digest = decode(AnalysisDigest, row.result["digest"])
             return digest, Action(row.deterministic_action)
 
@@ -291,7 +297,7 @@ class MarketLensService:
             total_score=r.scorecard.total, confidence=final_conf, action=final_action, sector=r.security.sector, regime=r.primary_regime,
             scoring_model_version=cfg.scoring_model.version,
         ))
-        prev = repo.latest_recommendation(s, r.ticker, before=r.as_of, mode=r.mode.value, inclusive=True, exclude_id=row.id)
+        prev = self.latest_company_recommendation(s, r.ticker, before=r.as_of, exclude_id=row.id)
         if prev is not None and prev.final_action != final_action:
             log_event(log, Event.RECOMMENDATION_CHANGED, ticker=r.ticker, before=prev.final_action, after=final_action, reasons=[c.text for c in r.changes if c.material][:5])
         log_event(log, Event.DECISION_CREATED, ticker=r.ticker, action=final_action, score=r.scorecard.total)

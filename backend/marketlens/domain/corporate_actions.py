@@ -68,8 +68,13 @@ def split_factor(splits: Sequence[SplitEvent], after: date, through: date) -> fl
     return share_multiplier(splits, ShareBasis(after), through) or 1.0
 
 
+def _key(execution_date: object, split_from: object, split_to: object) -> str:
+    """One text form whatever the numbers' type (the database returns 1.0, an encoded input may hold 1)."""
+    return f"{execution_date}:{float(split_from):g}:{float(split_to):g}"  # type: ignore[arg-type]
+
+
 def split_key(s: SplitEvent) -> str:
-    return f"{s.execution_date.isoformat()}:{s.split_from}:{s.split_to}"
+    return _key(s.execution_date.isoformat(), s.split_from, s.split_to)
 
 
 def encoded_split_keys(encoded: Sequence[object] | None) -> frozenset[str] | None:
@@ -79,7 +84,7 @@ def encoded_split_keys(encoded: Sequence[object] | None) -> frozenset[str] | Non
     out = []
     for e in encoded:
         if isinstance(e, dict) and e.get("execution_date"):
-            out.append(f"{e['execution_date']}:{e.get('split_from')}:{e.get('split_to')}")
+            out.append(_key(e["execution_date"], e.get("split_from") or 0, e.get("split_to") or 0))
     return frozenset(out)
 
 

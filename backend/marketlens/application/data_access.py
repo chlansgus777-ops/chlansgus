@@ -148,6 +148,32 @@ class DataAccess:
                     out[t] = list(v)
         return out
 
+    def company_recommendations(self, s: Any, ticker: str, mode: str, before: datetime | None, on: date, limit: int = 500,
+                                inclusive: bool = True, exclude_id: int | None = None) -> list[Any]:
+        """The recommendations of the COMPANY that uses ``ticker`` on ``on``, newest first — across renames, never
+        across a reuse (round 10 identity invariant). Every "previous", "latest" and "history" lookup goes through
+        here; "which company" is MarketStore.company_id."""
+        from sqlalchemy import desc, select
+
+        from marketlens.domain.market_calendar import to_ny
+        from marketlens.infrastructure.db.models import RecommendationRow as R
+
+        cid = self.store.company_id(ticker, on, s) if self.store is not None else None
+        labels = (self.store.company_labels(cid, s) | {ticker}) if self.store is not None and cid is not None else {ticker}
+        q = select(R).where(R.ticker.in_(sorted(labels)), R.mode == mode)
+        if before is not None:
+            q = q.where(R.as_of <= before if inclusive else R.as_of < before)
+        if exclude_id is not None:
+            q = q.where(R.id != exclude_id)
+        out: list[Any] = []
+        for r in s.scalars(q.order_by(desc(R.as_of), desc(R.id))):
+            if cid is not None and self.store is not None and self.store.company_id(r.ticker, to_ny(r.as_of).date(), s) != cid:
+                continue  # the label belonged to another company then
+            out.append(r)
+            if len(out) >= limit:
+                break
+        return out
+
     def identity_on(self, t: str, d: date, session: Any = None) -> str:
         """Storage key of the company that used ticker ``t`` on day ``d`` (a later reuse archives it)."""
         return self.store.resolve(t, d, session) if self.store is not None else t

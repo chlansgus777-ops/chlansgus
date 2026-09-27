@@ -315,6 +315,26 @@ class MarketStore:
                                                      TickerHistoryRow.effective > on).order_by(TickerHistoryRow.effective).limit(1)).first()
         return ev.archived_as if ev is not None and ev.archived_as else ticker
 
+    def company_id(self, ticker: str, on: date, session: Session | None = None) -> str:
+        """THE answer to "which company": the CIK of the company that used ``ticker`` on ``on`` (a reuse archived the
+        earlier holder; a rename keeps the CIK; a relisting is the same CIK). Without a CIK, the storage key."""
+        if session is not None:
+            return self._company_id(session, ticker, on)
+        with self.sf() as s:
+            return self._company_id(s, ticker, on)
+
+    def _company_id(self, s: Session, ticker: str, on: date) -> str:
+        key = self._resolve(s, ticker, on)
+        row = s.get(SecurityRow, key)
+        return f"cik:{row.cik}" if row is not None and row.cik else f"key:{key}"
+
+    def company_labels(self, company: str, session: Session) -> set[str]:
+        """Every ticker label the company was published under (its own rows, renamed-away rows, archives of it)."""
+        if company.startswith("cik:"):
+            cik = int(company[4:])
+            return {r.ticker.split("~")[0] for r in session.scalars(select(SecurityRow).where(SecurityRow.mode == self.mode, SecurityRow.cik == cik))}
+        return {company[4:].split("~")[0]}
+
     def aliases(self, ticker: str) -> list[tuple[str, date | None, date | None]]:
         """(storage ticker, from, until) covering one company across renames: its own rows, a predecessor's
         rows before the rename and a successor's rows from the rename on."""

@@ -43,14 +43,31 @@ class EntryPlan:
     support_used: float | None
     resistance_used: float | None
     rationale: tuple[str, ...]
+    # the unrounded levels: every comparison uses them, the rounded ones are for the screen. Rounding to cents is not
+    # split-invariant (a 10-for-1 split makes a cent ten times coarser), so a zone test on rounded levels could flip
+    # at the boundary (round 10 split invariants). None on plans stored before these fields existed.
+    max_buy_exact: float | None = None
+    stop_exact: float | None = None
+    add_zone_low_exact: float | None = None
+    add_zone_high_exact: float | None = None
+
+    @property
+    def max_buy_level(self) -> float:
+        return self.max_buy_exact if self.max_buy_exact is not None else self.max_buy
 
     @property
     def in_buy_zone(self) -> bool:
-        return self.current_price <= self.max_buy
+        return self.current_price <= self.max_buy_level
+
+    @property
+    def in_add_zone(self) -> bool:
+        low = self.add_zone_low_exact if self.add_zone_low_exact is not None else self.add_zone_low
+        high = self.add_zone_high_exact if self.add_zone_high_exact is not None else self.add_zone_high
+        return low <= self.current_price <= high
 
     @property
     def stop_breached(self) -> bool:
-        return self.current_price <= self.stop
+        return self.current_price <= (self.stop_exact if self.stop_exact is not None else self.stop)
 
 
 def _rr(price: float, stop: float, target: float) -> float | None:
@@ -136,6 +153,10 @@ def build_entry_plan(
         support_used=support,
         resistance_used=resistance,
         rationale=tuple(notes),
+        max_buy_exact=max_buy,
+        stop_exact=stop,
+        add_zone_low_exact=add_low,
+        add_zone_high_exact=add_high,
     )
 
 

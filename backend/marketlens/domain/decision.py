@@ -114,7 +114,7 @@ def _raw_action(score: float, held: bool, plan: EntryPlan | None, prev: Action |
             return Action.REDUCE, reasons + [f"매도 판단 점수(누락 데이터는 중립 처리) {sell_score} < {th.hold_floor:g} → 비중 축소"]
         if score < th.hold_floor:
             reasons.append(f"점수 {score}는 낮지만 누락 데이터를 중립으로 보면 {sell_score} → 데이터 부족을 매도 근거로 쓰지 않음")
-        if score >= buy_th and plan is not None and plan.add_zone_low <= plan.current_price <= plan.add_zone_high:
+        if score >= buy_th and plan is not None and plan.in_add_zone:
             if (plan.rr_at_current or 0) >= th.min_rr:
                 return Action.ADD, reasons + [f"점수 {score} ≥ {buy_th:g}, 추가매수 구간 진입, 손익비 {plan.rr_at_current} ≥ {th.min_rr:g}"]
             return Action.HOLD, reasons + [f"추가매수 구간이지만 손익비 {plan.rr_at_current} < {th.min_rr:g} → 보유"]
@@ -199,7 +199,8 @@ def decide(card: ScoreCard, plan: EntryPlan | None, ctx: DecisionContext, th: De
     th = th or DecisionThresholds()
     vetoes = evaluate_vetoes(ctx, th)
     raw, reasons = _raw_action(card.total, ctx.held, plan, ctx.previous_action, th, card.sell_side_total)
-    if ctx.prior_stop_breached and raw in BULLISH_ACTIONS | {Action.HOLD}:
+    # a close below the watched stop sells a held position whatever the score said (HOLD, REDUCE, …) and stops any buy
+    if ctx.prior_stop_breached and (raw in BULLISH_ACTIONS | {Action.HOLD} or (ctx.held and raw != Action.SELL)):
         raw = Action.SELL if ctx.held else Action.WAIT
         reasons.append("종가 기준 이탈: 직전 추천의 손절 기준가 아래로 마감 → " + ("매도" if ctx.held else "대기"))
     elif ctx.intraday_stop_breach and raw in BULLISH_ACTIONS | {Action.HOLD}:
@@ -212,7 +213,7 @@ def decide(card: ScoreCard, plan: EntryPlan | None, ctx: DecisionContext, th: De
     # a buy never stands above the maximum buy price (or below the minimum reward/risk): keeping a previous BUY
     # "because nothing material changed" would recommend buying at a price the plan itself rules out (the new
     # evaluator: the price crossed the max buy price inside the ATR buffer and BUY was kept)
-    add_ok = plan is not None and plan.add_zone_low <= plan.current_price <= plan.add_zone_high and (plan.rr_at_current or 0) >= th.min_rr - 1e-9
+    add_ok = plan is not None and plan.in_add_zone and (plan.rr_at_current or 0) >= th.min_rr - 1e-9
     keeps_invalid_buy = (prev in (Action.BUY, Action.BUY_SMALL) and not _plan_ok(plan, th)) or (prev == Action.ADD and not add_ok)
     if keeps_invalid_buy and action != prev:
         notes.append(f"{prev.value if prev else ''} 유지 안 함: 현재가가 최대 매수가를 넘었거나 손익비가 기준 미만")

@@ -418,7 +418,9 @@ def simulate_account(items: Sequence[AccountItem], bars_by_ticker: dict[str, Seq
                 continue
             eq = equity_at(d)
             existing = sum(open_qty(k, d, inclusive=False) * last_close.get(sig.ticker, sims[k].entry.price) for k in held)  # type: ignore[union-attr]
-            if eq > 0 and (existing + cost) / eq > cfg.max_position_weight + 1e-9:
+            # the entry price is rounded to 1/10,000 of a dollar, so a full position can land a hair above the limit it
+            # was sized to: compare at a tolerance of that rounding (1e-6), not 1e-9 (found by the split invariants)
+            if eq > 0 and (existing + cost) / eq > cfg.max_position_weight + 1e-6:
                 skipped.append((key, f"편입 후 종목 비중 {(existing + cost) / eq:.1%} > 한도 {cfg.max_position_weight:.0%}"))
                 continue
             cash -= cost
