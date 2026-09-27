@@ -82,6 +82,7 @@ manual). Results so far:
 | 2026-09-27 | 36281358983 | Commit 1499c75 (evaluation 6 fixes), run at 00:04 UTC: 11 VERIFIED (all SEC categories unchanged: revenue, TTM EPS 7.91 / 8.71 / 17.95, earnings, guidance). Two date-boundary bugs found: FRED refused the vintage 09-27 ("after today's date 2026-09-26" — FRED uses US Central time, the code used the UTC date); the news check asked for "since midnight UTC", a four-minute window |
 | 2026-09-27 | 36281592673 | Commit 4f3a663 (both fixed): **all 13 categories VERIFIED** again at 00:08 UTC — the evening case (New York) that the daytime runs could not show |
 | 2026-09-27 | 36286946675 | Commit 31bd2ca (evaluation 7 J1–J6 and the second evaluator's fixes: per-period concept vintages, split evidence, recast detection, release dates from the SEC report period): **all 13 categories VERIFIED**; the real TTM EPS (NVDA 7.91, AAPL 8.71, MSFT 17.95) and release dates (NVDA 08-26, AAPL 07-30) are unchanged |
+| 2026-09-27 | 36298323921 | Commit 0f88bc4 (evaluation 8 I1–I6: split basis of the previous levels, guidance parts and differences, pending recent sessions, strict delisting, setup keys): **all 13 categories VERIFIED**; the same real values as run 36286946675 (TTM EPS NVDA 7.91, AAPL 8.71, MSFT 17.95; release dates 08-26, 07-30; guidance NVDA 2 items from q2fy27pr.htm) |
 
 Reproducing a run: the SEC categories need a User-Agent with a contact e-mail. The runs above passed it as the
 workflow input `sec_user_agent`; the repository has no `SEC_USER_AGENT` secret yet, so a run with the default
