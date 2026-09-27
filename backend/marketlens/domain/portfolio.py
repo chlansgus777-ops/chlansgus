@@ -306,3 +306,44 @@ def replace_weight(r: HoldingValuation, nav: float) -> HoldingValuation:
     from dataclasses import replace as _replace
 
     return _replace(r, weight=round(r.market_value / nav, 4) if r.market_value is not None and nav > 0 else None)
+
+
+@dataclass(frozen=True, slots=True)
+class PositionPlan:
+    size_class: str  # FULL | HALF | SMALL
+    weight: float  # of the portfolio value
+    amount: float  # USD to invest (whole shares)
+    shares: int
+    price: float
+    risk_amount: float | None  # loss at the stop, USD
+    risk_pct: float | None  # of the portfolio value
+    notes: tuple[str, ...]
+
+
+def position_plan(action: str, size_cap: str | None, nav: float | None, price: float | None, stop: float | None,
+                  current_value: float = 0.0, limits: PortfolioLimits | None = None) -> PositionPlan | None:
+    """How much to buy, in dollars and shares, instead of a word like "small" (the new evaluator): the configured
+    position size of the action (BUY = full, BUY SMALL / ADD = half), lowered by the portfolio review's cap and by
+    the room left under the single-name limit; whole shares only. None when there is nothing to buy or the
+    portfolio value / price is unknown (the screen then asks for the portfolio instead of guessing)."""
+    limits = limits or PortfolioLimits()
+    if action not in ("BUY", "BUY SMALL", "ADD") or not nav or nav <= 0 or not price or price <= 0:
+        return None
+    size = "FULL" if action == "BUY" else "HALF"
+    order = ("FULL", "HALF", "SMALL")
+    if size_cap in order and order.index(size_cap) > order.index(size):
+        size = size_cap
+    if size_cap == "WATCH":
+        return None
+    weight = {"FULL": limits.full_position, "HALF": limits.half_position, "SMALL": limits.small_position}[size]
+    notes: list[str] = []
+    room = limits.max_single_name * nav - max(0.0, current_value)
+    target = min(weight * nav, room)
+    if target < weight * nav:
+        notes.append(f"한 종목 한도 {limits.max_single_name:.0%}까지 남은 금액으로 줄임")
+    shares = int(target // price)
+    if shares <= 0:
+        return PositionPlan(size, weight, 0.0, 0, price, None, None, tuple(notes + [f"권장 금액 ${target:,.0f}이 1주 가격보다 작음"]))
+    amount = round(shares * price, 2)
+    risk = round(shares * (price - stop), 2) if stop is not None and stop < price else None
+    return PositionPlan(size, weight, amount, shares, price, risk, round(risk / nav, 4) if risk is not None else None, tuple(notes))

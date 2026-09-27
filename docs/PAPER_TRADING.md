@@ -16,7 +16,10 @@ ticker, entry time/day, entry price, quantity (fixed notional, default $10,000),
 action, market regime, sector, stop, target 1, target 2, thesis, model version.
 
 ## Exits
-Stop (gap-aware: fills at min(open, stop)), Target 1 (sells 50%, moves stop to breakeven), Target 2,
+Stop — by default the recommendation's own rule (`PaperConfig.stop_rule = "close"`): a session that CLOSES at or
+below the stop exits at the next session's open, exactly what the stock screen tells a holder to do (an intraday
+dip below the stop is only a warning there). `stop_rule = "intraday"` simulates a resting stop order instead
+(fills at min(open, stop), checked before targets within a bar). Target 1 (sells 50%, moves stop to breakeven), Target 2,
 Time exit (60 trading days), Thesis invalidation and Recommendation downgrade (exit at the next open
 after a later recommendation reports the invalidation/downgrade). Sells pay slippage + half-spread.
 Stops are checked before targets within a bar (conservative).

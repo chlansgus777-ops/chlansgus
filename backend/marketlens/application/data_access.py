@@ -200,7 +200,7 @@ class DataAccess:
         if self.store is not None:
             from marketlens.application.estimate_book import build
 
-            rep = build(t, self.store.estimate_history(t, as_of), as_of)
+            rep = build(t, self.store.estimate_history(t, as_of), as_of, self.store.splits(t))
             if rep.snapshot is None:
                 return Fetched(None, None, "; ".join(rep.notes) or "추정치 없음")
             conflicts = [f"analyst:{rep.cross.status} {rep.cross.detail}"] if rep.cross.status in ("DATA_CONFLICT", "SEVERE_DATA_CONFLICT") else []

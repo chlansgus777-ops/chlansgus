@@ -40,7 +40,7 @@ from marketlens.domain.indicators import TechnicalSnapshot, aligned_closes, comp
 from marketlens.domain.issues import CompanyIssueImpact, Issue, aggregate_issue_score, compute_issue_impacts
 from marketlens.domain.macro import US10Y, MacroExposure, MacroImpact, MacroSnapshot, RegimeReading, detect_regimes, factor_moves, macro_impact, primary_regime
 from marketlens.domain.market import Bar, Quote, Security, assess_price_quality
-from marketlens.domain.market_calendar import NY, last_completed_session, session_close_utc, to_ny, trading_days_between
+from marketlens.domain.market_calendar import NY, last_completed_session, to_ny, trading_days_between
 from marketlens.domain.options import OptionsMetrics, OptionsSnapshot, OwnershipSnapshot, compute_options_metrics
 from marketlens.domain.portfolio import PortfolioReview
 from marketlens.domain.priced_in import PricedInEstimate, PricedInInputs, estimate_priced_in
@@ -215,12 +215,35 @@ def filing_visibility_day(ts: datetime) -> date:
     return local.date() if local.time() >= EDGAR_CUTOFF else local.date() - timedelta(days=1)
 
 
+def watched_stop(prev: AnalysisDigest | None, held: bool) -> float | None:
+    """The stop the close-based check watches: the previous buy's stop, or — while the position is held after the
+    recommendation moved to HOLD / REDUCE — the stop carried forward from that buy (the new evaluator: after
+    BUY → HOLD the stop was no longer watched at all)."""
+    if prev is None:
+        return None
+    if prev.action in {a.value for a in BULLISH_ACTIONS}:
+        return prev.stop
+    if held and prev.action in (Action.HOLD.value, Action.REDUCE.value):
+        return prev.guard_stop
+    return None
+
+
+def carried_guard_stop(action: Action, plan_stop: float | None, watch: float | None, held: bool) -> float | None:
+    """The stop stored with this recommendation for the next one to watch: a buy's own stop, else the carried one
+    while the position is held."""
+    if action in BULLISH_ACTIONS:
+        return plan_stop
+    return watch if held else None
+
+
 def earnings_visible(r: EarningsReport, ts: datetime) -> bool:
-    today = to_ny(ts).date()
-    if r.report_date < today:
-        return True
-    # without an intraday release time, a report dated today is only trusted after the regular close
-    return r.report_date == today and ts >= session_close_utc(today)
+    """Were these results public at ``ts``? With the release time (SEC 8-K acceptance) exactly from then on.
+    Without it, a report dated today is NOT treated as public on that day: releases come before the open, during
+    the session or after the close (often 16:05–16:30 ET or later), so "after the close" is not proof — found by the
+    new evaluator: an after-hours release was treated as known at 16:00 ET."""
+    if r.released_at is not None:
+        return ts >= r.released_at
+    return r.report_date < to_ny(ts).date()
 
 
 def _priced_in_for(issue: Issue, direction: int, bars: tuple[Bar, ...], analyst: AnalystSnapshot | None, opt: OptionsMetrics | None, as_of: datetime) -> PricedInEstimate:
@@ -595,13 +618,16 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         atr=tech.atr14 if tech else None,
     )
     changes = diff(prev, digest, cfg.decision)
-    prev_bullish = prev is not None and prev.action in {a.value for a in BULLISH_ACTIONS}
+    # the stop being watched: the previous buy's stop, or — while the position is held after the recommendation
+    # moved to HOLD / REDUCE — the stop carried forward from that buy (the new evaluator: after BUY → HOLD the stop
+    # was no longer watched at all)
+    watch_stop = watched_stop(prev, inp.held)
     # stop semantics: the decision rule is CLOSE-based (a completed session closing at/below the previous
     # stop); an intraday quote below it is only a warning (no new buy, holders wait for the close)
     last_close_bar = bars[-1] if bars else None
-    prior_stop_breached = bool(prev_bullish and prev is not None and prev.stop is not None and last_close_bar is not None
-                               and last_close_bar.day >= to_ny(prev.as_of).date() and last_close_bar.close <= prev.stop)
-    intraday_stop_breach = bool(prev_bullish and prev is not None and prev.stop is not None and price is not None and price <= prev.stop and not prior_stop_breached)
+    prior_stop_breached = bool(watch_stop is not None and prev is not None and last_close_bar is not None
+                               and last_close_bar.day >= to_ny(prev.as_of).date() and last_close_bar.close <= watch_stop)
+    intraday_stop_breach = bool(watch_stop is not None and price is not None and price <= watch_stop and not prior_stop_breached)
     ctx = DecisionContext(
         held=inp.held,
         previous_action=inp.previous_action,
@@ -626,7 +652,8 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
     decision = decide(card, entry, ctx, cfg.decision)
     unchanged = prev is not None and prev.action == decision.action.value
     baseline = (prev.baseline_score if prev.baseline_score is not None else prev.score) if (unchanged and prev is not None) else card.total
-    digest = replace(digest, action=decision.action.value, baseline_score=baseline)
+    digest = replace(digest, action=decision.action.value, baseline_score=baseline,
+                     guard_stop=carried_guard_stop(decision.action, entry.stop if entry else None, watch_stop, inp.held))
     if prev is not None and prev.action and prev.action != decision.action.value:
         changes = changes + [ChangeItem("action", f"추천 {prev.action} → {decision.action.value}", False)]
 

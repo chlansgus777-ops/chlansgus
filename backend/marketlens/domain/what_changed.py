@@ -39,6 +39,9 @@ class AnalysisDigest:
     agent_stances: Mapping[str, str] = field(default_factory=dict)
     baseline_score: float | None = None  # score when the recommendation last changed
     stop: float | None = None  # stop level of this analysis' plan
+    # the stop that protects a position opened on a buy recommendation: carried forward while the position is held
+    # and later recommendations say HOLD / ADD / REDUCE, so the close-based stop check does not end with the BUY
+    guard_stop: float | None = None
     max_buy: float | None = None
     atr: float | None = None
 

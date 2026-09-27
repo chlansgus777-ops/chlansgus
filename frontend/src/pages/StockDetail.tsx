@@ -9,7 +9,7 @@ import { day, krwAux, num, pct, price, stamp, usdWithKo } from "../format";
 import { GLOSSARY } from "../glossary";
 import { COMPONENT_KO, DATA_TYPE_KO, REGIME_KO, RISK_KO, SESSION_KO, SIZE_KO, STATUS_INFO, VETO_KO, ko } from "../i18n";
 import { More } from "../mode";
-import type { Analysis, CommitteeResult, Evidence, StockDetail as SD } from "../types";
+import type { Analysis, CommitteeResult, Evidence, PositionPlan, StockDetail as SD } from "../types";
 
 const RESULT_KO: Record<string, string> = {
   BEAT_AND_RAISE: "예상 상회 + 가이던스 상향", BEAT: "예상 상회", BEAT_WEAK_GUIDE: "예상 상회했으나 가이던스 부진", GUIDE_UP: "예상 부합 + 가이던스 상향",
@@ -43,6 +43,22 @@ export function missingData(a: Analysis): string[] {
 
 /** One instance per ticker: every piece of local state (busy flags, notes, pending AI runs) starts fresh
  * when the ticker changes, so nothing from another stock can be shown on this page. */
+/** Dollars and whole shares instead of "소량" — from the entered portfolio value and the configured position sizes. */
+function PositionPlanView({ p }: { p?: PositionPlan }) {
+  if (!p) return null;
+  if (!p.available) return <div className="caption" style={{ marginTop: 6 }}>매수 금액·수량: {p.reason}</div>;
+  const sizeKo: Record<string, string> = { FULL: "기본 비중", HALF: "절반 비중", SMALL: "소량(4분의 1) 비중" };
+  return (
+    <div className="kv" style={{ marginTop: 8 }} aria-label="매수 금액과 수량">
+      <span className="k">권장 매수</span><span><b>{p.shares}주</b> · 약 {usd(p.amount)} <span className="caption">(포트폴리오 {usd(p.nav)}의 {((p.weight ?? 0) * 100).toFixed(2)}%, {sizeKo[p.size_class ?? ""] ?? p.size_class})</span></span>
+      <span className="k">손절 시 예상 손실</span><span className="neg">{p.risk_amount != null ? `${usd(p.risk_amount)} (포트폴리오의 ${((p.risk_pct ?? 0) * 100).toFixed(2)}%)` : "계산 불가"}</span>
+      {(p.notes ?? []).map((n, i) => <span key={i} className="caption" style={{ gridColumn: "1 / -1" }}>{n}</span>)}
+    </div>
+  );
+}
+
+const usd = (v?: number | null) => (v == null ? "—" : `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`);
+
 export default function StockDetailPage() {
   const { ticker = "" } = useParams();
   return <StockDetail key={ticker.toUpperCase()} ticker={ticker.toUpperCase()} />;
@@ -195,7 +211,8 @@ function StockDetail({ ticker }: { ticker: string }) {
                 <span className="k"><Term k="target" /></span><span className="pos">{price(e.target1)} ({pct(e.upside_t1_pct)}) / {price(e.target2)}</span>
                 <span className="k"><Term k="rr" /></span><span>{num(e.rr_at_current)} <span className="caption">(2 이상이 기준)</span></span>
               </div>
-              <div className="caption" style={{ marginTop: 6 }}><Term k="close_exit">종가 기준 이탈</Term>: 종가가 손절 기준가 아래로 마감하면 매도(보유 중)·매수 중단으로 판단합니다. 장중에만 내려간 경우는 신규 매수만 멈춥니다. <Term k="paper_stop">모의투자</Term>는 장중 손절 주문을 가정합니다.</div>
+              <div className="caption" style={{ marginTop: 6 }}><Term k="close_exit">종가 기준 이탈</Term>: 종가가 손절 기준가 아래로 마감하면 매도(보유 중)·매수 중단으로 판단합니다. 장중에만 내려간 경우는 신규 매수만 멈춥니다. <Term k="paper_stop">모의투자</Term>도 같은 규칙으로 계산합니다.</div>
+              <PositionPlanView p={d.data.position_plan} />
             </>
           ) : <Empty hint="현재가·가격 이력이 부족하거나, 손절가 < 현재가 < 목표가 순서를 만족하는 계획을 만들 수 없을 때 표시하지 않습니다.">지금은 가격 계획을 제시하지 않습니다.</Empty>}
         </Card>

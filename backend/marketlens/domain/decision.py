@@ -209,7 +209,15 @@ def decide(card: ScoreCard, plan: EntryPlan | None, ctx: DecisionContext, th: De
 
     suppressed = False
     prev = ctx.previous_action
-    if not vetoes and not ctx.prior_stop_breached and prev is not None and action != prev and not ctx.material_changes and prev != Action.DATA_INSUFFICIENT:
+    # a buy never stands above the maximum buy price (or below the minimum reward/risk): keeping a previous BUY
+    # "because nothing material changed" would recommend buying at a price the plan itself rules out (the new
+    # evaluator: the price crossed the max buy price inside the ATR buffer and BUY was kept)
+    add_ok = plan is not None and plan.add_zone_low <= plan.current_price <= plan.add_zone_high and (plan.rr_at_current or 0) >= th.min_rr - 1e-9
+    keeps_invalid_buy = (prev in (Action.BUY, Action.BUY_SMALL) and not _plan_ok(plan, th)) or (prev == Action.ADD and not add_ok)
+    if keeps_invalid_buy and action != prev:
+        notes.append(f"{prev.value if prev else ''} 유지 안 함: 현재가가 최대 매수가를 넘었거나 손익비가 기준 미만")
+    if not vetoes and not ctx.prior_stop_breached and not keeps_invalid_buy and prev is not None and action != prev \
+            and not ctx.material_changes and prev != Action.DATA_INSUFFICIENT:
         # no material change → keep the previous recommendation (avoid flip-flopping)
         notes.append(f"{prev.value} → {action.value} 변경 보류: 중요한 변화 없음")
         action = prev

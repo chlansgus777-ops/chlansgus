@@ -89,9 +89,11 @@ def test_premarket_recommendation_enters_same_day_open():
 
 
 def test_gap_below_stop_fills_at_open():
+    # CHANGED (round 7, disclosed): the intraday stop is now an explicit mode; the default follows the screen's
+    # close-based rule (tests below)
     ts = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
     b = bars(date(2026, 9, 22), [(100, 101, 99, 100), (90, 92, 88, 91)])
-    r = simulate(sig(ts), b, PaperConfig(slippage_bps=0, default_half_spread_bps=0))
+    r = simulate(sig(ts), b, PaperConfig(slippage_bps=0, default_half_spread_bps=0, stop_rule="intraday"))
     assert r.exit_reasons == (ExitReason.STOP,) and r.exits[0].price == 90
     assert r.return_pct == pytest.approx(-0.1)
 
@@ -143,8 +145,29 @@ def test_as_of_hides_future_bars():
 def test_metrics():
     ts = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
     win = simulate(sig(ts), bars(date(2026, 9, 22), [(100, 101, 99, 100), (105, 111, 104, 110), (112, 121, 111, 120)]), PaperConfig(slippage_bps=0, default_half_spread_bps=0))
-    loss = simulate(sig(ts), bars(date(2026, 9, 22), [(100, 101, 99, 100), (90, 92, 88, 91)]), PaperConfig(slippage_bps=0, default_half_spread_bps=0))
+    loss = simulate(sig(ts), bars(date(2026, 9, 22), [(100, 101, 99, 100), (90, 92, 88, 91)]), PaperConfig(slippage_bps=0, default_half_spread_bps=0, stop_rule="intraday"))
     m = compute_metrics([win, loss], [0.01, 0.01])
     assert m.win_rate == 0.5 and m.profit_factor == pytest.approx(1.5) and m.expectancy == pytest.approx(0.025)
     assert m.excess_vs_benchmark == pytest.approx(0.015)
     assert max_drawdown([1, 1.2, 0.9, 1.1]) == pytest.approx(-0.25)
+
+
+def test_default_stop_follows_the_screen_close_rule():
+    """The screen says: sell when a session CLOSES at/below the stop (an intraday dip is only a warning). Paper
+    trading now does the same by default — exit at the next session's open (the new evaluator: the two rules
+    differed)."""
+    ts = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    # day 2 dips to 93 intraday but closes 97 (above the stop 95): no exit; day 3 closes 94: exit at day 4's open
+    b = bars(date(2026, 9, 22), [(100, 101, 99, 100), (99, 100, 93, 97), (96, 97, 93, 94), (92, 93, 91, 92)])
+    r = simulate(sig(ts), b, PaperConfig(slippage_bps=0, default_half_spread_bps=0))
+    assert r.exit_reasons == (ExitReason.STOP,) and r.exits[0].day == b[3].day and r.exits[0].price == 92
+    # the intraday mode would have stopped out on day 2 at 95
+    r2 = simulate(sig(ts), b, PaperConfig(slippage_bps=0, default_half_spread_bps=0, stop_rule="intraday"))
+    assert r2.exits[0].day == b[1].day and r2.exits[0].price == 95
+
+
+def test_close_rule_waits_for_the_next_open_before_selling():
+    ts = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    b = bars(date(2026, 9, 22), [(100, 101, 99, 100), (90, 92, 88, 91)])
+    r = simulate(sig(ts), b, PaperConfig(slippage_bps=0, default_half_spread_bps=0))
+    assert r.open  # closed below the stop on the last known session: the exit is at the next open, not yet known

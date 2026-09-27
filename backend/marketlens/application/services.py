@@ -8,7 +8,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Mapping
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -71,6 +71,37 @@ class ScanSummary:
     candidates: int
     committee_run: int
     paper_opened: int
+
+
+def scan_coverage(result: ScanResult, llm: Mapping[str, Any]) -> dict[str, Any]:
+    """How much of the market this scan actually judged, and why the rest was left out: the universe, the names
+    excluded by reason, the names analysed, how many of those lacked data for a decision, and the AI cost."""
+    from collections import Counter
+
+    stages = [{"stage": st.stage, "in": st.input_count, "out": st.output_count, "note": st.note} for st in result.stages]
+    universe = result.stages[0].input_count if result.stages else len(result.excluded) + len(result.candidates)
+    analysed = len(result.candidates)
+    insufficient = sum(1 for r in result.candidates if r.decision.action == Action.DATA_INSUFFICIENT)
+    missing_fields: Counter[str] = Counter()
+    for r in result.candidates:
+        for name, q in r.data_quality.fields:
+            if q.value == "MISSING":
+                missing_fields[name] += 1
+    def reason_group(txt: str) -> str:  # "주가 4.03 < 5.0" and "가격 이력이 오래됨(마지막 …)" are one reason each
+        if txt.startswith("주가 "):
+            return "주가 기준 미달"
+        return txt.split("(", 1)[0].strip()
+
+    reasons = Counter(reason_group(v) for v in result.excluded.values())
+    deep = result.stages[-1].input_count if result.stages else analysed
+    return {
+        "universe": universe, "excluded": len(result.excluded), "deep_analysed": deep, "analysed": analysed,
+        "data_insufficient": insufficient, "data_insufficient_rate": round(insufficient / analysed, 4) if analysed else None,
+        "missing_by_field": {k: {"count": v, "rate": round(v / analysed, 4)} for k, v in missing_fields.most_common()} if analysed else {},
+        "excluded_by_reason": dict(reasons.most_common(8)), "stages": stages,
+        "llm": {"calls": llm.get("calls", 0), "estimated_cost_usd": llm.get("estimated_cost_usd", 0.0), "cost_complete": llm.get("cost_complete", True),
+                "input_tokens": llm.get("input_tokens", 0), "output_tokens": llm.get("output_tokens", 0)},
+    }
 
 
 class MixedEnvironmentError(RuntimeError):
@@ -315,6 +346,9 @@ class MarketLensService:
             )
             s.add(scan)
             s.flush()
+            total = len(result.candidates)
+            self._scan_state(s, {"scan_id": scan.id, "status": "RUNNING", "started_at": as_of.isoformat(), "saved": 0, "total": total})
+            s.commit()  # the scan row exists even if the process stops mid-way
             if self.store is None:  # the LIVE store is maintained by the sync job
                 # full listing history incl. delisted names (the scan itself only sees the as-of universe)
                 repo.upsert_securities(s, self.data.securities(None).value or ctx.securities.values(), self.mode.value)
@@ -337,9 +371,30 @@ class MarketLensService:
                 row = self._persist(s, r, result.inputs[r.ticker], cfg, scan.id, rank, committee)
                 if Action(row.final_action) in BULLISH_ACTIONS and self.settings.enable_paper_trading:
                     paper += 1
+                # saved one by one: an interrupted scan keeps what it finished (and the AI committee results
+                # already paid for are reused by the next scan) instead of losing the whole run
+                self._scan_state(s, {"scan_id": scan.id, "status": "RUNNING", "started_at": as_of.isoformat(), "saved": rank, "total": total})
+                s.commit()
             repo.snapshot_health(s, [h.as_dict() for h in self.health.all()])
+            coverage = scan_coverage(result, repo.llm_usage(s, since=scan.created_at))
+            repo.set_setting(s, "last_scan_coverage", json.dumps(coverage | {"scan_id": scan.id, "as_of": as_of.isoformat()}))
+            self._scan_state(s, {"scan_id": scan.id, "status": "COMPLETE", "started_at": as_of.isoformat(), "saved": total, "total": total})
             s.commit()
             return ScanSummary(scan.id, as_of, len(result.candidates), committee_run, paper)
+
+    @staticmethod
+    def _scan_state(s: Session, state: dict[str, Any]) -> None:
+        repo.set_setting(s, "scan_state", json.dumps(state))
+
+    def scan_status(self) -> dict[str, Any]:
+        """The last scan's progress and coverage. A scan still "RUNNING" while no scan holds the lock was
+        interrupted (the app closed or crashed): its finished candidates are kept."""
+        with self.sf() as s:
+            state = json.loads(repo.get_setting(s, "scan_state", "") or "null") or {}
+            cov = json.loads(repo.get_setting(s, "last_scan_coverage", "") or "null")
+        if state.get("status") == "RUNNING" and not self._lock.locked():
+            state["status"] = "INTERRUPTED"
+        return {"state": state or None, "coverage": cov}
 
     def analyze(self, ticker: str, run_committee: bool = False, persist: bool = True) -> tuple[AnalysisResult, CommitteeResult | None, int | None]:
         ticker = ticker.upper()

@@ -78,14 +78,87 @@ def code_version() -> str:
         return "unknown"
 
 
+def env_file_path() -> Path:
+    return Path(os.environ.get("MARKETLENS_ENV_FILE", (default_data_dir() / ".env") if FROZEN else REPO_ROOT / ".env"))
+
+
 def _load_dotenv() -> None:
     try:
         from dotenv import load_dotenv
     except ImportError:  # pragma: no cover - optional
         return
-    env_path = Path(os.environ.get("MARKETLENS_ENV_FILE", (default_data_dir() / ".env") if FROZEN else REPO_ROOT / ".env"))
+    env_path = env_file_path()
     if env_path.exists():
         load_dotenv(env_path, override=False)
+
+
+# what the first-run setup screen may write (nothing else: no path, URL or code setting is reachable from the UI)
+SETUP_KEYS = SECRET_ENV_KEYS + ("SEC_USER_AGENT", "MARKETLENS_MODE", "LLM_PROVIDER")
+_SETUP_VALUE = {"MARKETLENS_MODE": ("MOCK", "LIVE"), "LLM_PROVIDER": ("none", "anthropic", "openai", "openai_compatible")}
+
+
+def validate_setup(values: dict[str, str]) -> dict[str, str]:
+    """Clean and check first-run settings. Raises ValueError with a message the user can act on."""
+    import re as _re
+
+    out: dict[str, str] = {}
+    for k, v in values.items():
+        if k not in SETUP_KEYS:
+            raise ValueError(f"{k}: 설정 화면에서 바꿀 수 없는 항목입니다")
+        v = (v or "").strip()
+        if not v:
+            continue  # empty = leave unchanged
+        if any(c in v for c in "\r\n\x00") or len(v) > 300:
+            raise ValueError(f"{k}: 줄바꿈이 없는 300자 이하 값이어야 합니다")
+        if k in _SETUP_VALUE:
+            if v not in _SETUP_VALUE[k]:
+                raise ValueError(f"{k}: {', '.join(_SETUP_VALUE[k])} 중 하나여야 합니다")
+        elif k == "SEC_USER_AGENT":
+            if not _re.fullmatch(r"[^@\s]+(?: [^@\s]+)* [^@\s]+@[^@\s]+\.[^@\s]+", v):
+                raise ValueError("SEC_USER_AGENT: '이름 이메일' 형식이어야 합니다 (예: Hong Gildong hong@example.com). SEC가 요구합니다")
+        elif _re.search(r"\s", v):
+            raise ValueError(f"{k}: API 키에는 공백이 들어갈 수 없습니다")
+        out[k] = v
+    return out
+
+
+def _keychain_set(name: str, value: str) -> bool:
+    """Store a secret in the OS keychain (Windows Credential Manager via ``keyring``); False when no keychain is
+    available, so the caller falls back to the private .env file."""
+    try:
+        import keyring  # type: ignore[import-not-found]
+
+        keyring.set_password("marketlens", name, value)
+        return True
+    except Exception:  # noqa: BLE001 - keyring missing or no usable backend
+        return False
+
+
+def save_setup(values: dict[str, str], env_path: Path | None = None) -> dict[str, str]:
+    """Store first-run settings without editing files by hand. Secrets go to the OS keychain when ``keyring`` is
+    installed (Windows Credential Manager), else to the private ``.env`` of this installation; other settings go to
+    that ``.env``. Returns {name: where} — never the values."""
+    clean = validate_setup(values)
+    where: dict[str, str] = {}
+    to_file: dict[str, str] = {}
+    for k, v in clean.items():
+        if k in SECRET_ENV_KEYS and _keychain_set(k, v):
+            where[k] = "keychain"
+            continue
+        to_file[k] = v
+        where[k] = ".env"
+    if to_file:
+        path = env_path or env_file_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        kept = [ln for ln in lines if ln.split("=", 1)[0].strip() not in to_file]
+        kept += [f'{k}="{v}"' for k, v in to_file.items()]
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        if os.name != "nt":
+            os.chmod(tmp, 0o600)
+        tmp.replace(path)
+    return where
 
 
 def _secret(name: str) -> str | None:

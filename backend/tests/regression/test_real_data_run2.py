@@ -52,8 +52,11 @@ def test_revenue_concept_is_chosen_per_period_not_once_for_all_periods():
     by_end = {q.period_end: q for q in qs}
     assert by_end[date(2025, 9, 30)].revenue == 12e9
     assert by_end[date(2025, 6, 30)].revenue == 11e9
-    # a period both concepts report is taken from the preferred one only (never mixed, no false "restatement")
-    assert by_end[date(2019, 3, 31)].revenue == 7.0e9 and "revenue" not in by_end[date(2019, 3, 31)].revisions
+    # CHANGED in round 7 (evaluation 7, J3), disclosed: the period keeps its first-reported value (7e9, the view
+    # before 2020-04-30 is unchanged), and the later comparative filed only under the other concept is a later
+    # vintage — visible from 2020-04-30 — instead of being dropped (dropping it made year-over-year compare two
+    # definitions after a concept switch).
+    assert by_end[date(2019, 3, 31)].revenue == 7.0e9 and by_end[date(2019, 3, 31)].revisions["revenue"] == ((date(2020, 4, 30), 99e9),)
 
 
 def _eps_facts(q4_shares: bool) -> dict[str, Any]:
