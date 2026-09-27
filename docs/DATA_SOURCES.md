@@ -84,6 +84,8 @@ manual). Results so far:
 | 2026-09-27 | 36286946675 | Commit 31bd2ca (evaluation 7 J1–J6 and the second evaluator's fixes: per-period concept vintages, split evidence, recast detection, release dates from the SEC report period): **all 13 categories VERIFIED**; the real TTM EPS (NVDA 7.91, AAPL 8.71, MSFT 17.95) and release dates (NVDA 08-26, AAPL 07-30) are unchanged |
 | 2026-09-27 | 36298323921 | Commit 0f88bc4 (evaluation 8 I1–I6: split basis of the previous levels, guidance parts and differences, pending recent sessions, strict delisting, setup keys): **all 13 categories VERIFIED**; the same real values as run 36286946675 (TTM EPS NVDA 7.91, AAPL 8.71, MSFT 17.95; release dates 08-26, 07-30; guidance NVDA 2 items from q2fy27pr.htm) |
 | 2026-09-27 | 36308453708 | Commit 7292d51 (independent review of 2240992, F01–F14: plan validity at its own price, HOLD stop, reuse bar cut, history gaps, sector room, guidance quarter, identity of the previous recommendation, rate direction, cross-site requests): **all 13 categories VERIFIED**; same real values as run 36298323921 |
+| 2026-09-27 | 36310862631 | Commit 19c7e79 (evaluation 9 H1–H5): **all 13 categories VERIFIED** |
+| 2026-09-27 | 36316695650 | Commit e8978ff (round 10: one share-basis conversion, invariant suites, guidance corpus, trade records, security identity): **all 13 categories VERIFIED**; the same real values as run 36298323921 (TTM EPS NVDA 7.91, AAPL 8.71, MSFT 17.95; release dates 08-26, 07-30; guidance NVDA 2 items from q2fy27pr.htm) |
 
 Reproducing a run: the SEC categories need a User-Agent with a contact e-mail. The runs above passed it as the
 workflow input `sec_user_agent`; the repository has no `SEC_USER_AGENT` secret yet, so a run with the default
