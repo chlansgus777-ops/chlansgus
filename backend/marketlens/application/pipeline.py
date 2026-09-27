@@ -34,7 +34,7 @@ from marketlens.domain.facts import DataQualityReport, Fact, build_quality_repor
 from marketlens.domain.freshness import FreshnessCheck, check_age, missing as fresh_missing, rules_from_config
 from marketlens.domain.annual import AnnualFinancials, annual_features
 from marketlens.domain.banks import bank_features
-from marketlens.domain.corporate_actions import SplitEvent, normalize_quarters, split_factor
+from marketlens.domain.corporate_actions import SplitEvent, factor_since, normalize_quarters, split_key
 from marketlens.domain.fundamentals import FundamentalMetrics, QuarterlyFinancials, as_of, compute_metrics
 from marketlens.domain.indicators import TechnicalSnapshot, aligned_closes, compute_technicals
 from marketlens.domain.issues import CompanyIssueImpact, Issue, aggregate_issue_score, compute_issue_impacts
@@ -115,7 +115,7 @@ class AnalysisInputs:
 
 
 _ADDED_LATER = ("splits", "annuals")
-_ADDED_LATER_NESTED = {"analyst": ("eps_revision_60d", "forward_eps_basis", "revision_status", "revision_basis", "estimate_range_pct", "cross_check")}
+_ADDED_LATER_NESTED = {"previous": ("splits_applied",), "analyst": ("eps_revision_60d", "forward_eps_basis", "revision_status", "revision_basis", "estimate_range_pct", "cross_check")}
 
 
 def _canonical(x: object) -> object:
@@ -236,7 +236,7 @@ def on_current_share_basis(prev: AnalysisDigest | None, splits: Sequence[SplitEv
     so every split of a held name read as a close below the stop → SELL."""
     if prev is None or not splits:
         return prev
-    f = split_factor(splits, to_ny(prev.as_of).date(), to_ny(as_of).date())
+    f = factor_since(splits, prev.splits_applied, to_ny(prev.as_of).date(), to_ny(as_of).date())
     if f == 1.0:
         return prev
 
@@ -634,6 +634,7 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         stop=entry.stop if entry else None,
         max_buy=entry.max_buy if entry else None,
         atr=tech.atr14 if tech else None,
+        splits_applied=tuple(split_key(x) for x in inp.splits if x.execution_date <= to_ny(inp.as_of).date()),
     )
     changes = diff(prev, digest, cfg.decision)
     # the stop being watched: the previous buy's stop, or — while the position is held after the recommendation

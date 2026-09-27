@@ -39,6 +39,36 @@ def split_factor(splits: Sequence[SplitEvent], after: date, through: date) -> fl
     return f
 
 
+def split_key(s: SplitEvent) -> str:
+    return f"{s.execution_date.isoformat()}:{s.split_from}:{s.split_to}"
+
+
+def encoded_split_keys(encoded: Sequence[object] | None) -> tuple[str, ...] | None:
+    """Keys of splits stored in an encoded analysis input (``inputs["splits"]``); None when the record predates it."""
+    if encoded is None:
+        return None
+    out = []
+    for e in encoded:
+        if isinstance(e, dict) and e.get("execution_date"):
+            out.append(f"{e['execution_date']}:{e.get('split_from')}:{e.get('split_to')}")
+    return tuple(out)
+
+
+def factor_since(splits: Sequence[SplitEvent], applied: Sequence[str] | None, after: date, through: date) -> float:
+    """Share multiplier from the basis of an earlier analysis to today's bars. The basis of an analysis is the splits
+    its bars already reflected (``applied``), not its date: an analysis on a split's execution day before that day's
+    sync still had pre-split bars (9th evaluation H1). Without that record (older snapshots) the date rule
+    (``after``, ``through``] is used."""
+    if applied is None:
+        return split_factor(splits, after, through)
+    known = set(applied)
+    f = 1.0
+    for s in splits:
+        if s.execution_date <= through and split_key(s) not in known and s.split_from > 0 and s.split_to > 0:
+            f *= s.ratio
+    return f
+
+
 PER_SHARE_DIVIDE = ("eps_diluted",)  # per-share amounts: divide by the share multiplier
 SHARE_COUNTS = ("shares_diluted", "shares_outstanding")  # share counts: multiply
 

@@ -21,7 +21,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from marketlens.application.codec import encode
-from marketlens.domain.corporate_actions import split_factor
+from marketlens.domain.corporate_actions import encoded_split_keys, factor_since
 from marketlens.domain.calibration import compare_shadow, propose_weights, segment_report
 from marketlens.domain.enums import BULLISH_ACTIONS, Action, ExitReason
 from marketlens.domain.evaluation import HORIZONS, OutcomeSample, bucket_performance, dedupe_samples, factor_ic, forward_outcome, is_mature, rolling_ic
@@ -113,14 +113,16 @@ class EvaluationService:
         return written
 
     # ------------------------------------------------------------------ paper trading (one account)
-    def _signal(self, pos: PaperPositionRow, spread_bps: float | None, basis_date: date | None = None, key: str | None = None) -> PaperSignal:
+    def _signal(self, pos: PaperPositionRow, spread_bps: float | None, basis_date: date | None = None, key: str | None = None,
+                applied: tuple[str, ...] | None = None) -> PaperSignal:
         """The plan's price levels expressed on the share basis of the stored bars. Levels were set on the
         basis of the recommendation day; every split executed after it (and already applied to the bars,
         i.e. on/before ``basis_date``) divides them, so a 10:1 split does not turn a normal entry into a
         'gap below the stop' or a stop into an impossible level."""
         f = 1.0
         if basis_date is not None:
-            f = split_factor(self.svc.data.splits(key or pos.ticker), to_ny(pos.recommended_at).date(), basis_date)
+            # the splits the recommendation's bars already reflected (9th evaluation H1), else the date rule
+            f = factor_since(self.svc.data.splits(key or pos.ticker), applied, to_ny(pos.recommended_at).date(), basis_date)
         # the signal is keyed by the COMPANY (identity key), not the ticker label: a reused ticker is another company
         return PaperSignal(key or pos.ticker, pos.recommended_at, pos.action, pos.score, pos.confidence, pos.stop / f, pos.target1 / f, pos.target2 / f,
                            pos.thesis, pos.model_version, pos.regime, pos.sector, spread_bps, pos.max_buy / f if pos.max_buy is not None else None)
@@ -152,7 +154,8 @@ class EvaluationService:
                 key = keys[pos.id]
                 # later recommendations under the same ticker count only if they are about the same company
                 later = [r for r in later if self.svc.data.identity_on(r.ticker, rec_session_day(r.as_of), s) == key]
-                items.append(AccountItem(str(pos.id), self._signal(pos, spread_bps, to_ny(as_of).date(), key), tuple(exit_events_for(later, pos.recommended_at))))
+                applied = encoded_split_keys((rec.inputs or {}).get("splits")) if rec is not None and isinstance(rec.inputs, dict) else None
+                items.append(AccountItem(str(pos.id), self._signal(pos, spread_bps, to_ny(as_of).date(), key, applied), tuple(exit_events_for(later, pos.recommended_at))))
                 if key not in bars_by:
                     first = min(to_ny(p.recommended_at).date() for p in positions if keys[p.id] == key)
                     bars_by[key] = self._bars(key, first - timedelta(days=5), today)

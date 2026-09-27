@@ -44,6 +44,9 @@ class AnalysisDigest:
     guard_stop: float | None = None
     max_buy: float | None = None
     atr: float | None = None
+    # the splits the bars of this analysis already reflected (their keys): the share basis of its price levels.
+    # None = recorded before this field existed (the date rule is used then)
+    splits_applied: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

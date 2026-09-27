@@ -28,7 +28,7 @@ from marketlens.application.theses import ThesisBook
 from marketlens.config import AGENT_PROMPT_VERSION, CONFIG_DIR, SCHEMA_VERSION, ModelConfig, Settings, code_version, load_model_config
 from marketlens.domain.enums import BULLISH_ACTIONS, Action, DataMode
 from marketlens.domain.freshness import PlanCheck, RecommendationFreshness, recommendation_freshness
-from marketlens.domain.corporate_actions import split_factor
+from marketlens.domain.corporate_actions import encoded_split_keys, factor_since, split_factor
 from marketlens.domain.market_calendar import UTC, to_ny
 from marketlens.domain.paper import position_notional
 from marketlens.domain.portfolio import Holding, Portfolio
@@ -146,7 +146,8 @@ class MarketLensService:
         self.store = MarketStore(session_factory, self.registry.mode.value) if store_on else None
         self.data = DataAccess(self.registry, self.base_cfg.cache_ttl, store=self.store, now_fn=self.now)
         self._lock = threading.Lock()
-        self._sync_lock = threading.Lock()
+        self._sync_lock = threading.Lock()  # the background preparation job (taken by start_sync, freed by the job)
+        self._sync_run = threading.Lock()  # one sync_market() at a time, whoever calls it (9th evaluation H5)
         self.last_scan_context: ScanContext | None = None
         self._check_db_environment()
 
@@ -188,10 +189,16 @@ class MarketLensService:
         rows = repo.holdings(s)
         cash = float(repo.get_setting(s, "portfolio_cash", str(DEFAULT_CASH)) or DEFAULT_CASH)
         hs = []
+        today = to_ny(self.now()).date()
         for r in rows:
             sec = (self.last_scan_context.securities.get(r.ticker) if self.last_scan_context else None)
             exp = self.seed.macro_exposure(sec) if sec else None
-            hs.append(Holding(r.ticker, r.quantity, r.cost_basis, sec.sector if sec else "Unknown", ("AI",) if exp and exp.ai >= 0.4 else (), exp.rates if exp else 0.0))
+            # a holding entered before a split is on the old share basis: the split multiplies the quantity and divides
+            # the average cost, as the broker does, so it is valued with today's split-adjusted closes (9th evaluation H4)
+            entered = r.updated_at if r.updated_at.tzinfo is not None else r.updated_at.replace(tzinfo=UTC)
+            f = split_factor(self.data.splits(r.ticker), to_ny(entered).date(), today)
+            hs.append(Holding(r.ticker, r.quantity * f, r.cost_basis / f, sec.sector if sec else "Unknown", ("AI",) if exp and exp.ai >= 0.4 else (),
+                              exp.rates if exp else 0.0, split_adjusted=f))
         return Portfolio(tuple(hs), cash)
 
     def _previous_lookup(self, s: Session) -> Any:
@@ -223,7 +230,8 @@ class MarketLensService:
         divides them by its ratio, as the paper trades and the next analysis do (8th evaluation I1) — the current
         quote is on the new basis."""
         entry = (row.result or {}).get("entry") or {}
-        f = split_factor(self.data.splits(row.ticker), to_ny(row.as_of).date(), to_ny(self.now()).date())
+        known = encoded_split_keys((row.inputs or {}).get("splits")) if isinstance(row.inputs, dict) else None
+        f = factor_since(self.data.splits(row.ticker), known, to_ny(row.as_of).date(), to_ny(self.now()).date())
 
         def adj(v: Any) -> float | None:
             return None if v is None else float(v) / f
@@ -484,7 +492,10 @@ class MarketLensService:
         sc = self.base_cfg.scanner
         limits.setdefault("min_market_cap", sc.min_market_cap)
         limits.setdefault("min_dollar_volume", sc.min_avg_dollar_volume)
-        rep = MarketSync(self.registry, self.store).run(self.now(), **limits)
+        # another sync (the background job, POST /api/sync, the CLI, the scheduler) waits for the running one and then
+        # computes its own missing days from the store: no session is downloaded twice
+        with self._sync_run:
+            rep = MarketSync(self.registry, self.store).run(self.now(), **limits)
         self.data.cache = type(self.data.cache)()  # the store changed → drop cached provider reads
         # "sync finished" is not "data complete": a partial sync says how much is still missing
         out = {"status": "SYNC_COMPLETE" if rep.complete else "SYNC_PARTIAL", "bar_days_remaining": max(0, rep.bar_days_missing - rep.bar_days_loaded - rep.bar_days_empty), **rep.__dict__}
@@ -499,8 +510,13 @@ class MarketLensService:
             return {"started": False, "reason": "MOCK 모드는 데이터 준비가 필요 없음"}
         if not self._sync_lock.acquire(blocking=False):
             return {"started": False, "reason": "이미 데이터를 준비하는 중", **self.sync_status()}
-        self._sync_state({"status": "RUNNING", "round": 0, "started_at": self.now().isoformat()})
-        threading.Thread(target=self._sync_rounds, args=(max_rounds,), name="marketlens-sync", daemon=True).start()
+        state: dict[str, Any] = {"status": "RUNNING", "round": 0, "started_at": self.now().isoformat()}
+        try:
+            self._sync_state(state)
+            threading.Thread(target=self._sync_rounds, args=(max_rounds, state), name="marketlens-sync", daemon=True).start()
+        except Exception:
+            self._sync_lock.release()  # the job never started: the lock must not stay taken
+            raise
         return {"started": True, **self.sync_status()}
 
     def _sync_state(self, state: dict[str, Any]) -> None:
@@ -508,9 +524,8 @@ class MarketLensService:
             repo.set_setting(s, "sync_job", json.dumps(state))
             s.commit()
 
-    def _sync_rounds(self, max_rounds: int) -> None:
+    def _sync_rounds(self, max_rounds: int, state: dict[str, Any]) -> None:
         """Runs holding ``_sync_lock`` (taken by :meth:`start_sync`)."""
-        state: dict[str, Any] = {"status": "RUNNING", "round": 0, "started_at": self.now().isoformat()}
         try:
             for i in range(max_rounds):
                 out = self.sync_market()
@@ -531,9 +546,14 @@ class MarketLensService:
             log.exception("background sync failed")
             state.update(status="FAILED", errors=[f"{type(e).__name__}: {e}"])
         finally:
-            state["finished_at"] = self.now().isoformat()
-            self._sync_state(state)
-            self._sync_lock.release()
+            self._sync_last = state  # kept in memory too: shown when the database refused the final write
+            try:
+                state["finished_at"] = self.now().isoformat()
+                self._sync_state(state)
+            except Exception:  # the final state could not be written (e.g. a busy database): logged, never keeps the lock
+                log.exception("background sync: final state not saved")
+            finally:
+                self._sync_lock.release()  # always: the button must work again without restarting the app
 
     def sync_status(self) -> dict[str, Any]:
         """The background data preparation's progress. RUNNING while no job holds the lock = the app was closed mid-way."""
@@ -542,6 +562,9 @@ class MarketLensService:
         with self.sf() as s:
             job = json.loads(repo.get_setting(s, "sync_job", "") or "null")
         if job and job.get("status") == "RUNNING" and not self._sync_lock.locked():
+            last = getattr(self, "_sync_last", None)
+            if last is not None and last.get("started_at") == job.get("started_at"):
+                return {"job": {**last, "note": "마지막 상태를 저장하지 못해 메모리의 결과를 보여 줌"}}
             job["status"] = "INTERRUPTED"
         return {"job": job}
 

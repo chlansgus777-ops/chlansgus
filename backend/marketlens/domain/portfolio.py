@@ -17,6 +17,7 @@ class Holding:
     sector: str
     themes: tuple[str, ...] = ()  # e.g. ("AI",)
     rate_sensitivity: float = 0.0
+    split_adjusted: float = 1.0  # share multiplier of splits executed after the holding was entered (quantity ×, cost ÷)
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,6 +224,7 @@ class HoldingValuation:
     unrealized_pct: float | None
     weight: float | None
     sector: str
+    split_adjusted: float = 1.0  # the entered quantity/cost were put on today's share basis by this multiplier
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,7 +273,7 @@ def portfolio_snapshot(pf: Portfolio, closes: Mapping[str, Mapping[date, float]]
             invested += mv
             unreal += pnl or 0.0
         rows.append(HoldingValuation(h.ticker, h.quantity, h.cost_basis, px, val_day if px is not None else None, mv, pnl,
-                                     (px / h.cost_basis - 1) if px is not None and h.cost_basis > 0 else None, None, h.sector))
+                                     (px / h.cost_basis - 1) if px is not None and h.cost_basis > 0 else None, None, h.sector, h.split_adjusted))
     nav = pf.cash + invested
     rows = [replace_weight(r, nav) for r in rows]
     sector_w: dict[str, float] = {}

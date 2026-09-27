@@ -35,9 +35,15 @@ def test_a_stored_recommendation_is_checked_on_the_post_split_basis(monkeypatch)
     for k in ("price", "stop", "max_buy", "target"):
         assert after[k] == pytest.approx(before[k] / 10), k
     assert after["split_factor_since"] == 10.0
-    # a split before the analysis changes nothing
-    monkeypatch.setattr(svc.data, "splits", lambda t: [SplitEvent(t, date(2020, 1, 2), 1, 10, "polygon")])
+    # a split the analysis already knew (its bars reflected it) changes nothing — changed with the 9th evaluation (H1):
+    # the basis is the splits recorded in the analysis inputs, no longer the analysis date; a record without that
+    # list (older snapshots) still uses the date rule
+    old = SplitEvent(row.ticker, date(2020, 1, 2), 1, 10, "polygon")
+    monkeypatch.setattr(svc.data, "splits", lambda t: [old])
+    row.inputs = {**row.inputs, "splits": [{"execution_date": "2020-01-02", "split_from": 1, "split_to": 10}]}
     assert svc.levels_now(row)["split_factor"] == 1.0 and svc.levels_now(row)["stop"] == pytest.approx(row.result["entry"]["stop"])
+    row.inputs = {k: v for k, v in row.inputs.items() if k != "splits"}
+    assert svc.levels_now(row)["split_factor"] == 1.0
 
 
 def test_the_previous_levels_are_rescaled_only_by_splits_after_that_analysis():

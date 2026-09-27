@@ -5,7 +5,7 @@ import { useApi } from "../components/useApi";
 import { day, num, pct, price, usdWithKo } from "../format";
 import { More } from "../mode";
 
-interface HoldingV { ticker: string; quantity: number; cost_basis: number; price: number | null; price_day: string | null; market_value: number | null; unrealized_pnl: number | null; unrealized_pct: number | null; weight: number | null; sector: string }
+interface HoldingV { ticker: string; quantity: number; cost_basis: number; price: number | null; price_day: string | null; market_value: number | null; unrealized_pnl: number | null; unrealized_pct: number | null; weight: number | null; sector: string; split_adjusted?: number }
 interface Pf {
   valuation_day: string | null; cash: number; invested_value: number; nav: number; unrealized_pnl: number; holdings: HoldingV[];
   sector_weights: Record<string, number>; theme_weights: Record<string, number>; hhi: number; beta: number | null;
@@ -91,7 +91,7 @@ export default function Portfolio() {
       <More title="보유 종목 상세" hint="모든 종목을 같은 거래일 종가로 평가">
         {x.holdings.length ? (
           <table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th></tr></thead>
-            <tbody>{x.holdings.map((h) => <tr key={h.ticker}><td>{h.ticker}</td><td>{num(h.quantity, 0)}</td><td>{price(h.cost_basis)}</td><td>{price(h.price)} <span className="caption">{day(h.price_day)}</span></td>
+            <tbody>{x.holdings.map((h) => <tr key={h.ticker}><td>{h.ticker}</td><td>{num(h.quantity, 0)}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{price(h.price)} <span className="caption">{day(h.price_day)}</span></td>
               <td>{price(h.market_value)}</td><td className={(h.unrealized_pnl ?? 0) >= 0 ? "pos" : "neg"}>{price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</td><td>{pct(h.weight, 1, false)}</td><td>{h.sector}</td></tr>)}</tbody></table>
         ) : <Empty>보유 종목이 없습니다.</Empty>}
         {x.correlations.length > 0 && <div className="caption" style={{ marginTop: 8 }}><Term k="correlation">상관계수</Term>: {x.correlations.map(([a, b, c]) => `${a}↔${b} ${num(c, 2)}`).join(" · ")}</div>}

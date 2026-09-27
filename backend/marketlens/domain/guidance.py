@@ -197,30 +197,60 @@ _TO_LEVEL = re.compile(r"(?<![a-z])(improve|increase|decline|decrease|grow|rise|
 
 # the word right before the metric may qualify it as the company's own measure; any other word names a part of it
 # ("data center revenue", "services gross margin", "interest income per share") — 8th evaluation I2
-_HEAD_OK = frozenset("""total net consolidated company overall reported expect expects expected expecting anticipate anticipates
-    see sees forecast forecasts project projects guide guides guiding target targets raise raises raised raising lower lowers
-    lowered lowering reaffirm reaffirms reaffirmed reaffirming reiterate reiterates reiterated reiterating update updates updated
-    narrow narrows narrowed maintain maintains maintained provide provides providing its their""".split()) | _GAP_OK
-# the rest of the amount after its first number ("$0.05 to $0.08 per share"): what follows it decides whether it is a change
+# 9th evaluation (H2/H3): the words right before the metric. Company-level qualifiers are skipped leftwards; the first
+# word after them must be a guidance verb, a determiner / preposition or a company / period possessive ("The Company's
+# revenue", "this year's EPS") — any other word names a part of the metric ("data center net revenue", "services GAAP
+# gross margin", "interest income per share") and the amount is not the company's level
+_QUALIFIERS = frozenset("""total net gaap non adjusted diluted basic consolidated reported comparable annual quarterly full year
+    fiscal quarter first second third fourth fy""".split())
+_LEAD_OK = frozenset("""expect expects expected expecting anticipate anticipates anticipated anticipating see sees seeing
+    forecast forecasts forecasted forecasting project projects projected projecting guide guides guided guiding target
+    targets targeted targeting raise raises raised raising lower lowers lowered lowering reaffirm reaffirms reaffirmed
+    reaffirming reiterate reiterates reiterated reiterating update updates updated updating narrow narrows narrowed narrowing
+    maintain maintains maintained maintaining provide provides provided providing report reports reported reporting generate
+    generates generating deliver delivers delivering achieve achieves achieving post posts posting record estimate estimates
+    estimated plan plans planned smaller larger narrower wider
+    the a an our its their this that next current with and for of on to in at as is are be will would""".split())
+_POSSESSIVE_OK = re.compile(r"(company|year|quarter|period|firm|group|corporation|business)'s")
+# the rest of the amount after its first number ("$0.05 to $0.08 per share", "$50 million, or 5%,"): what follows it decides
+# whether it is a change or a part
 _AMOUNT_TAIL = re.compile(r"\s*(?:\$\s?\(?\d[\d,]*(?:\.\d+)?\)?|\(?\d[\d,]*(?:\.\d+)?\)?\s*%|\d[\d,]*(?:\.\d+)?"
+                          r"|,?\s*or\s+\d[\d.]*\s*(?:%|percent)\s*,?"
+                          r"|(?:a|per)\s+(?:diluted\s+)?share(?![a-z])"
                           r"|(?:billion|million|thousand|b|m|to|and|per|diluted|share|percent|approximately|about|around|roughly)(?![a-z])|[-–‒])")
-# "… $0.10 higher than last year", "$50 million above the third quarter": the amount is a difference, not the level
+# "… $0.10 higher than last year", "$50 million, or 5%, above the third quarter": the amount is a difference, not the level
 _COMPARED = re.compile(r"\s*(higher|lower|more|less|greater|fewer|above|below|better|worse|up|down)(?![a-z])")
+# "$500 million from the acquired business", "$1.2 billion in the Americas": a part named after the amount — unless the
+# words say when ("in fiscal 2027", "for the fourth quarter") or "from continuing operations"
+_PART_AFTER = re.compile(r"\s*(from|in|for)\s+([^,;.]*)")
+_PERIOD_AFTER = re.compile(r"(the\s+)?((first|second|third|fourth)\s+(fiscal\s+)?quarter|(full|fiscal|calendar)[\s-]+year|fiscal|20\d\d|q[1-4]\b|fy|"
+                           r"(the\s+)?(quarter|year|period|half)\b|(first|second)\s+half|(this|next|the\s+current|the\s+coming|each)\s+|continuing operations)")
 
 
 def _qualified_by_part(low: str, head_start: int) -> bool:
-    """A word directly before the metric that is not one of the company-level qualifiers or guidance verbs."""
-    m = re.search(r"([a-z0-9'&-]+)\s+$", low[:head_start])
-    if m is None:
-        return False  # start of the sentence, or punctuation ("Outlook: revenue …")
-    return not all(p in _HEAD_OK or re.fullmatch(r"20\d\d|q[1-4]|fy\d*", p) for p in m.group(1).split("-") if p)
+    """The first word before the metric, after company-level qualifiers, is not a verb, determiner or possessive."""
+    tail = re.split(r"[,;:.()\u2014\u2013]", low[:head_start])[-1]
+    words = [part for tok in re.findall(r"[a-z0-9'&-]+", tail) for part in tok.split("-") if part]
+    for w in reversed(words):
+        if w in _QUALIFIERS or re.fullmatch(r"20\d\d|q[1-4]|fy\d*", w):
+            continue
+        return not (w in _LEAD_OK or _POSSESSIVE_OK.fullmatch(w))
+    return False  # only qualifiers, at the start of a sentence or clause
 
 
-def _compared_after(low: str, start: int) -> bool:
+def _amount_end(low: str, start: int) -> int:
     pos = start
     while (m := _AMOUNT_TAIL.match(low, pos)) and m.end() > pos:
         pos = m.end()
-    return bool(_COMPARED.match(low, pos))
+    return pos
+
+
+def _compared_after(low: str, start: int) -> bool:
+    pos = _amount_end(low, start)
+    if _COMPARED.match(low, pos):
+        return True
+    m = _PART_AFTER.match(low, pos)
+    return bool(m and not _PERIOD_AFTER.match(m.group(2).strip()))
 
 
 def _governed(metric: str, low: str, start: int) -> bool:
