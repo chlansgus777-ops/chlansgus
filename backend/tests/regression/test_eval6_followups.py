@@ -191,3 +191,24 @@ def test_a_live_registry_without_a_transport_is_offline_in_tests():
 
 
 _ = timedelta  # imported for symmetry with the counterexample helpers
+
+
+# ---------------------------------------------------------------- found by live-verify run 36281358983 (00:04 UTC)
+def test_fred_vintage_never_runs_ahead_of_freds_own_date():
+    """At 00:04 UTC on 09-27 it is still 09-26 in St. Louis: FRED refuses realtime dates after its own today (400)."""
+    import httpx
+
+    from marketlens.providers.live.fred import FredMacroProvider
+
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        rs = req.url.params["realtime_start"]
+        seen.append(rs)
+        if rs > "2026-09-26":
+            return httpx.Response(400, json={"error_message": "Variable realtime_start can not be after today's date (2026-09-26)"})
+        return httpx.Response(200, json={"observations": [{"date": "2026-09-24", "value": "3.88"}]})
+
+    fred = FredMacroProvider("k", transport=httpx.MockTransport(handler), rate_per_s=1000.0)
+    got = fred.get_series(["FED_FUNDS"], datetime(2026, 9, 27, 0, 4, tzinfo=UTC))
+    assert seen and max(seen) <= "2026-09-26" and got["FED_FUNDS"].latest.value == 3.88
