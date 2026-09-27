@@ -49,6 +49,17 @@ def _cfg(reg: Any, kind: str, name: str) -> bool:
     return any(p.name == name and getattr(p, "configured", True) for p in reg.chain(kind).providers)
 
 
+def missing_setup(reg: Any) -> list[str]:
+    """THE list of what the data preparation cannot fetch for lack of a key (the readiness screen and the sync job
+    both use it): the recommendation cannot become ready until these are set, whatever the button does."""
+    out = []
+    if not _cfg(reg, "universe", "sec-edgar"):
+        out.append("SEC 요청자(SEC_USER_AGENT)가 비어 있어 종목 목록·재무를 받을 수 없음 — 설정 화면에서 '이름 이메일'을 입력하고 앱을 다시 시작하세요")
+    if not _cfg(reg, "price", "polygon"):
+        out.append("POLYGON_API_KEY가 없어 일봉(가격 이력)을 받을 수 없음 — 설정 화면에서 입력하고 앱을 다시 시작하세요")
+    return out
+
+
 def categories(reg: Any, stats: dict[str, Any] | None, live_verified: dict[str, bool]) -> tuple[DataCategory, ...]:
     def lv(key: str, status: str) -> str:
         return status if live_verified.get(key) or status in ("UNAVAILABLE", "BLOCKED_BY_CREDENTIAL") else f"{status} (NOT_LIVE_VERIFIED)"
@@ -86,10 +97,7 @@ def evaluate(mode: str, reg: Any, stats: dict[str, Any] | None, sync_state: str 
     reasons: list[str] = []
     prog: dict[str, float | None] = {}
     # a key the preparation needs is missing: say so first — pressing "데이터 준비 시작" cannot fix it
-    if not _cfg(reg, "universe", "sec-edgar"):
-        reasons.append("SEC 요청자(SEC_USER_AGENT)가 비어 있어 종목 목록·재무를 받을 수 없음 — 설정 화면에서 '이름 이메일'을 입력하고 앱을 다시 시작하세요")
-    if not _cfg(reg, "price", "polygon"):
-        reasons.append("POLYGON_API_KEY가 없어 일봉(가격 이력)을 받을 수 없음 — 설정 화면에서 입력하고 앱을 다시 시작하세요")
+    reasons += missing_setup(reg)
     if not stats or not stats.get("listed"):
         reasons.append("유니버스(종목 목록)가 아직 적재되지 않음 — ‘데이터 준비 시작’(데이터 동기화)을 실행하세요")
         prog = {"price_history": 0.0, "market_cap": 0.0, "sector": 0.0, "fundamentals": 0.0, "market_days": 0.0}

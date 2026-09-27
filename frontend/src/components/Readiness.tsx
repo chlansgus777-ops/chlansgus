@@ -60,11 +60,12 @@ export function ProgressBars({ p }: { p: Record<string, number | null> }) {
 }
 
 export interface SyncJob {
-  status: "RUNNING" | "DONE" | "FAILED" | "PAUSED" | "INTERRUPTED"; round: number;
-  bar_days_remaining?: number; fundamentals_pending?: number; errors?: string[]; started_at?: string; finished_at?: string;
+  status: "RUNNING" | "DONE" | "FAILED" | "PAUSED" | "INTERRUPTED" | "NEEDS_SETUP"; round: number;
+  bar_days_remaining?: number; fundamentals_pending?: number; errors?: string[]; missing?: string[]; started_at?: string; finished_at?: string;
 }
 const JOB_KO: Record<SyncJob["status"], string> = {
   RUNNING: "받는 중", DONE: "끝남", FAILED: "실패", PAUSED: "일시 정지(다시 누르면 이어서 받음)", INTERRUPTED: "중단됨(앱이 꺼짐) — 다시 누르면 이어서 받음",
+  NEEDS_SETUP: "설정 필요 — 키가 없어 받을 수 없는 데이터가 있음",
 };
 
 /** LIVE: the button that fills the local data store (SEC list and filings, Polygon daily prices), with its progress.
@@ -94,6 +95,12 @@ export function SyncControl({ onChange }: { onChange?: () => void }) {
       </div>
       <div className="explain">무료 API 요청 한도를 지키며 받기 때문에 처음 한 번은 1시간 안팎 걸릴 수 있습니다. 앱을 켜 둔 채 기다리세요.
         중간에 꺼도 받은 데이터는 남고, 다시 누르면 이어서 받습니다. 그 뒤로는 하루 한 번 누르면 새 거래일만 받습니다.</div>
+      {job?.missing?.length ? (
+        <Notice tone="neg">
+          <b>이 버튼만으로는 준비를 끝낼 수 없습니다.</b> 아래 항목을 <Link to="/settings">설정 화면</Link>에서 입력하고 앱을 다시 시작한 뒤 다시 누르세요.
+          <ul className="list">{job.missing.map((x, i) => <li key={i}><span className="dot warn">!</span><span>{x}</span></li>)}</ul>
+        </Notice>
+      ) : null}
       {job?.errors?.length ? <ul className="list">{job.errors.map((x, i) => <li key={i}><span className="dot warn">!</span><span>{x}</span></li>)}</ul> : null}
       {err && <Notice tone="neg">{err}</Notice>}
     </div>

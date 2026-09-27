@@ -123,3 +123,26 @@ def test_mock_mode_needs_no_preparation_and_the_api_is_guarded():
         assert c.get("/api/sync/status").json() == {"job": None}
     with TestClient(app) as c:  # without the client header the CSRF guard refuses the write
         assert c.post("/api/sync/start").status_code == 403
+
+
+# ---------------------------------------------------------------- owner report 2026-09-27: "완료" in 10 s, still NOT READY
+@pytest.mark.parametrize("missing,word", [("polygon_api_key", "POLYGON"), ("sec_user_agent", "SEC")])
+def test_a_preparation_that_cannot_fetch_a_required_dataset_says_setup_is_needed(tmp_path, missing, word):
+    """A step whose provider has no key was skipped silently and the job ended DONE ('끝남') after one round while
+    the readiness stayed NOT READY. Without a required key the job ends NEEDS_SETUP and names what to set."""
+    svc = _live(tmp_path, **{missing: None})
+    svc.start_sync(max_rounds=3)
+    _join()
+    job = svc.sync_status()["job"]
+    assert job["status"] == "NEEDS_SETUP", job
+    assert any(word in m for m in job["missing"]), job
+    last = svc.store.get_setting("last_sync") or ""
+    assert "SYNC_COMPLETE" not in last  # never "complete" while a required dataset cannot be fetched
+
+
+def test_with_every_key_the_preparation_does_not_ask_for_setup(tmp_path):
+    svc = _live(tmp_path)
+    svc.start_sync(max_rounds=1)
+    _join()
+    job = svc.sync_status()["job"]
+    assert job["status"] != "NEEDS_SETUP" and not job.get("missing")

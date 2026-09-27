@@ -35,3 +35,15 @@ describe("data preparation from the screen", () => {
     expect(screen.queryByRole("button", { name: "데이터 준비 시작" })).toBeNull();
   });
 });
+
+describe("a preparation that needs a key first", () => {
+  it("says what to set instead of 'done', with a way to the settings", async () => {
+    const job = { status: "NEEDS_SETUP", round: 1, bar_days_remaining: 0, errors: [], missing: ["POLYGON_API_KEY가 없어 일봉(가격 이력)을 받을 수 없음 — 설정 화면에서 입력하고 앱을 다시 시작하세요"] };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ job }), { status: 200 })));
+    render(<MemoryRouter><NotReady r={r} /></MemoryRouter>);
+    expect(await screen.findByText(/설정 필요/)).toBeTruthy();
+    expect(screen.queryByText(/상태: 끝남/)).toBeNull();
+    expect(screen.getAllByText(/POLYGON_API_KEY가 없어/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: /설정 화면/ }).getAttribute("href")).toContain("settings");
+  });
+});

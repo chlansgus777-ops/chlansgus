@@ -45,11 +45,13 @@ class SyncReport:
     splits_new: int = 0
     bars_split_adjusted: int = 0
     errors: list[str] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)  # required datasets with no configured provider (readiness.missing_setup)
 
     @property
     def complete(self) -> bool:
-        """Every wanted price day was loaded and no step failed. A partial sync is NOT scanner-ready."""
-        return not self.errors and self.bar_days_loaded + self.bar_days_empty + self.bar_days_pending >= self.bar_days_missing
+        """Every wanted price day was loaded, no step failed and nothing required was skipped for lack of a key (a
+        skipped step is not a finished one). A partial sync is NOT scanner-ready."""
+        return not self.errors and not self.missing and self.bar_days_loaded + self.bar_days_empty + self.bar_days_pending >= self.bar_days_missing
 
 
 def _find(registry: ProviderRegistry, kind: str, attr: str) -> Any:
@@ -67,7 +69,9 @@ class MarketSync:
     def run(self, now: Any, backfill_days: int = 300, max_bar_calls: int = 30, max_profiles: int = 300,
             min_market_cap: float = 1e9, min_dollar_volume: float = 2e7, max_fundamentals: int = 150,
             fundamentals_refresh: timedelta = FUNDAMENTALS_REFRESH) -> SyncReport:
-        rep = SyncReport()
+        from marketlens.application.readiness import missing_setup
+
+        rep = SyncReport(missing=missing_setup(self.reg))
         today = last_completed_session(now)
         unloaded: set[date] = set()
         # 1) bars via grouped daily (before the universe step, see 2a)

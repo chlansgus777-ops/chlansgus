@@ -111,7 +111,10 @@ def test_a_recent_unpublished_session_is_pending_and_an_old_empty_day_stays_reco
     eng = make_engine(f"sqlite:///{(tmp_path / 's.db').as_posix()}")
     Base.metadata.create_all(eng)
     st = MarketStore(make_session_factory(eng), "LIVE")
-    reg = SimpleNamespace(chain=lambda k: C([G()]) if k == "price" else C([]))
+    class U:  # the listing provider the real registry always has (round 10: a missing one is reported, not skipped)
+        name, configured = "sec-edgar", True
+
+    reg = SimpleNamespace(chain=lambda k: C([G()]) if k == "price" else C([U()]) if k == "universe" else C([]))
     rep = MarketSync(reg, st).run(datetime(2026, 6, 3, 20, 5, tzinfo=UTC), backfill_days=20)  # type: ignore[arg-type]
     assert rep.bar_days_pending == 1 and rep.bar_days_empty == 1 and not rep.errors
     assert rep.complete  # a session not published yet does not make the whole sync partial

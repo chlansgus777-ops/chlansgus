@@ -659,17 +659,20 @@ class MarketLensService:
                 out = self.sync_market()
                 progressed = bool(out["bar_days_loaded"] or out["bar_days_empty"] or out["fundamentals_ingested"] or out["profiles_updated"])
                 state.update(round=i + 1, bar_days_remaining=out["bar_days_remaining"], fundamentals_pending=out["fundamentals_pending"],
-                             errors=out["errors"][:3], updated_at=self.now().isoformat())
+                             errors=out["errors"][:3], missing=out.get("missing", []), updated_at=self.now().isoformat())
                 # profiles have no pending count: a round that still added some may have left more (bounded per round)
                 if out["status"] == "SYNC_COMPLETE" and not out["fundamentals_pending"] and not out["profiles_updated"]:
                     state["status"] = "DONE"
                     break
                 if not progressed:  # the next round would repeat the same calls: stop and say why
-                    state["status"] = "FAILED" if out["errors"] else "DONE"
+                    # a required dataset without a key is never "done": the screen says what to set (owner report)
+                    state["status"] = "NEEDS_SETUP" if state["missing"] else ("FAILED" if out["errors"] else "DONE")
                     break
                 self._sync_state(state)
             else:
                 state["status"] = "PAUSED"  # round cap reached; pressing the button again continues where it stopped
+            if state["status"] == "PAUSED" and state.get("missing"):
+                state["status"] = "NEEDS_SETUP"  # what it could fetch it did, but readiness needs the missing key first
         except Exception as e:  # the job must end with a visible state; the error is logged with its traceback
             log.exception("background sync failed")
             state.update(status="FAILED", errors=[f"{type(e).__name__}: {e}"])
