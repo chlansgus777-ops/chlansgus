@@ -334,3 +334,19 @@ describe("portfolio and performance", () => {
     expect(screen.queryByTestId("perf-live")).toBeNull();
   });
 });
+
+describe("data preparation stays reachable (owner: '데이터 준비 시작은 어디갔어?')", () => {
+  it("LIVE: the home screen always has the preparation button, even with candidates and a ready scanner", async () => {
+    const ready = { mode: "LIVE", recommendation_readiness: "NOT READY", readiness_reasons: ["시가총액 확인 종목 70% < 80%"], scanner_status: "SCANNER_READY", scanner_reasons: [], progress: {}, sync: {}, categories: [] };
+    serve([[/\/dashboard/, dash([row()], { readiness: ready })], [/\/scan\/status/, { state: null, coverage: null }], [/\/sync\/status/, { job: null }], [/\/system/, system("LIVE")], [/./, {}]]);
+    render(<MemoryRouter><StatusProvider><Dashboard /></StatusProvider></MemoryRouter>);
+    expect(await screen.findByRole("button", { name: "데이터 준비 시작" })).toBeTruthy();
+    expect(screen.getByTestId("goto-data-prep")).toBeTruthy();
+  });
+  it("MOCK: no preparation button (nothing to download)", async () => {
+    serve([[/\/dashboard/, dash([row()])], [/\/scan\/status/, { state: null, coverage: null }], [/\/system/, system("MOCK")], [/./, {}]]);
+    render(<MemoryRouter><StatusProvider><Dashboard /></StatusProvider></MemoryRouter>);
+    await screen.findAllByTestId("candidate-card");
+    expect(screen.queryByRole("button", { name: "데이터 준비 시작" })).toBeNull();
+  });
+});

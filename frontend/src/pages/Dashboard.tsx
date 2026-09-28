@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import { OppTable } from "../components/OppTable";
 import { Action, Card, Change, Empty, Err, LineChart, Loading, Notice, Ribbon, StaleData, StatePanel, StatusBadge, Term } from "../components/ui";
-import { NotReady, ReadinessBanner, type ReadinessInfo } from "../components/Readiness";
+import { NotReady, ReadinessBanner, SyncControl, type ReadinessInfo } from "../components/Readiness";
 import { type ScanStatus, usePageTime, useStatus } from "../components/status";
 import { useApi } from "../components/useApi";
 import { ago, day, num, pct, price, stampEt } from "../format";
@@ -156,7 +156,10 @@ export default function Dashboard() {
           <h1>오늘의 미국 주식 한눈에 보기</h1>
           <div className="t-sub">{x.scan ? <>분석 {stampEt(x.scan.as_of)} ({ago(x.scan.as_of, nowMs)}){scope ? ` · ${scope}` : ""}</> : "아직 스캔 결과가 없습니다."}</div>
         </div>
-        <button className="primary" disabled={busy} onClick={scan}>{busy ? "스캔 중…" : "시장 스캔 실행"}</button>
+        <div className="row">
+          {sysMode === "LIVE" && <button data-testid="goto-data-prep" onClick={() => document.getElementById("data-prep")?.scrollIntoView({ behavior: "smooth", block: "start" })}>데이터 준비 ↓</button>}
+          <button className="primary" disabled={busy} onClick={scan}>{busy ? "스캔 중…" : "시장 스캔 실행"}</button>
+        </div>
       </div>
 
       {x.readiness && x.readiness.recommendation_readiness !== "PAPER ONLY" && <ReadinessBanner r={x.readiness} />}
@@ -195,6 +198,7 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {sysMode === "LIVE" && notReady && !shown.length && <span id="data-prep" />}
       <Card title="지금 검토할 후보" icon="◎" right={<Link to="/opportunities">전체 후보 보기 →</Link>}
             explain="매수 조건을 통과하고 지금 다시 확인해도 유효한 종목만, 최대 5개까지 보여줍니다.">
         {shown.length ? <div className="cands">{shown.map((r) => <CandidateCard key={r.id} r={r} />)}</div>
@@ -213,6 +217,13 @@ export default function Dashboard() {
           </div>
         )}
       </Card>
+
+      {sysMode === "LIVE" && !(notReady && !shown.length) && (
+        <div id="data-prep"><Card title="데이터 준비" icon="⏳" testId="data-prep"
+              explain="가격·재무 데이터를 받아 이 PC에 저장합니다. 처음 한 번은 오래 걸리고, 그 뒤로는 하루 한 번 누르면 새 거래일만 받습니다.">
+          <SyncControl onChange={() => { d.reload(); st?.refresh(); }} />
+        </Card></div>
+      )}
 
       <div className="g3">
         <Card title="가장 조심할 위험" icon="⚠" tone={x.major_risks.length ? "warn" : undefined}>
