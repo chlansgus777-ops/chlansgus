@@ -7,7 +7,7 @@ from datetime import date, datetime
 from typing import Any, Iterable
 
 from sqlalchemy import delete, desc, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from marketlens.domain.market_calendar import UTC
 from marketlens.infrastructure.db.models import (
@@ -47,9 +47,16 @@ def _superseded_ids() -> Any:
     return select(RecommendationRow.supersedes_id).where(RecommendationRow.supersedes_id.is_not(None))
 
 
+def heavy_deferred() -> list[Any]:
+    """Load options for list screens: the stored inputs and model snapshot (about 120 KB of JSON per row) are read only
+    if a row needs them, while its session is open (owner report 2026-09-28: every list parsed megabytes of it)."""
+    return [defer(RecommendationRow.inputs), defer(RecommendationRow.model_config_snapshot)]
+
+
 def recommendations_for_scan(s: Session, scan_id: int) -> list[RecommendationRow]:
-    """The current version of each recommendation of a scan (superseded versions stay in history)."""
-    return list(s.scalars(select(RecommendationRow).where(RecommendationRow.scan_run_id == scan_id, RecommendationRow.id.not_in(_superseded_ids())).order_by(RecommendationRow.rank)))
+    """The current version of each recommendation of a scan (superseded versions stay in history). The heavy inputs
+    load on demand — use the rows inside the session."""
+    return list(s.scalars(select(RecommendationRow).options(*heavy_deferred()).where(RecommendationRow.scan_run_id == scan_id, RecommendationRow.id.not_in(_superseded_ids())).order_by(RecommendationRow.rank)))
 
 
 def current_version(s: Session, rec_id: int) -> RecommendationRow | None:
@@ -122,6 +129,17 @@ def all_recommendations(s: Session, mode: str | None = None, until: datetime | N
     if until is not None:
         q = q.where(RecommendationRow.as_of <= until)
     return list(s.scalars(q.order_by(RecommendationRow.as_of, RecommendationRow.id)))
+
+
+def recommendation_keys(s: Session, mode: str | None = None, until: datetime | None = None) -> list[Any]:
+    """id, ticker, as_of, final_action, confidence of every recommendation — the evaluation screens' view, without the
+    stored analysis, inputs and model snapshot (about 190 KB of JSON per row: 2,400 rows took 6 s to load)."""
+    q = select(RecommendationRow.id, RecommendationRow.ticker, RecommendationRow.as_of, RecommendationRow.final_action, RecommendationRow.confidence)
+    if mode is not None:
+        q = q.where(RecommendationRow.mode == mode)
+    if until is not None:
+        q = q.where(RecommendationRow.as_of <= until)
+    return list(s.execute(q.order_by(RecommendationRow.as_of, RecommendationRow.id)))
 
 
 def committee_for(s: Session, rec_id: int) -> CommitteeRow | None:

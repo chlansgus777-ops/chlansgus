@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import date, timedelta
 from typing import Any, Literal
 
@@ -11,7 +12,7 @@ from pydantic import BaseModel, Field
 from marketlens import __version__
 from marketlens.application.codec import encode
 from marketlens.application.evaluation_service import PAPER_DISCLAIMER, EvaluationService
-from marketlens.application.services import MarketLensService
+from marketlens.application.services import CALENDAR_VIEW_DAYS, MarketLensService
 from marketlens.config import AGENT_PROMPT_VERSION, SCHEMA_VERSION, code_version
 from marketlens.application.brief import build_brief
 from marketlens.domain.enums import ACTION_KO, BULLISH_ACTIONS, Action, Horizon
@@ -78,8 +79,8 @@ def _row_summary(r: Any, s: MarketLensService | None = None, fetch_quote: bool =
     entry = res.get("entry") or {}
     er = res.get("event_risk") or {}
     nxt = (er.get("nearest") or {})
-    status = s.recommendation_status(r, fetch_quote=fetch_quote) if s is not None else None
     lv = s.levels_now(r) if s is not None else None  # after a split: the levels on today's share basis
+    status = s.recommendation_status(r, fetch_quote=fetch_quote, levels=lv) if s is not None else None
     bullish = r.final_action in {a.value for a in BULLISH_ACTIONS}
     return {
         "current_status": status.status if status else None,  # CURRENT | AGING | EXPIRED (re-judged now)
@@ -108,17 +109,27 @@ def _row_summary(r: Any, s: MarketLensService | None = None, fetch_quote: bool =
     }
 
 
+def _scan_rows(s: MarketLensService, ss: Any) -> tuple[Any, list[dict[str, Any]], dict[int, dict[str, Any]]]:
+    """The latest scan's current recommendations: (scan, row summaries, stored analysis by id) from ONE query."""
+    scan = repo.latest_scan(ss, mode=s.mode.value)
+    if scan is None:
+        return None, [], {}
+    recs = repo.recommendations_for_scan(ss, scan.id)
+    return scan, [_row_summary(r, s) for r in recs], {r.id: (r.result or {}) for r in recs}
+
+
+def _scan_head(scan: Any) -> dict[str, Any] | None:
+    return None if scan is None else {"id": scan.id, "as_of": scan.as_of.isoformat(), "mode": scan.mode, "stages": scan.stages, "excluded": scan.excluded_count,
+                                      "scoring_model_version": scan.scoring_model_version}
+
+
 @router.get("/opportunities")
 def opportunities(req: Request) -> dict[str, Any]:
     s = svc(req)
-    ready = s.readiness()  # "no rows" must be explainable: not ready ≠ no opportunities
+    ready = s.readiness_view()  # "no rows" must be explainable: not ready ≠ no opportunities (last count, never a wait)
     with s.sf() as ss:
-        scan = repo.latest_scan(ss, mode=s.mode.value)
-        if scan is None:
-            return {"scan": None, "rows": [], "readiness": ready}
-        rows = repo.recommendations_for_scan(ss, scan.id)
-        return {"scan": {"id": scan.id, "as_of": scan.as_of.isoformat(), "mode": scan.mode, "stages": scan.stages, "excluded": scan.excluded_count, "scoring_model_version": scan.scoring_model_version},
-                "rows": [_row_summary(r, s) for r in rows], "readiness": ready}
+        scan, rows, _ = _scan_rows(s, ss)
+    return {"scan": _scan_head(scan), "rows": rows, "readiness": ready}
 
 
 @router.post("/scan")
@@ -163,9 +174,10 @@ def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
         if row is None:
             raise HTTPException(404, f"{t}: 분석 결과 없음")
         com = repo.committee_for(ss, row.id)
-        history = [{"id": h.id, "as_of": h.as_of.isoformat(), "score": h.score, "action": h.final_action} for h in s.company_recommendations(ss, t, limit=30)]
+        history = [{"id": h.id, "as_of": h.as_of.isoformat(), "score": h.score, "action": h.final_action} for h in s.company_recommendations(ss, t, limit=30, light=True)]
         bars = (row.inputs or {}).get("bars") or []
-        summary = _row_summary(row, s, fetch_quote=True)
+        quote_pending = s.quote_soon(t, wait=STORE_FIRST_WAIT)  # the current-price re-check never holds the page longer
+        summary = _row_summary(row, s) | {"quote_pending": quote_pending}
         return {
             "recommendation": summary,
             # the five-question reading of this analysis, on today's share basis (product overhaul 2026-09-28)
@@ -206,7 +218,8 @@ def _position_plan(s: MarketLensService, ss: Any, row: Any, summary: dict[str, A
         return {"available": False, "reason": f"지금 실행할 수 있는 매수 추천이 아니어서 수량을 계산하지 않음 — {why}", "status": summary.get("current_status")}
     pf = s.portfolio(ss)
     end = last_completed_session(s.now())
-    closes = {h.ticker: {b.day: b.close for b in (s.data.bars(h.ticker, end - timedelta(days=10), end).value or []) if b.day <= end} for h in pf.holdings}
+    series, _ = _view_bars(s, [h.ticker for h in pf.holdings], end - timedelta(days=10), end)
+    closes = {h.ticker: {b.day: b.close for b in series.get(h.ticker, []) if b.day <= end} for h in pf.holdings}
     entered = repo.get_setting(ss, "portfolio_cash", "") not in ("", None) or bool(pf.holdings)  # a default cash figure is not the user's account
     snap = portfolio_snapshot(pf, closes) if entered else None
     if snap is not None and snap.valuation_status == "UNAVAILABLE":  # a cash-only total is not the account (review 2026-09-28 F10)
@@ -237,24 +250,44 @@ def replay(req: Request, rec_id: int) -> dict[str, Any]:
 # ---------------------------------------------------------------- market / macro / issues / calendar
 @router.get("/macro")
 def macro(req: Request) -> dict[str, Any]:
-    s = svc(req)
-    snap, missing = s.data.macro_snapshot(s.now())
+    return _macro_body(svc(req).macro_view(wait=VIEW_FIRST_WAIT))
+
+
+VIEW_FIRST_WAIT = 1.5  # seconds a screen waits for a provider when it has nothing yet; then it says "loading"
+STORE_FIRST_WAIT = 0.4  # stored history / a quote: answered in milliseconds when present — past this it is a provider call
+
+
+def _view_meta(v: Any) -> dict[str, Any]:
+    """When the shown data was fetched and whether a newer fetch is running — a cached answer is never shown as new."""
+    return {"fetched_at": v.computed_at.isoformat() if v.computed_at else None, "refreshing": v.refreshing, "refresh_error": v.error if v.ready else None}
+
+
+def _macro_body(v: Any) -> dict[str, Any]:
+    snap = v.value
     if snap is None:
-        return {"available": False, "reason": missing, "series": {}, "regimes": [], "primary_regime": "Unknown", "factor_moves": []}
+        pending = v.refreshing
+        return {"available": False, "pending": pending, "reason": "거시 지표를 불러오는 중" if pending else (v.error or "거시 데이터 없음"),
+                "series": {}, "regimes": [], "primary_regime": "Unknown", "factor_moves": []} | _view_meta(v)
     regs = detect_regimes(snap)
-    return {"available": True, "as_of": snap.as_of.isoformat(), "series": encode(snap.series), "regimes": encode(regs), "primary_regime": primary_regime(regs), "factor_moves": encode(factor_moves(snap)), "yield_curve_2s10s": snap.yield_curve_2s10s}
+    return {"available": True, "as_of": snap.as_of.isoformat(), "series": encode(snap.series), "regimes": encode(regs), "primary_regime": primary_regime(regs),
+            "factor_moves": encode(factor_moves(snap)), "yield_curve_2s10s": snap.yield_curve_2s10s} | _view_meta(v)
 
 
-def _ctx(s: MarketLensService) -> Any:
-    return s.market_context()  # never older than CONTEXT_MAX_AGE (review 2026-09-28 F06)
+def _ctx(s: MarketLensService) -> tuple[Any, bool]:
+    """The newest shared market context at once; an older one than CONTEXT_MAX_AGE is rebuilt in the background
+    (review 2026-09-28 F06) and the answer says so — the screen never waits for the news collection."""
+    return s.context_view(wait=VIEW_FIRST_WAIT)
 
 
 @router.get("/issues")
 def issues(req: Request) -> dict[str, Any]:
     s = svc(req)
-    ctx = _ctx(s)
+    ctx, rebuilding = _ctx(s)
+    if ctx is None:
+        return {"available": False, "pending": rebuilding, "reason": "시장 이슈를 모으는 중" if rebuilding else "시장 이슈를 만들지 못함", "issues": [], "refreshing": rebuilding}
+    meta = {"as_of": ctx.as_of.isoformat(), "refreshing": rebuilding}
     if ctx.issues is None:
-        return {"available": False, "reason": ctx.news_missing, "issues": []}
+        return {"available": False, "reason": ctx.news_missing, "issues": []} | meta
     out = []
     for i in ctx.issues.issues:
         impacts = compute_issue_impacts(i, ctx.graph, None, s.base_cfg.impact)
@@ -263,14 +296,14 @@ def issues(req: Request) -> dict[str, Any]:
             "affected_stocks": [{"ticker": x.ticker, "hops": x.hops, "swing": x.at(Horizon.SWING).impact_score} for x in impacts[:15]],
             "affected_sectors": sorted({ctx.securities[x.ticker].sector for x in impacts if x.ticker in ctx.securities}),
         })
-    return {"available": True, "issues": out, "injection_flags": ctx.issues.injection_flags}
+    return {"available": True, "issues": out, "injection_flags": ctx.issues.injection_flags} | meta
 
 
 @router.get("/issues/{issue_id}")
 def issue_detail(req: Request, issue_id: str) -> dict[str, Any]:
     s = svc(req)
-    ctx = _ctx(s)
-    iss = next((i for i in (ctx.issues.issues if ctx.issues else []) if i.issue_id == issue_id), None)
+    ctx, _ = _ctx(s)
+    iss = None if ctx is None else next((i for i in (ctx.issues.issues if ctx.issues else []) if i.issue_id == issue_id), None)
     if iss is None:
         raise HTTPException(404, issue_id)
     impacts = compute_issue_impacts(iss, ctx.graph, None, s.base_cfg.impact)
@@ -281,10 +314,16 @@ def issue_detail(req: Request, issue_id: str) -> dict[str, Any]:
 def calendar(req: Request, days: int = 45) -> dict[str, Any]:
     s = svc(req)
     days = max(1, min(days, 365))
+    return _calendar_body(s, s.calendar_view(days, wait=VIEW_FIRST_WAIT), days)
+
+
+def _calendar_body(s: MarketLensService, v: Any, days: int) -> dict[str, Any]:
     d = to_ny(s.now()).date()
-    f = s.data.events(d - timedelta(days=1), d + timedelta(days=days))
-    evs = sorted(f.value or [], key=lambda e: e.event_date)
-    return {"available": f.value is not None, "reason": f.error, "events": [encode(e) | {"days_until": e.days_until(d)} for e in evs if (not e.affected or e.importance >= 0.8)][:300]}
+    if v.value is None:
+        pending = v.refreshing
+        return {"available": False, "pending": pending, "reason": "일정을 불러오는 중" if pending else v.error, "events": []} | _view_meta(v)
+    evs = sorted((e for e in v.value if e.event_date <= d + timedelta(days=days)), key=lambda e: e.event_date)
+    return {"available": True, "reason": None, "events": [encode(e) | {"days_until": e.days_until(d)} for e in evs if (not e.affected or e.importance >= 0.8)][:300]} | _view_meta(v)
 
 
 # ---------------------------------------------------------------- dashboard
@@ -313,30 +352,16 @@ def _card_facts(res: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/dashboard")
 def dashboard(req: Request) -> dict[str, Any]:
+    """The home screen from stored data only: candidates, portfolio and watchlist at once; the macro regime and the
+    upcoming events are the last fetched ones (with their fetch time) while a background refresh runs — a slow or
+    failing provider never holds the screen (owner report 2026-09-28: 30 s+ for FRED and the calendar in turn)."""
     s = svc(req)
-    opp = opportunities(req)
-    rows = opp["rows"]
-    top = [r for r in rows if r["action"] in {a.value for a in BULLISH_ACTIONS}][:8] or rows[:8]
-    risks = []
-    for r in rows:
-        if r["vetoes"]:
-            risks.append({"ticker": r["ticker"], "text": ", ".join(r["vetoes"])})
-        elif r["risk"] in ("HIGH", "EXTREME"):
-            risks.append({"ticker": r["ticker"], "text": f"이벤트 위험 {r['risk']}"})
-    m = macro(req)
-    cal = calendar(req, 21)
-    changes = []
-    top_ids = {r["id"] for r in top}
-    for r in rows:
-        with s.sf() as ss:
-            rec = repo.get_recommendation(ss, r["id"])
-            items = [c for c in ((rec.result or {}).get("changes") or []) if c.get("kind") == "action"] if rec else []
-        if items:
-            changes.append({"ticker": r["ticker"], "text": items[0]["text"], "action": r["action"]})
-        if r["id"] in top_ids:
-            r.update(_card_facts((rec.result or {}) if rec else {}))
+    ready = s.readiness_view(wait=0.0)
+    mv, cv = s.macro_view(), s.calendar_view(CALENDAR_VIEW_DAYS)  # never wait: cached value or "loading"
+    bullish_set = {a.value for a in BULLISH_ACTIONS}
     alerts = []
     with s.sf() as ss:
+        scan, rows, results = _scan_rows(s, ss)
         pf = s.portfolio(ss)
         for w in repo.watchlist(ss):
             rec = s.latest_company_recommendation(ss, w.ticker)
@@ -344,12 +369,30 @@ def dashboard(req: Request) -> dict[str, Any]:
                 alerts.append({"ticker": w.ticker, "level": "info", "text": "아직 분석하지 않은 관심 종목입니다."})
                 continue
             row = _row_summary(rec, s)
-            if row["action"] in {a.value for a in BULLISH_ACTIONS} and row["actionable_now"]:
+            if row["action"] in bullish_set and row["actionable_now"]:
                 alerts.append({"ticker": w.ticker, "level": "positive", "text": f"{row['action_ko']} 신호 — 최대 매수가 {row['max_buy']}달러 이하에서 유효"})
             elif row["current_status"] != "CURRENT":
                 alerts.append({"ticker": w.ticker, "level": "info", "text": "마지막 분석이 오래되었습니다. 다시 분석해 보세요."})
             elif row["vetoes"]:
                 alerts.append({"ticker": w.ticker, "level": "warning", "text": "주의: " + ", ".join(row["vetoes"])})
+    top = [r for r in rows if r["action"] in bullish_set][:8] or rows[:8]
+    risks = []
+    for r in rows:
+        if r["vetoes"]:
+            risks.append({"ticker": r["ticker"], "text": ", ".join(r["vetoes"])})
+        elif r["risk"] in ("HIGH", "EXTREME"):
+            risks.append({"ticker": r["ticker"], "text": f"이벤트 위험 {r['risk']}"})
+    changes = []
+    top_ids = {r["id"] for r in top}
+    for r in rows:
+        res = results.get(r["id"]) or {}
+        items = [c for c in (res.get("changes") or []) if c.get("kind") == "action"]
+        if items:
+            changes.append({"ticker": r["ticker"], "text": items[0]["text"], "action": r["action"]})
+        if r["id"] in top_ids:
+            r.update(_card_facts(res))
+    m = _macro_body(mv)
+    cal = _calendar_body(s, cv, 21)
     acct = EvaluationService(s).paper_account()
     perf = None
     if acct and acct.get("equity"):
@@ -360,14 +403,17 @@ def dashboard(req: Request) -> dict[str, Any]:
         "performance": perf,
         "recommendation_changes": changes[:8],
         "watchlist_alerts": alerts[:8],
-        "scan": opp["scan"],
+        "scan": _scan_head(scan),
         "regime": {"primary": m.get("primary_regime"), "readings": [x for x in m.get("regimes", []) if x.get("active")]},
+        # each outside section says whether it is loaded, when it was fetched and whether a refresh runs
+        "regime_status": {k: m.get(k) for k in ("available", "pending", "reason", "fetched_at", "refreshing", "refresh_error", "as_of")},
         "top_opportunities": top,
         "major_risks": risks[:10],
         "upcoming_catalysts": cal["events"][:10],
+        "catalysts_status": {k: cal.get(k) for k in ("available", "pending", "reason", "fetched_at", "refreshing", "refresh_error")},
         "portfolio": {"holdings": len(pf.holdings), "cash": pf.cash},
         "provider_health": [h.as_dict() for h in s.health.all()],
-        "readiness": opp["readiness"],
+        "readiness": ready,
     }
 
 
@@ -390,10 +436,35 @@ def portfolio(req: Request) -> dict[str, Any]:
         pf = s.portfolio(ss)
     end = last_completed_session(s.now())
     start = end - timedelta(days=260)
-    closes = {h.ticker: {b.day: b.close for b in (s.data.bars(h.ticker, start, end).value or []) if b.day <= end} for h in pf.holdings}
-    bench = {b.day: b.close for b in (s.data.bars("SPY", start, end).value or []) if b.day <= end}
+    series, pending = _view_bars(s, [h.ticker for h in pf.holdings] + ["SPY"], start, end)
+    closes = {h.ticker: {b.day: b.close for b in series.get(h.ticker, []) if b.day <= end} for h in pf.holdings}
+    bench = {b.day: b.close for b in series.get("SPY", []) if b.day <= end}
     snap = portfolio_snapshot(pf, closes, bench or None)
-    return encode(snap) | {"currency": "USD", "note": "MarketLens는 주문을 넣지 않습니다. 평가금액은 모든 종목을 같은 거래일 종가로 계산합니다."}
+    return encode(snap) | {"currency": "USD", "note": "MarketLens는 주문을 넣지 않습니다. 평가금액은 모든 종목을 같은 거래일 종가로 계산합니다.",
+                           "history_pending": pending, "unused_manual": [{"ticker": t, "quantity": q} for t, q in pf.unused_manual]}
+
+
+def _view_bars(s: MarketLensService, tickers: list[str], start: date, end: date, wait: float = STORE_FIRST_WAIT) -> tuple[dict[str, list[Any]], list[str]]:
+    """Daily bars for a screen. Stored history answers at once; a stretch the store lacks is fetched in the
+    background (one job per name and window) — the screen waits at most ``wait`` seconds in total, then uses what is
+    stored and lists the names still loading (owner report 2026-09-28: the portfolio waited on the price provider)."""
+    if s.store is None:  # MOCK: generated in memory, nothing to wait for
+        return {t: s.data.bars(t, start, end).value or [] for t in dict.fromkeys(tickers)}, []
+    keys = {t: f"bars:{t}:{start}:{end}" for t in dict.fromkeys(tickers)}
+    for t, k in keys.items():
+        s.refresher.get(k, lambda t=t: s.data.bars(t, start, end).value or [], max_age=600.0, retry_after=120.0)
+    deadline = time.monotonic() + wait
+    out: dict[str, list[Any]] = {}
+    pending: list[str] = []
+    for t, k in keys.items():
+        v = s.refresher.wait(k, max(0.0, deadline - time.monotonic()))
+        if v.ready:
+            out[t] = v.value
+            continue
+        out[t] = s.store.bars(t, start, end)
+        if v.refreshing:
+            pending.append(t)
+    return out, pending
 
 
 @router.put("/portfolio")
@@ -564,7 +635,7 @@ def calibration(req: Request) -> dict[str, Any]:
 @router.get("/readiness")
 def readiness(req: Request) -> dict[str, Any]:
     """Can today's recommendations be trusted? FULL / LIMITED / PAPER ONLY / NOT READY, with progress."""
-    return svc(req).readiness()
+    return svc(req).readiness_view(wait_if_cached=2.0)  # the readiness screen waits briefly for a recount, then shows the last one marked
 
 
 @router.get("/health")

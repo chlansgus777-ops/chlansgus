@@ -54,9 +54,16 @@ function describe(t: TradeRow): string {
 export function Ledger({ today, onChange, prefill }: { today: string; onChange: () => void; prefill?: string | null }) {
   const v = useApi<LedgerView>("/transactions");
   // opened from a stock page ("거래 기록하기"): the ticker and today are filled in, the form is in view
-  const [f, setF] = useState<TradeForm>(() => prefill ? { ...EMPTY_FORM, ticker: prefill.toUpperCase(), day: today } : EMPTY_FORM);
+  // ``prefill`` = "TICKER" (a buy from a stock page) or "TICKER:QTY" (sell the holding, from the holdings table)
+  const fromPrefill = (pf: string): TradeForm => {
+    const [t, q] = pf.split(":");
+    return q ? { ...EMPTY_FORM, kind: "SELL", ticker: (t ?? "").toUpperCase(), day: today, quantity: q } : { ...EMPTY_FORM, ticker: pf.toUpperCase(), day: today };
+  };
+  const [f, setF] = useState<TradeForm>(() => prefill ? fromPrefill(prefill) : EMPTY_FORM);
+  const [seen, setSeen] = useState(prefill ?? null);
+  if (prefill && prefill !== seen) { setSeen(prefill); setF(fromPrefill(prefill)); } // a new request while open
   const formRef = useCallback((el: HTMLFormElement | null) => {
-    if (el && prefill) { el.scrollIntoView({ block: "center" }); el.querySelector<HTMLInputElement>('input[aria-label="거래 수량"]')?.focus(); }
+    if (el && prefill) { el.scrollIntoView({ block: "center" }); el.querySelector<HTMLInputElement>('input[aria-label="거래 가격"], input[aria-label="거래 수량"]')?.focus(); }
   }, [prefill]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

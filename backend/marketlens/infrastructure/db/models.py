@@ -228,7 +228,7 @@ class RecommendationRow(Base):
     data_quality: Mapped[str] = mapped_column(String(16))
     committee_status: Mapped[str] = mapped_column(String(24), default="NOT_RUN")
     result: Mapped[dict] = mapped_column(JSON)  # full AnalysisResult (audit)
-    inputs: Mapped[dict] = mapped_column(JSON)  # point-in-time AnalysisInputs (replay)
+    inputs: Mapped[dict] = mapped_column(JSON)  # point-in-time AnalysisInputs (replay) — lists defer it (repository.HEAVY)
     model_config_snapshot: Mapped[dict] = mapped_column(JSON)  # TOML texts used for this decision
     input_fingerprint: Mapped[str] = mapped_column(String(64))
     scoring_model_version: Mapped[str] = mapped_column(String(64))
@@ -423,3 +423,40 @@ class AppSettingRow(Base):
     __tablename__ = "app_settings"
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
+
+
+# ---------------------------------------------------------------- data versions (cheap change marker)
+# Every insert, update or delete of a table the readiness counts read bumps that table's counter (SQLite triggers), so
+# "did the stored data change?" is one tiny read instead of a count over millions of price bars (owner report
+# 2026-09-28: the check itself scanned the whole store on every screen).
+DATA_VERSION_TABLES = ("price_bars", "securities", "fundamentals_quarterly", "ingestion_manifest", "estimate_snapshots")
+
+
+class DataVersionRow(Base):
+    __tablename__ = "data_versions"
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, default=0)
+
+
+def data_version_ddl() -> list[str]:
+    """SQLite statements that create the counters' rows and triggers (idempotent)."""
+    out = [f"INSERT OR IGNORE INTO data_versions (name, version) VALUES ('{t}', 0)" for t in DATA_VERSION_TABLES]
+    for t in DATA_VERSION_TABLES:
+        for op in ("INSERT", "UPDATE", "DELETE"):
+            out.append(f"CREATE TRIGGER IF NOT EXISTS dv_{t}_{op.lower()} AFTER {op} ON {t} BEGIN "
+                       f"UPDATE data_versions SET version = version + 1 WHERE name = '{t}'; END")
+    return out
+
+
+def _install_data_version_triggers(target: object, connection: object, **kw: object) -> None:
+    if getattr(getattr(connection, "dialect", None), "name", "") != "sqlite":
+        return
+    from sqlalchemy import text
+
+    for stmt in data_version_ddl():
+        connection.exec_driver_sql(stmt) if hasattr(connection, "exec_driver_sql") else connection.execute(text(stmt))  # type: ignore[attr-defined]
+
+
+from sqlalchemy import event as _event  # noqa: E402
+
+_event.listen(Base.metadata, "after_create", _install_data_version_triggers)

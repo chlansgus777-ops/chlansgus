@@ -149,7 +149,7 @@ class DataAccess:
         return out
 
     def company_recommendations(self, s: Any, ticker: str, mode: str, before: datetime | None, on: date, limit: int = 500,
-                                inclusive: bool = True, exclude_id: int | None = None) -> list[Any]:
+                                inclusive: bool = True, exclude_id: int | None = None, light: bool = False) -> list[Any]:
         """The recommendations of the SECURITY that uses ``ticker`` on ``on``, newest first — across renames and
         relistings, never across a reuse or to another share class (round 10 identity invariant). Every "previous",
         "latest" and "history" lookup goes through here; "which security" is MarketStore.security_id."""
@@ -174,7 +174,12 @@ class DataAccess:
         keep = [i for i, t, a in light if ids[(t, to_ny(a).date())] == sid][:limit]
         if not keep:
             return []
-        full = {r.id: r for r in s.scalars(select(R).where(R.id.in_(keep)))}
+        q2 = select(R).where(R.id.in_(keep))
+        if light:  # a history list: the heavy JSON loads only if read, inside this session
+            from marketlens.infrastructure.db.repository import heavy_deferred
+
+            q2 = q2.options(*heavy_deferred())
+        full = {r.id: r for r in s.scalars(q2)}
         return [full[i] for i in keep if i in full]
 
     def security_of(self, ticker: str, on: date, s: Any) -> str:

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { stamp } from "../format";
+import { stamp, stampEt } from "../format";
 import { READINESS_KO } from "../i18n";
 import { Card, Notice, Ribbon, StatePanel } from "./ui";
 import { useApi } from "./useApi";
@@ -11,6 +11,8 @@ export interface ReadinessInfo {
   scanner_status: string; scanner_reasons: string[]; progress: Record<string, number | null>;
   sync: { status?: string; at?: string; bar_days_remaining?: number };
   categories: { category: string; status: string; provider: string; note: string }[];
+  /** the counts are from ``stats_as_of`` and a recount of newer data is running (null readiness: never counted yet) */
+  stats_pending?: boolean; stats_as_of?: string | null;
 }
 
 const PROGRESS_KO: Record<string, string> = {
@@ -44,6 +46,7 @@ export function ReadinessBanner({ r }: { r: ReadinessInfo | undefined | null }) 
     <Ribbon tone={tone} cap="추천 준비도" testId="readiness-ribbon">
       <b>추천 준비도: {info.label}</b> — {info.help} <Link to="/health">자세히 보기</Link>
       {why ? <div>이유: {why}</div> : null}
+      {r.stats_pending && r.stats_as_of ? <div className="caption" data-testid="readiness-recount">저장된 데이터가 바뀌어 다시 세는 중 — 위 판정은 {stampEt(r.stats_as_of)} 기준입니다.</div> : null}
     </Ribbon>
   );
 }
@@ -74,16 +77,18 @@ export interface SyncJob {
   reasons?: string[]; failures?: string[]; retry_at?: string; progress?: SyncProgress | null;
 }
 export interface SyncProgress {
-  percent: number; eta_seconds?: number; current?: string | null;
+  percent: number; eta_seconds?: number | null; current?: string | null; current_for_seconds?: number | null;
   steps: Record<string, { done: number; total: number; percent: number; detail?: string }>;
 }
 const STEP_KO: Record<string, [string, string]> = {
-  bars: ["가격 이력", "거래일"], universe: ["종목 목록", ""], profiles: ["업종 정보", "종목"], fundamentals: ["재무", "종목"],
+  bars: ["가격 이력", "거래일"], universe: ["종목 목록(SEC)", ""], splits: ["주식분할 기록", ""], estimates: ["실적 추정치 일정", "구간"],
+  shares: ["발행주식수·시가총액", ""], share_lookups: ["발행주식수 개별 확인", "종목"], profiles: ["업종 정보", "종목"], fundamentals: ["재무", "종목"],
 };
-const STEP_ORDER = ["bars", "universe", "profiles", "fundamentals"];
+const STEP_ORDER = ["bars", "universe", "splits", "estimates", "shares", "share_lookups", "profiles", "fundamentals"];
 
-function eta(seconds: number | undefined): string {
+function eta(seconds: number | null | undefined): string {
   if (seconds === undefined) return "";
+  if (seconds === null) return "남은 시간 계산 중(이 단계가 예상보다 오래 걸림)";
   if (seconds < 60) return "남은 시간 1분 미만";
   const m = Math.ceil(seconds / 60);
   return m >= 90 ? `남은 시간 약 ${Math.floor(m / 60)}시간 ${m % 60}분` : `남은 시간 약 ${m}분`;
@@ -104,9 +109,13 @@ export function SyncProgressView({ p, running }: { p: SyncProgress; running: boo
       <ul className="list">{steps.map((k) => {
         const st = p.steps[k]!;
         const [label, unit] = STEP_KO[k] ?? [k, ""];
-        const now = running && p.current === k && st.detail && st.done < st.total ? ` — ${st.detail} 받는 중` : "";
+        const active = running && p.current === k && st.done < st.total;
+        const took = active && p.current_for_seconds != null && p.current_for_seconds >= 10 ? ` · ${p.current_for_seconds >= 120 ? `${Math.floor(p.current_for_seconds / 60)}분` : `${p.current_for_seconds}초`}째` : "";
+        const now = active ? ` — ${st.detail ? `${st.detail} ` : ""}받는 중${took}` : "";
+        // a one-shot step (a single download) has no count worth showing: done or in progress
+        const count = st.total === 1 && !unit ? (st.done >= 1 ? "완료" : "진행 중") : `${st.done}/${st.total}${unit ? ` ${unit}` : ""} (${st.percent}%)`;
         return <li key={k}><span className={`dot ${st.done >= st.total ? "info" : "warn"}`}>{st.done >= st.total ? "✓" : "…"}</span>
-          <span>{label}: {st.done}/{st.total}{unit ? ` ${unit}` : ""} ({st.percent}%){now}</span></li>;
+          <span>{label}: {count}{now}</span></li>;
       })}</ul>
       {running && p.percent < 100 && !p.steps.fundamentals && <div className="caption">재무·업종 단계의 양은 가격 이력을 받은 뒤에 정해지므로 전체 %가 그때 한 번 달라질 수 있습니다.</div>}
     </div>

@@ -5,8 +5,9 @@ import { IArrow, IDownload, IEvent, IPerf, IPortfolio, IScan, IShield, IStar } f
 import { Action, Card, Change, Empty, Err, LineChart, Loading, Notice, Ribbon, ScoreMeter, StaleData, StatePanel, StatusBadge, Term } from "../components/ui";
 import { NotReady, ReadinessBanner, SyncControl, type ReadinessInfo } from "../components/Readiness";
 import { type ScanStatus, usePageTime, useStatus } from "../components/status";
-import { useApi } from "../components/useApi";
+import { useApi, usePoll } from "../components/useApi";
 import { LivePrice } from "../components/LivePrice";
+import { StalePriceNote, stalePriceCause } from "../components/OppTable";
 import { useQuote, useViewQuotes } from "../quotes";
 import { ago, day, num, pct, price, stampEt } from "../format";
 import { ACTION_PLAIN, BULLISH, HEALTH_KO, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
@@ -26,7 +27,11 @@ interface Dash {
   recommendation_changes: { ticker: string; text: string; action: string }[];
   watchlist_alerts: { ticker: string; level: string; text: string }[];
   readiness?: ReadinessInfo;
+  /** outside sections: loaded or not, when fetched, whether a background refresh runs */
+  regime_status?: SectionStatus;
+  catalysts_status?: SectionStatus;
 }
+interface SectionStatus { available?: boolean; pending?: boolean; reason?: string | null; fetched_at?: string | null; refreshing?: boolean; refresh_error?: string | null }
 
 const REGIME_HELP: Record<string, string> = {
   "Risk On": "투자자들이 위험을 감수하는 분위기 — 성장주·경기민감주에 우호적",
@@ -132,15 +137,28 @@ export function scopeLine(s: ScanStatus | null | undefined, mode: string | undef
   return `이번 스캔 범위: ${list} ${c.universe.toLocaleString("ko-KR")}개 → 기준 통과 ${(c.universe - c.excluded).toLocaleString("ko-KR")}개 → 정밀 분석 ${c.deep_analysed.toLocaleString("ko-KR")}개 → 최종 ${c.analysed}개`;
 }
 
+/** When an outside section's data was fetched — shown once it is older than 30 minutes or a refresh failed, so a
+ * cached answer is never taken for a new one. */
+function SectionAge({ s, nowMs, what }: { s?: SectionStatus; nowMs: number; what: string }) {
+  if (!s?.fetched_at) return null;
+  const old = nowMs - Date.parse(s.fetched_at) > 30 * 60_000;
+  if (!old && !s.refresh_error) return null;
+  return <div className="s" data-testid={`age-${what}`}>{what} {ago(s.fetched_at, nowMs)} 기준{s.refresh_error ? " · 새로 받기 실패(이전 값 표시)" : s.refreshing ? " · 새로 받는 중" : ""}</div>;
+}
+
 export default function Dashboard() {
   const d = useApi<Dash>("/dashboard");
   const st = useStatus();
+  // the macro regime / the calendar still loading in the background: ask again shortly (cheap — stored data only)
+  const sectionsLoading = !!(d.data?.regime_status?.pending || d.data?.catalysts_status?.pending || (d.data?.readiness?.stats_pending && d.data.readiness.recommendation_readiness == null));
+  usePoll(d.reload, 3_000, sectionsLoading);
   const ownScan = useApi<ScanStatus>(st ? null : "/scan/status"); // outside the app shell (tests) read it here
   const ss = st ? st.scan.data : ownScan.data;
   const [busy, setBusy] = useState(false);
   const [scanErr, setScanErr] = useState<string | null>(null);
   const x = d.data;
   const { valid, notValid } = splitCandidates(x?.top_opportunities ?? []);
+  const staleCause = stalePriceCause(x?.top_opportunities ?? []);
   const shown = valid.slice(0, MAX_CARDS);
   const newestPrice = shown.map((r) => r.price_timestamp).filter((t): t is string => !!t).sort().pop() ?? null;
   useViewQuotes(shown.map((r) => r.ticker));  // the few names on the home screen join the app-wide quote stream
@@ -195,22 +213,24 @@ export default function Dashboard() {
               <span className="count-l">{headline}</span>
             </div>
             <p className="lead">
-              {x.scan ? <>시장 분위기는 <b>{ko(REGIME_KO, x.regime.primary, "판단 불가")}</b> — {REGIME_HELP[x.regime.primary] ?? "거시 지표로 판단한 현재 환경"}.</> : "스캔은 종목 목록을 거래대금·시가총액으로 거른 뒤 업종별 재무·밸류에이션·실적·가격 계획을 차례로 계산합니다."}
+              {x.scan && !x.regime_status?.pending ? <>시장 분위기는 <b>{ko(REGIME_KO, x.regime.primary, "판단 불가")}</b> — {REGIME_HELP[x.regime.primary] ?? "거시 지표로 판단한 현재 환경"}.</> : x.scan ? null : "스캔은 종목 목록을 거래대금·시가총액으로 거른 뒤 업종별 재무·밸류에이션·실적·가격 계획을 차례로 계산합니다."}
               {notValid.length > 0 ? <> 매수 계열 추천 중 {notValid.length}개는 시간 경과·가격 조건 이탈·자료 오래됨으로 지금은 유효하지 않아 따로 표시했습니다.</> : null}
             </p>
             <div className="facts">
-              <div><div className="t">시장 분위기</div><div className="v">{ko(REGIME_KO, x.regime.primary, "판단 불가")}</div>
+              <div><div className="t">시장 분위기</div><div className="v">{x.regime_status?.pending ? <span className="muted" data-testid="regime-loading">거시 지표 불러오는 중…</span> : ko(REGIME_KO, x.regime.primary, "판단 불가")}</div>
+                <SectionAge s={x.regime_status} nowMs={nowMs} what="거시 지표" />
                 {x.regime.readings.length > 1 && <div className="s" title={x.regime.readings.map((r) => `${ko(REGIME_KO, r.regime)}: ${r.evidence.join(", ")}`).join("\n")}>함께 나타난 국면: {x.regime.readings.filter((r) => r.regime !== x.regime.primary).slice(0, 2).map((r) => ko(REGIME_KO, r.regime)).join(", ")}</div>}</div>
               <div className={risk0 || notValid.length ? "warn" : ""}><div className="t">가장 큰 위험</div><div className="v">{risk0 ? `${risk0.ticker} — ${risk0.text.split(", ").map((v) => VETO_KO[v] ?? v).join(", ")}` : notValid.length ? `유효하지 않은 추천 ${notValid.length}개` : "상위 후보에 거부권·고위험 일정 없음"}</div>
                 <div className="s">{risk0 ? "상위 후보 중 거부권이나 큰 이벤트가 걸린 종목" : "종목별 가장 큰 위험은 후보 카드에 있습니다"}</div></div>
-              <div><div className="t">다음 핵심 일정</div><div className="v">{next ? next.title : "일정 자료 없음"}</div>
-                <div className="s">{next ? `${day(next.event_date)} (미국 날짜) · ${next.days_until === 0 ? "오늘" : `${next.days_until}일 후`}` : "일정 공급자에게서 받은 일정이 없습니다"}</div></div>
+              <div><div className="t">다음 핵심 일정</div><div className="v">{next ? next.title : x.catalysts_status?.pending ? <span className="muted">일정 불러오는 중…</span> : "일정 자료 없음"}</div>
+                <div className="s">{next ? `${day(next.event_date)} (미국 날짜) · ${next.days_until === 0 ? "오늘" : `${next.days_until}일 후`}` : x.catalysts_status?.pending ? "일정 공급자에게 요청했습니다" : x.catalysts_status?.reason ? `일정을 받지 못함 — ${x.catalysts_status.reason}` : "일정 공급자에게서 받은 일정이 없습니다"}</div></div>
             </div>
           </section>
 
           {sysMode === "LIVE" && notReady && !shown.length && <span id="data-prep" />}
           <Card title="지금 검토할 후보" right={<Link to="/stocks?tab=candidates" className="row tight">전체 후보 보기 <IArrow width={15} height={15} /></Link>}
                 explain="매수 조건을 통과하고 지금 다시 확인해도 유효한 종목만, 최대 5개까지 보여줍니다.">
+            {!shown.length && staleCause ? <div style={{ marginBottom: 12 }}><StalePriceNote c={staleCause} /></div> : null}
             {shown.length ? <div className="cands">{shown.map((r, i) => <CandidateCard key={r.id} r={r} lead={i === 0 && shown.length !== 2 && shown.length !== 4} />)}</div>
               : notReady && x.readiness ? <NotReady r={x.readiness} onChange={d.reload} />
               : !x.scan ? <StatePanel kind="not_scanned" actions={<button className="primary" disabled={running} onClick={scan}>시장 스캔 실행</button>} />
@@ -247,7 +267,8 @@ export default function Dashboard() {
             <div className="head"><h2><IEvent />다가오는 일정</h2><Link to="/market?tab=calendar">전체 →</Link></div>
             {x.upcoming_catalysts.length ? x.upcoming_catalysts.slice(0, 5).map((e) => (
               <div className="rail-item" key={e.event_id}><span className="t">{e.title}</span><span className={`chip-days${e.days_until <= 2 ? " soon" : ""}`}>{e.days_until === 0 ? "오늘" : `D-${e.days_until}`}</span><span className="s">{day(e.event_date)} (미국 날짜)</span></div>
-            )) : <div className="caption">일정 데이터가 없습니다.</div>}
+            )) : <div className="caption">{x.catalysts_status?.pending ? "일정 불러오는 중…" : "일정 데이터가 없습니다."}</div>}
+            <SectionAge s={x.catalysts_status} nowMs={nowMs} what="일정" />
           </div>
           <div className="rail-card">
             <div className="head"><h2><IStar />관심 종목</h2><Link to="/stocks?tab=watch">관리 →</Link></div>

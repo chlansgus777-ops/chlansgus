@@ -22,6 +22,7 @@ from marketlens.application.graph_seed import GraphSeed
 from marketlens.application.issue_engine import news_for_ticker
 from marketlens.application.market_store import MarketStore
 from marketlens.application.pipeline import AnalysisInputs, AnalysisResult
+from marketlens.application.refresher import Refresher, Snapshot
 from marketlens.application.registry import ProviderRegistry, build_registry
 from marketlens.application.replay import ReplayOutcome, config_snapshot, replay
 from marketlens.application.scanner import NEWS_LOOKBACK, ScanContext, ScanResult, Scanner
@@ -45,7 +46,16 @@ from marketlens.providers.llm.base import LLMProvider, UnavailableLLM
 log = logging.getLogger("marketlens.service")
 DEFAULT_CASH = 100_000.0
 COMMITTEE_OK = ("COMPLETED", "PARTIAL", "REUSED")
-CONTEXT_MAX_AGE = timedelta(minutes=30)  # the issues screen rebuilds an older shared market context
+CONTEXT_MAX_AGE = timedelta(minutes=30)  # the issues screen rebuilds an older shared market context (in the background)
+MACRO_VIEW_AGE = 15 * 60.0  # seconds — FRED series are daily; the provider TTL cache sits under this
+CALENDAR_VIEW_AGE = 30 * 60.0
+CALENDAR_VIEW_DAYS = 60
+READINESS_WAIT = 2.0  # a first visit waits this long for the coverage counts, then shows them as pending
+READINESS_MIN_GAP = 20.0  # seconds between background recounts while the data keeps changing (a running preparation)
+
+
+class ProviderUnavailableForView(Exception):
+    """A screen's background read found no data (the reason is shown; the last good value is kept)."""
 
 
 PLAN_PRICE_FIELDS = ("ideal_entry", "acceptable_low", "acceptable_high", "max_buy", "add_zone_low", "add_zone_high", "stop", "target1", "target2",
@@ -219,6 +229,12 @@ class MarketLensService:
         self._master: tuple[date, float, dict[str, Any]] | None = None  # (day, loaded at, ticker → Security)
         self._check_db_environment()
         self.quotes, self._quote_stream = self._build_quotes()
+        # screen reads never wait for a provider or a market-wide recount: last good result + one background refresh
+        self.refresher = Refresher(workers=3, wall=self.now)
+        self._readiness_lock = threading.Lock()
+        self._readiness_cache: tuple[Any, Any, datetime] | None = None  # (data key, coverage counts, counted at)
+        self._readiness_started = 0.0
+        self._readiness_kick = threading.Lock()
 
     # ------------------------------------------------------------------ live quotes (independent of analysis)
     def _build_quotes(self) -> tuple[Any, Any]:
@@ -261,6 +277,49 @@ class MarketLensService:
         if self._quote_stream is not None:
             self._quote_stream.stop()
         self.quotes.stop()
+
+    def stop_background(self) -> None:
+        self.refresher.shutdown()
+
+    # ------------------------------------------------------------------ screen reads (stale-while-revalidate)
+    def macro_view(self, wait: float = 0.0) -> Snapshot:
+        """The macro snapshot for the screens: the last good one with its real time, refreshed in the background every
+        15 minutes (a failure is retried after 2 minutes and keeps the previous good snapshot)."""
+        def load() -> Any:
+            snap, missing = self.data.macro_snapshot(self.now())
+            if snap is None:
+                raise ProviderUnavailableForView(missing or "거시 데이터 없음")
+            return snap
+        return self.refresher.get("macro", load, max_age=MACRO_VIEW_AGE, wait=wait, retry_after=120)
+
+    def calendar_view(self, days: int = CALENDAR_VIEW_DAYS, wait: float = 0.0) -> Snapshot:
+        """Upcoming events from yesterday on (one shared fetch per day and window — the home screen and the calendar
+        screen read the same one)."""
+        d = to_ny(self.now()).date()
+        def load() -> Any:
+            f = self.data.events(d - timedelta(days=1), d + timedelta(days=days))
+            if f.value is None:
+                raise ProviderUnavailableForView(f.error or "일정 데이터 없음")
+            return f.value
+        return self.refresher.get(f"calendar:{d}:{days}", load, max_age=CALENDAR_VIEW_AGE, wait=wait, retry_after=120)
+
+    def context_view(self, wait: float = 0.0) -> tuple[ScanContext | None, bool]:
+        """The shared market context for the issues screen: the newest one at once (with its own ``as_of``), and a
+        background rebuild when it is older than ``CONTEXT_MAX_AGE`` — never a rebuild inside the request.
+        Returns (context or None, rebuilding)."""
+        ctx = self.last_scan_context
+        if ctx is not None and self.now() - ctx.as_of <= CONTEXT_MAX_AGE:
+            return ctx, False
+        snap = self.refresher.get("context", self.market_context, max_age=0.0, wait=wait if ctx is None else 0.0, retry_after=120)
+        return self.last_scan_context, snap.refreshing
+
+    def quote_soon(self, ticker: str, wait: float = 1.0) -> bool:
+        """Fetch a quote for the stock page in the background, waiting at most ``wait`` seconds; True while still
+        pending (the page then uses what is cached and says the re-check is pending)."""
+        if self.data.peek_quote(ticker) is not None or self.quotes.latest(ticker) is not None:
+            return False
+        snap = self.refresher.get(f"quote:{ticker}", lambda: self.data.quote(ticker), max_age=30.0, wait=wait, retry_after=30)
+        return snap.refreshing
 
     def _check_db_environment(self) -> None:
         """A database belongs to one data mode. MOCK and LIVE rows share tables (securities are keyed by
@@ -322,6 +381,7 @@ class MarketLensService:
         entered = {r.ticker: to_ny(r.updated_at if r.updated_at.tzinfo is not None else r.updated_at.replace(tzinfo=UTC)).date() for r in rows}
         sids = self.data.securities_of([(r.ticker, entered[r.ticker]) for r in rows], s)
         manual: dict[str, Any] = {}
+        unused: list[tuple[str, float]] = []
         for r in sorted(rows, key=lambda r: entered[r.ticker]):
             sid = sids[(r.ticker, entered[r.ticker])]
             if sid in manual:
@@ -330,6 +390,7 @@ class MarketLensService:
         for sid, r in manual.items():
             if decides(ledgers.get(sid)):
                 notes.append(f"{r.ticker}: 수동 입력 줄({r.quantity:g}주)은 쓰지 않습니다 — 이 종목의 보유는 거래 기록 기준입니다")
+                unused.append((r.ticker, r.quantity))
                 continue
             label = self.data.current_label(sid, r.ticker, s)
             if label is None:
@@ -355,7 +416,7 @@ class MarketLensService:
             sector, themes, rates = profile(g["ticker"])
             hs.append(Holding(g["ticker"], pos.quantity, pos.avg_cost, sector, themes, rates, source="ledger",
                               realized_pnl=pos.realized_pnl, dividends=pos.dividends))
-        return Portfolio(tuple(hs), cash, tuple(notes))
+        return Portfolio(tuple(hs), cash, tuple(notes), tuple(unused))
 
     def ledger(self, s: Session, today: date | None = None) -> list[dict[str, Any]]:
         """Per security: its trade records, today's ticker, its splits and the holding computed by
@@ -400,9 +461,9 @@ class MarketLensService:
             s.commit()
 
     def company_recommendations(self, s: Session, ticker: str, before: datetime | None = None, on: date | None = None, limit: int = 500,
-                                inclusive: bool = True, exclude_id: int | None = None) -> list[RecommendationRow]:
-        """See DataAccess.company_recommendations (the one implementation)."""
-        return self.data.company_recommendations(s, ticker, self.mode.value, before, on or to_ny(before or self.now()).date(), limit, inclusive, exclude_id)
+                                inclusive: bool = True, exclude_id: int | None = None, light: bool = False) -> list[RecommendationRow]:
+        """See DataAccess.company_recommendations (the one implementation). ``light``: heavy JSON on demand."""
+        return self.data.company_recommendations(s, ticker, self.mode.value, before, on or to_ny(before or self.now()).date(), limit, inclusive, exclude_id, light)
 
     def latest_company_recommendation(self, s: Session, ticker: str, before: datetime | None = None, inclusive: bool = True,
                                       exclude_id: int | None = None) -> RecommendationRow | None:
@@ -434,8 +495,11 @@ class MarketLensService:
         divides them by its ratio, as the paper trades and the next analysis do (8th evaluation I1) — the current
         quote is on the new basis."""
         entry = (row.result or {}).get("entry") or {}
-        known = encoded_split_keys((row.inputs or {}).get("splits")) if isinstance(row.inputs, dict) else None
-        f = share_multiplier(self.data.splits(row.ticker), analysis_basis(to_ny(row.as_of).date(), known), to_ny(self.now()).date()) or 1.0
+        splits = self.data.splits(row.ticker)
+        f = 1.0
+        if splits:  # the stored inputs (loaded on demand) say which splits the analysis already reflected
+            known = encoded_split_keys((row.inputs or {}).get("splits")) if isinstance(row.inputs, dict) else None
+            f = share_multiplier(splits, analysis_basis(to_ny(row.as_of).date(), known), to_ny(self.now()).date()) or 1.0
 
         def adj(v: Any) -> float | None:
             return None if v is None else float(v) / f
@@ -483,12 +547,13 @@ class MarketLensService:
                     self._adopt_context(self.scanner(self.model_config(), s).build_context(self.now()))
         return self.last_scan_context  # type: ignore[return-value]
 
-    def recommendation_status(self, row: RecommendationRow, fetch_quote: bool = False) -> RecommendationFreshness:
+    def recommendation_status(self, row: RecommendationRow, fetch_quote: bool = False, levels: dict[str, Any] | None = None) -> RecommendationFreshness:
         """Is this stored recommendation still current NOW (not just: was it fresh when it was made)?
 
         Same-session recommendations are re-checked against a current quote (max buy, stop, reward/risk,
-        move since analysis). Listings only use an already cached quote; the stock page may fetch one."""
-        lv = self.levels_now(row)
+        move since analysis). Listings only use an already cached quote; the stock page may fetch one.
+        ``levels``: this row's ``levels_now`` when the caller already has them."""
+        lv = levels if levels is not None else self.levels_now(row)
         bullish = row.final_action in {a.value for a in BULLISH_ACTIONS}
         plan = PlanCheck(lv["price"], lv["max_buy"], lv["stop"], lv["target1"], self.base_cfg.decision.min_rr, bullish)
         f = self.data.peek_quote(row.ticker)
@@ -691,6 +756,7 @@ class MarketLensService:
         repo.set_setting(s, "last_scan_coverage", json.dumps(coverage | {"scan_id": scan.id, "as_of": as_of.isoformat()}))
         self._scan_state(s, {"scan_id": scan.id, "status": "COMPLETE", "started_at": as_of.isoformat(), "saved": total, "total": total})
         s.commit()
+        self.refresher.invalidate("context")  # the scan adopted a newer context; a pending rebuild's older one is dropped
         return ScanSummary(scan.id, as_of, len(result.candidates), committee_run, paper)
 
     @staticmethod
@@ -864,7 +930,8 @@ class MarketLensService:
 
     # seconds one item takes at the free providers' limits (Polygon 5 requests/minute; SEC filings are large downloads):
     # used for the weights of the overall percentage and for the time estimate until a measured pace exists
-    SYNC_SECONDS_PER_ITEM = {"bars": 12.5, "universe": 10.0, "profiles": 0.5, "fundamentals": 1.5}
+    SYNC_SECONDS_PER_ITEM = {"bars": 12.5, "universe": 10.0, "profiles": 0.5, "fundamentals": 1.5, "splits": 15.0, "estimates": 2.0, "shares": 20.0,
+                             "share_lookups": 0.5}
 
     def _on_sync_progress(self, step: str, done: int, total: int, detail: str = "") -> None:
         """MarketSync's progress callback: counts of the whole preparation after every stored item."""
@@ -872,16 +939,19 @@ class MarketLensService:
 
         now = time.monotonic()
         rec = self._sync_progress.get(step)
-        if rec is None or done < rec["first"]:
+        if rec is None or done < rec["first"] or total != rec.get("total"):
             rec = {"first": done, "t0": now}
             self._sync_progress[step] = rec
         rec.update(done=done, total=total, detail=detail, t=now)
+        if self._sync_progress.get("_current") != step or done == rec["first"]:
+            self._sync_progress["_since"] = now  # when the step now running started (the screen shows how long)
         self._sync_progress["_current"] = step
 
     def _progress_summary(self) -> dict[str, Any] | None:
-        """{steps: {step: done/total/percent/detail}, percent, eta_seconds, current}: the overall percentage weighs
-        each step's items by the time one takes; 100 only when every item of every reported step is done. The time
-        left uses the pace measured in this job once three items went through, else the providers' limits."""
+        """{steps: {step: done/total/percent/detail}, percent, eta_seconds, current, current_for_seconds}: the overall
+        percentage weighs each step's items by the time one takes; 100 only when every item of every reported step is
+        done. The time left uses the pace measured in this job once three items went through, else the providers'
+        limits; None (unknown) while the running step has taken far longer than that estimate."""
         import math
 
         steps = {k: v for k, v in self._sync_progress.items() if not k.startswith("_")}
@@ -899,7 +969,13 @@ class MarketLensService:
             done_work += done * spu
             eta += (total - done) * pace
         percent = 100.0 if done_work >= work else math.floor(1000 * done_work / work) / 10
-        return {"steps": out, "percent": percent, "eta_seconds": round(eta), "current": self._sync_progress.get("_current")}
+        since = self._sync_progress.get("_since")
+        cur = self._sync_progress.get("_current")
+        # the later steps' sizes are known only when they start: never "under a minute" while one of them runs longer
+        # than its estimate — the estimate is then unknown
+        overdue = cur in steps and since is not None and steps[cur]["done"] < steps[cur]["total"] and time.monotonic() - since > max(60.0, 3 * eta)
+        return {"steps": out, "percent": percent, "eta_seconds": None if overdue else round(eta), "current": cur,
+                "current_for_seconds": round(time.monotonic() - since) if since is not None else None}
 
     def _settle_sync(self, state: dict[str, Any]) -> None:
         """The job's last word agrees with the recommendation readiness (owner report: "done" in 10 s while the
@@ -908,6 +984,7 @@ class MarketLensService:
         from marketlens.application.data_access import FUNDAMENTALS
         from marketlens.application.readiness import missing_setup
 
+        self.refresher.invalidate("bars:")  # the preparation stored new prices: screens read them, not a cached copy
         missing = missing_setup(self.registry)
         state["missing"] = missing
         rd = self.readiness()
@@ -945,6 +1022,39 @@ class MarketLensService:
                 job["progress"] = live
         return {"job": job}
 
+    def _readiness_key(self, today: date, sync_state: str | None, verified_s: str | None) -> tuple[Any, ...]:
+        return (today, sync_state, verified_s, self.store.data_fingerprint() if self.store is not None else None)
+
+    def readiness_view(self, wait: float = READINESS_WAIT, wait_if_cached: float = 0.0) -> dict[str, Any]:
+        """Readiness for the screens: the counts from the last recount at once — when the stored data changed since, a
+        recount runs in the background and the answer says so (``stats_pending``, ``stats_as_of``) instead of making the
+        screen wait (owner report 2026-09-28: every screen waited for the whole-market count). Decisions (scan gate,
+        preparation result) keep using ``readiness()``, which always counts the current data."""
+        from marketlens.application.readiness import evaluate
+        from marketlens.domain.market_calendar import last_completed_session
+
+        today = last_completed_session(self.now())
+        sync_state = self.store.get_setting("last_sync") if self.store is not None else None
+        verified_s = self.store.get_setting("live_verified") if self.store is not None else None
+        key = self._readiness_key(today, sync_state, verified_s)
+        cached = self._readiness_cache
+        if cached is not None and cached[0] == key:
+            return evaluate(self.mode.value, self.registry, cached[1], sync_state, json.loads(verified_s or "{}")).as_dict() | {"stats_pending": False, "stats_as_of": cached[2].isoformat()}
+        with self._readiness_kick:  # one background recount at a time, started by whichever screen asks first
+            now_m = time.monotonic()
+            if not self.refresher.peek("readiness").refreshing and (cached is None or now_m - self._readiness_started >= READINESS_MIN_GAP):
+                self._readiness_started = now_m
+                self.refresher.invalidate("readiness")
+                self.refresher.get("readiness", self.readiness, max_age=float("inf"))
+        self.refresher.wait("readiness", wait if cached is None else wait_if_cached)
+        cached = self._readiness_cache
+        if cached is None:
+            # no count exists yet: say it is being counted — never a NOT READY made from missing counts
+            return {"mode": self.mode.value, "stats_pending": True, "stats_as_of": None, "recommendation_readiness": None, "scanner_status": None,
+                    "readiness_reasons": [], "scanner_reasons": [], "progress": {}, "sync": {}, "categories": [], "pending_reason": "데이터 준비 상태를 계산하는 중"}
+        current = cached[0] == self._readiness_key(today, sync_state, verified_s)
+        return evaluate(self.mode.value, self.registry, cached[1], sync_state, json.loads(verified_s or "{}")).as_dict() | {"stats_pending": not current, "stats_as_of": cached[2].isoformat()}
+
     def readiness(self) -> dict[str, Any]:
         """Scanner readiness + recommendation readiness gate + per-category data status (see readiness.py)."""
         from marketlens.application.readiness import evaluate
@@ -956,11 +1066,12 @@ class MarketLensService:
         verified_s = self.store.get_setting("live_verified") if self.store is not None else None
         # the coverage counts read the whole market (seconds on a full store): computed again only when the stored data
         # changed (owner report 2026-09-28: every dashboard / candidates screen waited about 5 s for them)
-        key = (today, sync_state, verified_s, self.store.data_fingerprint() if self.store is not None else None)
-        cached = getattr(self, "_readiness_cache", None)
-        if cached is not None and cached[0] == key:
-            stats = cached[1]
-        else:
-            stats = self.store.coverage_stats(today, sc.min_market_cap, sc.min_avg_dollar_volume, sc.min_price) if self.store is not None else None
-            self._readiness_cache = (key, stats)
+        with self._readiness_lock:  # one market-wide recount at a time; a second caller reuses it
+            key = self._readiness_key(today, sync_state, verified_s)  # read BEFORE counting: a change during it recounts
+            cached = self._readiness_cache
+            if cached is not None and cached[0] == key:
+                stats = cached[1]
+            else:
+                stats = self.store.coverage_stats(today, sc.min_market_cap, sc.min_avg_dollar_volume, sc.min_price) if self.store is not None else None
+                self._readiness_cache = (key, stats, self.now())
         return evaluate(self.mode.value, self.registry, stats, sync_state, json.loads(verified_s or "{}")).as_dict()

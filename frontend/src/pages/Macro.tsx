@@ -1,9 +1,9 @@
 import { Quality } from "../components/ui";
-import { useApi } from "../components/useApi";
+import { useSettling } from "../components/useApi";
 import { num, pct, stamp } from "../format";
 
 interface Series { series_id: string; latest: { value: number | null; source: string; source_ts: string | null; quality: string; note?: string | null }; change_20d: number | null; pct_change_20d: number | null }
-interface MacroResp { available: boolean; reason?: string; as_of?: string; series: Record<string, Series>; regimes: { regime: string; score: number; confidence: number; active: boolean; evidence: string[] }[]; primary_regime: string; factor_moves: { factor: string; move: number; evidence: string }[]; yield_curve_2s10s?: number | null }
+interface MacroResp { available: boolean; pending?: boolean; refreshing?: boolean; refresh_error?: string | null; reason?: string; as_of?: string; series: Record<string, Series>; regimes: { regime: string; score: number; confidence: number; active: boolean; evidence: string[] }[]; primary_regime: string; factor_moves: { factor: string; move: number; evidence: string }[]; yield_curve_2s10s?: number | null }
 
 export const MARKET_SERIES = ["SPX", "NASDAQ_COMP", "NDX", "RUT", "SOX", "VIX", "BREADTH_ABOVE_200D", "HY_SPREAD"];
 export const MACRO_SERIES = ["FED_FUNDS", "US2Y", "US10Y", "US30Y", "CPI_YOY", "CORE_CPI_YOY", "PCE_YOY", "CORE_PCE_YOY", "PAYROLLS_CHG", "UNEMPLOYMENT", "GDP_QOQ_SAAR", "USD_INDEX", "USDKRW", "WTI", "BRENT", "GOLD"];
@@ -23,5 +23,5 @@ export function SeriesTable({ data, ids }: { data: MacroResp; ids: string[] }) {
 }
 
 export function useMacro() {
-  return useApi<MacroResp>("/macro");
+  return useSettling<MacroResp>("/macro");
 }

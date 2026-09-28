@@ -92,6 +92,9 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
         stop_quotes = getattr(app.state.service, "stop_quotes", None)
         if stop_quotes is not None:
             stop_quotes()
+        stop_background = getattr(app.state.service, "stop_background", None)
+        if stop_background is not None:
+            stop_background()
         if sched:
             sched.stop()
         try:  # leave a complete .db file behind (no pending -wal content)
@@ -176,7 +179,14 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
 
 
 def _warm(svc: Any) -> None:
+    """LIVE start-up: the readiness counts, the macro snapshot and the calendar start loading in the background, so the
+    first home screen has them or shows them as loading — it never waits for them."""
     try:
         svc.readiness()
     except Exception:  # noqa: BLE001 - a warm-up only; the first request computes it again
         logging.getLogger("marketlens.api").warning("readiness warm-up failed", exc_info=True)
+    for name in ("macro_view", "calendar_view"):
+        try:
+            getattr(svc, name)()
+        except Exception:  # noqa: BLE001 - a warm-up only
+            logging.getLogger("marketlens.api").warning("%s warm-up failed", name, exc_info=True)

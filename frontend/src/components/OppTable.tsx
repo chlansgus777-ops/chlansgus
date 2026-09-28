@@ -32,7 +32,38 @@ export function PriceCell({ r }: { r: OppRow }) {
   );
 }
 
-export function OppTable({ rows, compact = false }: { rows: OppRow[]; compact?: boolean }) {
+/** Most of a scan's rows withheld for the same reason — the price was not current when the scan ran. Said once above
+ * the table (with why and what to do) instead of three identical badges on every row (owner report 2026-09-28:
+ * "전부 오래됨·데이터부족·거부권 — 뭘 보라는 거야, 오류야?"). */
+export function stalePriceCause(rows: OppRow[]): { n: number; total: number; session: string | null } | null {
+  const n = rows.filter((r) => r.vetoes.includes("STALE_PRICE")).length;
+  if (n < 3 || n < rows.length * 0.6) return null;
+  return { n, total: rows.length, session: rows.find((r) => r.vetoes.includes("STALE_PRICE"))?.session ?? null };
+}
+
+const STALE_WHY: Record<string, string> = {
+  PREMARKET: "스캔한 시각이 미국 프리마켓이었습니다. 프리마켓에는 종목 대부분의 체결이 드물어 20분 안의 체결가가 없었고, 어제 종가를 지금 가격으로 쓰지 않는 안전 규칙 때문에 판단을 보류했습니다.",
+  AFTER_HOURS: "스캔한 시각이 미국 애프터마켓이었습니다. 시간외에는 종목 대부분의 체결이 드물어 20분 안의 체결가가 없었고, 오래된 가격으로 판단하지 않도록 보류했습니다.",
+  OVERNIGHT: "스캔한 시각이 미국 야간 시간대였습니다. 이때는 새 체결이 없어 지금 가격을 확인할 수 없었습니다.",
+  CLOSED: "장이 닫힌 뒤 마지막 종가를 받지 못했습니다 — 시세 공급자 연결이나 키를 확인하세요.",
+  REGULAR: "정규장인데도 현재가를 받지 못했습니다 — 시세 공급자(Finnhub) 연결이나 키를 확인하세요.",
+};
+
+export function StalePriceNote({ c }: { c: { n: number; total: number; session: string | null } }) {
+  return (
+    <div className="ribbon info" role="note" data-testid="stale-price-note">
+      <span className="cap">판단 보류 이유</span>
+      <div className="msg">
+        <b>{c.total}개 중 {c.n}개가 ‘데이터 부족’인 것은 오류가 아니라, 스캔할 때 현재가가 최신이 아니었기 때문입니다.</b>{" "}
+        {STALE_WHY[c.session ?? ""] ?? "스캔할 때 20분 안의 체결가가 없어 매수 판단을 보류했습니다."}{" "}
+        점수·가격 계획은 참고로 볼 수 있고, 정규장(한국 시간 밤 10:30~새벽 5:00, 서머타임이 아니면 11:30~6:00)에 다시 스캔하면 판단이 나옵니다.
+        표에서는 이 공통 사유를 줄마다 반복하지 않습니다.
+      </div>
+    </div>
+  );
+}
+
+export function OppTable({ rows, compact = false, commonStale = false }: { rows: OppRow[]; compact?: boolean; commonStale?: boolean }) {
   const [sort, setSort] = useState<Key>("rank");
   const [asc, setAsc] = useState(true);
   const nav = useNavigate();
@@ -66,7 +97,7 @@ export function OppTable({ rows, compact = false }: { rows: OppRow[]; compact?: 
         <tbody>
           {sorted.map((r) => (
             <tr key={r.id} className={r.actionable_now === false ? "row-expired" : ""} onDoubleClick={() => nav(`/stocks/${r.ticker}`)}>
-              {cols.map(([k, , , numeric]) => <td key={k} className={numeric ? "num" : undefined}>{cell(r, k)}</td>)}
+              {cols.map(([k, , , numeric]) => <td key={k} className={numeric ? "num" : undefined}>{cell(r, k, commonStale)}</td>)}
             </tr>
           ))}
         </tbody>
@@ -75,7 +106,7 @@ export function OppTable({ rows, compact = false }: { rows: OppRow[]; compact?: 
   );
 }
 
-function cell(r: OppRow, k: Key) {
+function cell(r: OppRow, k: Key, commonStale = false) {
   switch (k) {
     case "rank":
       return <span className="muted">{r.rank ?? "—"}</span>;
@@ -87,7 +118,12 @@ function cell(r: OppRow, k: Key) {
         </div>
       );
     case "action":
-      return <div className="row tight"><Action a={r.action} status={r.current_status} quality={r.data_quality} /><Vetoes v={r.vetoes} />{r.data_quality !== "FRESH" && r.data_quality !== "DELAYED" ? <Quality q={r.data_quality} /> : null}</div>;
+    {
+      // the scan-wide "price not current" reason is explained above the table: only what differs stays on the row
+      const vetoes = commonStale ? r.vetoes.filter((v) => v !== "STALE_PRICE") : r.vetoes;
+      const priceOnly = commonStale && r.vetoes.includes("STALE_PRICE") && r.price_quality !== "FRESH" && r.price_quality !== "DELAYED";
+      return <div className="row tight"><Action a={r.action} status={r.current_status} quality={r.data_quality} /><Vetoes v={vetoes} />{r.data_quality !== "FRESH" && r.data_quality !== "DELAYED" && !priceOnly ? <Quality q={r.data_quality} /> : null}</div>;
+    }
     case "score":
       return <span className="score-mini"><b>{num(r.score, 1)}</b><span className="bar"><span style={{ display: "block", height: "100%", width: `${Math.max(0, Math.min(100, r.score))}%`, borderRadius: 99, background: r.score >= 80 ? "var(--buy)" : r.score >= 72 ? "rgba(114,184,255,.6)" : "var(--faint)" }} /></span></span>;
     case "price":

@@ -563,6 +563,10 @@ class MarketStore:
         """Cheap marker of everything coverage_stats reads (newest rows and update times): equal markers → equal counts."""
         if self.get_setting(GROUPED_DAYS_KEY) is None:
             self.grouped_days()  # the one-time record coverage_stats would write: taken first so the marker stays equal
+        settings = (self.get_setting(GROUPED_DAYS_KEY), self.get_setting("instrument_kinds"), self.get_setting("instrument_kinds_day"))
+        versions = self._data_versions()
+        if versions is not None:  # the triggers' counters: one small read (not a count over millions of bars)
+            return (versions, *settings)
         with self.sf() as s:
             return (
                 s.execute(select(func.max(PriceBarRow.retrieved_at), func.count())).one()[:],
@@ -570,8 +574,36 @@ class MarketStore:
                 s.execute(select(func.max(FundamentalVintageRow.retrieved_at), func.count())).one()[:],
                 s.execute(select(func.max(IngestionManifestRow.last_attempt_at), func.count()).where(IngestionManifestRow.mode == self.mode)).one()[:],
                 s.execute(select(func.min(EstimateSnapshotRow.observed_on))).scalar(),
-                self.get_setting(GROUPED_DAYS_KEY), self.get_setting("instrument_kinds"), self.get_setting("instrument_kinds_day"),
+                *settings,
             )
+
+    def _data_versions(self) -> tuple[tuple[str, int], ...] | None:
+        """The per-table change counters (migration 0006), or None where they are not kept (not SQLite, or the triggers
+        are missing) — then the caller falls back to the full check. Checked once per store."""
+        ok = getattr(self, "_dv_ok", None)
+        if ok is False:
+            return None
+        from sqlalchemy import text
+        from sqlalchemy.exc import OperationalError, ProgrammingError
+
+        from marketlens.infrastructure.db.models import DATA_VERSION_TABLES, DataVersionRow
+
+        try:
+            with self.sf() as s:
+                if ok is None:
+                    if s.get_bind().dialect.name != "sqlite":
+                        self._dv_ok = False
+                        return None
+                    names = {n for (n,) in s.execute(text("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'dv_%'"))}
+                    want = {f"dv_{t}_{k}" for t in DATA_VERSION_TABLES for k in ("insert", "update", "delete")}
+                    self._dv_ok = want <= names
+                    if not self._dv_ok:
+                        return None
+                rows = tuple(sorted((n, int(v)) for n, v in s.execute(select(DataVersionRow.name, DataVersionRow.version))))
+        except (OperationalError, ProgrammingError):
+            self._dv_ok = False
+            return None
+        return rows if len(rows) == len(DATA_VERSION_TABLES) else None
 
     # ------------------------------------------------------------------ coverage (readiness)
     def coverage_stats(self, today: date, min_market_cap: float, min_dollar_volume: float | None = None, min_price: float | None = None) -> dict[str, Any]:

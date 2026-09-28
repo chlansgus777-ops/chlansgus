@@ -1,4 +1,6 @@
 export interface OppRow {
+  /** stock page: the current price was still being fetched when the page was built (re-judged shortly) */
+  quote_pending?: boolean;
   id: number; rank: number | null; ticker: string; company: string; sector: string; sector_model: string;
   price: number | null; session: string | null; price_timestamp: string | null; price_source: string | null; price_quality: string;
   score: number; confidence: number; action: string; deterministic_action: string; committee_status: string;

@@ -86,13 +86,13 @@ export interface LiveStatus { id: number; status: string | null; reason: string 
  * minute (a plain read of the same recommendation — never a new analysis; a newer recommendation id is ignored). */
 const LIVE_STATUS_MAX_FAILURES = 3;
 
-export function useLiveStatus(ticker: string, recId: number | undefined, everyMs = 60_000): LiveStatus | null {
+export function useLiveStatus(ticker: string, recId: number | undefined, everyMs = 60_000, soonMs: number | null = null): LiveStatus | null {
   const [live, setLive] = useState<LiveStatus | null>(null);
   useEffect(() => {
     if (recId === undefined) return;
     let alive = true;
     let failures = 0;
-    const timer = window.setInterval(() => {
+    const check = () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       api.get<SD>(`/stocks/${ticker}`).then((x) => {
         if (!alive) return;
@@ -103,9 +103,12 @@ export function useLiveStatus(ticker: string, recId: number | undefined, everyMs
         failures += 1;
         if (alive && failures >= LIVE_STATUS_MAX_FAILURES) setLive({ id: recId, status: "UNVERIFIED", reason: `서버에서 상태를 ${failures}번 연속 확인하지 못했습니다 — 실행 전에 새로고침하세요` });
       });
-    }, everyMs);
-    return () => { alive = false; window.clearInterval(timer); };
-  }, [ticker, recId, everyMs]);
+    };
+    const timer = window.setInterval(check, everyMs);
+    // the page opened before the current price arrived: re-judge once it had time to (not a minute later)
+    const soon = soonMs !== null ? window.setTimeout(check, soonMs) : null;
+    return () => { alive = false; window.clearInterval(timer); if (soon !== null) window.clearTimeout(soon); };
+  }, [ticker, recId, everyMs, soonMs]);
   return live && live.id === recId ? live : null;
 }
 
@@ -128,7 +131,7 @@ function StockDetail({ ticker }: { ticker: string }) {
   const [note, setNote] = useState<string | null>(null);
   const [replay, setReplay] = useState<string | null>(null);
   const evIndex = useMemo(() => new Map<string, Evidence>((d.data?.analysis.evidence ?? []).map((e) => [e.evidence_id, e])), [d.data]);
-  const live = useLiveStatus(ticker, d.data?.recommendation.id);
+  const live = useLiveStatus(ticker, d.data?.recommendation.id, 60_000, d.data?.recommendation.quote_pending ? 3_000 : null);
   useViewQuotes([ticker]);  // the viewed stock joins the app-wide quote subscription while this page is open
   const wl = useApi<{ ticker: string }[]>("/watchlist");
   const watched = Array.isArray(wl.data) && wl.data.some((w) => w?.ticker === ticker);  // an odd answer never breaks the page

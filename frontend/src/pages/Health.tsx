@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 import { Card, Err, Loading, StatePanel } from "../components/ui";
 import { ProgressBars, ReadinessBanner, statusKo, SyncControl, type ReadinessInfo } from "../components/Readiness";
-import { useApi } from "../components/useApi";
+import { useApi, usePoll } from "../components/useApi";
 import { num, pct, stamp } from "../format";
 
 interface H { name: string; kind: string; mode: string; status: string; configured: boolean; requests: number; error_rate: number; latency_ms: number | null; last_success: string | null; last_failure: string | null; last_error: string | null; freshness: string | null; rate_limit_state: string; breaker_state: string }
@@ -13,6 +13,7 @@ const USAGE_KO: Record<string, string> = { calls: "호출 수", input_tokens: "�
 export default function Health() {
   const h = useApi<Resp>("/health");
   const r = useApi<ReadinessInfo>("/readiness");
+  usePoll(r.reload, 3_000, !!r.data?.stats_pending); // a recount runs in the background: pick it up when done
   if (h.state === "loading") return <Loading what="시스템 상태" />;
   if (!h.data) return <Err error={h.error} retry={h.reload} />;
   const cls = (s: string) => (s === "HEALTHY" ? "ok" : s === "DOWN" ? "danger" : "warn");
@@ -23,7 +24,8 @@ export default function Health() {
         <StatePanel kind="provider_failure" what={`중단된 공급자: ${h.data.providers.filter((p) => p.status === "DOWN" && p.mode === "LIVE").map((p) => `${p.name}(${p.kind})${p.last_error ? ` — ${p.last_error.slice(0, 80)}` : ""}`).join(" · ")}`} />
       )}
       {!h.data.llm.available && <StatePanel kind="ai_unavailable" what={`AI 공급자: ${h.data.llm.provider} — ${ST_KO[h.data.llm.status] ?? h.data.llm.status}`} />}
-      {r.data && (
+      {r.data && r.data.recommendation_readiness == null && <StatePanel kind="analyzing" what="데이터 준비 상태를 처음 계산하고 있습니다(저장된 전체 종목을 셉니다). 끝나면 여기에 표시됩니다." />}
+      {r.data && r.data.recommendation_readiness != null && (
         <>
           <ReadinessBanner r={r.data} />
           <div className="g2">

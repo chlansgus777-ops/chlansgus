@@ -246,7 +246,7 @@ class EvaluationService:
         with self.svc.sf() as s:
             samples = self.samples(s, until=today)
             positions = [p for p in repo.all_paper_positions(s) if p.recommended_at <= now]
-            recs = {r.id: r for r in repo.all_recommendations(s, mode=self.svc.mode.value, until=now)}
+            recs = {r.id: r for r in repo.recommendation_keys(s, mode=self.svc.mode.value, until=now)}
         if period_days:
             cutoff = today - timedelta(days=period_days)
             samples = [x for x in samples if x.rec_day >= cutoff]

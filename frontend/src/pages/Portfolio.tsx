@@ -5,7 +5,7 @@ import { Card, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } fro
 import { Ledger } from "../components/Ledger";
 import { LivePrice } from "../components/LivePrice";
 import { refreshQuoteSubscriptions } from "../quotes";
-import { useApi } from "../components/useApi";
+import { useApi, usePoll } from "../components/useApi";
 import { day, num, pct, price, shares, usdWithKo } from "../format";
 
 
@@ -16,6 +16,8 @@ interface Pf {
   correlations: [string, string, number][]; missing_prices: string[]; notes: string[]; currency: string; note: string;
   /** EMPTY | COMPLETE | PARTIAL | UNAVAILABLE — an unvalued account is never shown as a cash-only total */
   valuation_status?: string;
+  history_pending?: string[];
+  unused_manual?: { ticker: string; quantity: number }[];
 }
 
 /** Plain-language reading of the portfolio (only from the numbers above). */
@@ -45,14 +47,24 @@ export function nyToday(now: Date = new Date()): string {
 
 export default function Portfolio() {
   const p = useApi<Pf>("/portfolio");
+  usePoll(p.reload, 3_000, !!p.data?.history_pending?.length); // prices the store lacked are being fetched in the background
   const [params] = useSearchParams();
   const [row, setRow] = useState({ ticker: "", quantity: "", cost: "" });
   const [cash, setCash] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [sellFor, setSellFor] = useState<string | null>(null);
   if (p.state === "loading") return <Loading what="포트폴리오 재계산" steps={["보유 종목 종가 확인", "평가금액·손익 계산", "쏠림·상관관계 점검"]} />;
   if (!p.data) return <Err error={p.error} retry={p.reload} />;
   const save = async (body: unknown) => { setErr(null); try { await api.put("/portfolio", body); p.reload(); refreshQuoteSubscriptions(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } };
+  // removing an entered line = saving it with quantity 0 (the trade records are never touched here)
+  const removeManual = async (tickers: string[], tag: string) => {
+    if (busy) return;
+    setBusy(tag);
+    try { await save({ holdings: tickers.map((t) => ({ ticker: t, quantity: 0, cost_basis: 0 })) }); } finally { setBusy(null); }
+  };
   const x = p.data;
+  const unused = x.unused_manual ?? [];
   const reading = interpret(x);
   const unvalued = x.valuation_status === "UNAVAILABLE";
   const empty = !x.holdings.length;  // no holdings: nothing to diversify and no P&L — never "좋음" or a green ▲ $0  // holdings exist but none could be valued (review 2026-09-28 F10)
@@ -62,12 +74,19 @@ export default function Portfolio() {
     <div className="grid">
       <div className="page-head"><div><h1>내 포트폴리오</h1><div className="t-sub">{x.note}</div></div></div>
       <StaleData error={p.error} at={p.fetchedAt} retry={p.reload} />
+      {(x.history_pending?.length ?? 0) > 0 && <Notice tone="info">가격 이력을 받는 중: {x.history_pending?.join(", ")} — 받는 대로 평가금액을 다시 계산합니다.</Notice>}
       {x.missing_prices.length > 0 && (
         <Ribbon tone="warn" cap="가격 없음" testId="missing-prices">
           <b>{x.missing_prices.join(", ")}</b>의 종가를 받지 못해 평가금액·비중·손익 계산에서 뺐습니다. 매입가로 대신 계산하지 않습니다. 그래서 아래 합계와 비중은 이 종목을 뺀 값입니다.
         </Ribbon>
       )}
-      {x.notes.filter((n) => !(x.missing_prices.length && n.startsWith("가격 데이터 없는 보유 종목"))).map((n, i) => <Notice key={i} tone="warn">{n}</Notice>)}
+      {unused.length > 0 && (
+        <Ribbon tone="info" cap="겹친 입력" testId="unused-manual">
+          <b>{unused.map((u) => u.ticker).join(", ")}</b>는 거래 기록이 있어 보유 수량·평단을 거래 기록으로 계산하고 있습니다. 위에서 직접 입력한 줄({unused.map((u) => `${u.ticker} ${num(u.quantity, 0)}주`).join(", ")})은 계산에 쓰이지 않으니 지워도 결과가 바뀌지 않습니다.{" "}
+          <button className="sm" disabled={busy === "unused"} onClick={() => void removeManual(unused.map((u) => u.ticker), "unused")}>{busy === "unused" ? "지우는 중…" : "직접 입력한 줄 지우기"}</button>
+        </Ribbon>
+      )}
+      {x.notes.filter((n) => !(x.missing_prices.length && n.startsWith("가격 데이터 없는 보유 종목")) && !unused.some((u) => n.startsWith(`${u.ticker}: 수동 입력 줄(`))).map((n, i) => <Notice key={i} tone="warn">{n}</Notice>)}
       <Err error={err} />
       <div className="g4">
         {unvalued ? (
@@ -81,10 +100,13 @@ export default function Portfolio() {
       </div>
       {!empty && (
         <Card title="보유 종목" explain="평가액·손익·비중은 모든 종목을 같은 거래일 종가로 계산합니다. ‘최신 시세’는 표시용입니다." testId="holdings">
-<div className="scroll"><table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th title="표시용 최신 시세 — 평가액·손익은 모든 종목 같은 거래일 종가 기준">최신 시세</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th></tr></thead>
+<div className="scroll"><table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th title="표시용 최신 시세 — 평가액·손익은 모든 종목 같은 거래일 종가 기준">최신 시세</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th><th><span className="sr-only">정리</span></th></tr></thead>
             <tbody>{x.holdings.map((h) => <tr key={h.ticker}><td>{h.ticker}</td><td>{h.source === "ledger" ? shares(h.quantity) : num(h.quantity, 0)}{h.source === "ledger" ? <span className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}> 거래 기록 기준</span> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)} <span className="caption">{day(h.price_day)}</span></>}</td>
               <td><LivePrice ticker={h.ticker} size="sm" /></td>
-              <td>{h.market_value === null ? "—" : price(h.market_value)}</td><td className={h.unrealized_pnl === null ? "" : h.unrealized_pnl >= 0 ? "pos" : "neg"}>{h.unrealized_pnl === null ? "계산 안 함" : <>{h.unrealized_pnl >= 0 ? "▲" : "▼"} {price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</>}</td><td>{h.weight === null ? "—" : pct(h.weight, 1, false)}</td><td>{h.sector}</td></tr>)}</tbody></table></div>
+              <td>{h.market_value === null ? "—" : price(h.market_value)}</td><td className={h.unrealized_pnl === null ? "" : h.unrealized_pnl >= 0 ? "pos" : "neg"}>{h.unrealized_pnl === null ? "계산 안 함" : <>{h.unrealized_pnl >= 0 ? "▲" : "▼"} {price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</>}</td><td>{h.weight === null ? "—" : pct(h.weight, 1, false)}</td><td>{h.sector}</td>
+              <td>{h.source === "ledger"
+                ? <button className="sm ghost" title="거래 기록 기준 보유는 매도를 기록하면 줄어들고, 전부 팔면 목록에서 빠집니다(기록은 아래 ‘거래 기록’에서 지울 수도 있습니다)" onClick={() => setSellFor(`${h.ticker}:${h.quantity}`)}>매도 기록</button>
+                : <button className="sm ghost" aria-label={`${h.ticker} 보유에서 빼기`} disabled={busy === h.ticker} onClick={() => { if (window.confirm(`${h.ticker} ${num(h.quantity, 0)}주 보유 줄을 지울까요? (거래 기록은 그대로입니다)`)) void removeManual([h.ticker], h.ticker); }}>{busy === h.ticker ? "빼는 중…" : "빼기"}</button>}</td></tr>)}</tbody></table></div>
           {x.correlations.length > 0 && <div className="caption" style={{ marginTop: 8 }}><Term k="correlation">상관계수</Term>: {x.correlations.map(([a, b, c]) => `${a}↔${b} ${num(c, 2)}`).join(" · ")}</div>}
         </Card>
       )}
@@ -121,7 +143,7 @@ export default function Portfolio() {
           </form>
         </Card>
       </div>
-      <Ledger today={nyToday()} prefill={params.get("trade")} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
+      <Ledger today={nyToday()} prefill={sellFor ?? params.get("trade")} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
 
     </div>
   );

@@ -49,26 +49,39 @@ export function baseUrl(): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export interface RequestOptions { retries?: number; backoffMs?: number }
+export interface RequestOptions { retries?: number; backoffMs?: number; signal?: AbortSignal }
+
+/** Listeners told about every successful change request (the screen cache marks what it affects as outdated). */
+const mutationListeners = new Set<(method: string, path: string) => void>();
+export function onMutation(f: (method: string, path: string) => void): () => void {
+  mutationListeners.add(f);
+  return () => { mutationListeners.delete(f); };
+}
 
 async function req<T>(method: string, path: string, body?: unknown, opts: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json", "X-MarketLens-Client": "marketlens-ui" };
   if (typeof window !== "undefined" && window.__MARKETLENS_TOKEN__) headers["X-MarketLens-Token"] = window.__MARKETLENS_TOKEN__;
-  const init: RequestInit = { method, headers };
+  const init: RequestInit = { method, headers, signal: opts.signal };
   if (body !== undefined) init.body = JSON.stringify(body);
   const retries = opts.retries ?? (method === "GET" ? 2 : 0);
   const backoff = opts.backoffMs ?? 500;
   let last: ApiError | null = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) await sleep(backoff * 2 ** (attempt - 1));
+    if (opts.signal?.aborted) throw new ApiError(-1, "취소됨");
     let r: Response;
     try {
       r = await fetch(`${baseUrl()}/api${path}`, init);
     } catch {
+      if (opts.signal?.aborted) throw new ApiError(-1, "취소됨"); // nobody waits for it any more: not an error to show
       last = new ApiError(0, describeStatus(0));
       continue; // network error → retry (backend may be starting)
     }
-    if (r.ok) return (await r.json()) as T;
+    if (r.ok) {
+      const out = (await r.json()) as T;
+      if (method !== "GET") mutationListeners.forEach((f) => f(method, path));
+      return out;
+    }
     let detail: string | undefined;
     try {
       const j = (await r.json()) as { detail?: unknown };

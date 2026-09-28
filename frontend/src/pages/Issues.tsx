@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Card, Empty, Err, Loading } from "../components/ui";
-import { useApi } from "../components/useApi";
+import { useApi, useSettling } from "../components/useApi";
 import { num, stamp } from "../format";
 import { HORIZON_KO } from "../i18n";
 import type { CompanyIssueImpact } from "../types";
@@ -13,20 +13,21 @@ const CAT_KO: Record<string, string> = {
 };
 
 interface IssueJ { issue_id: string; title: string; category: string; summary: string; publish_time: string; sources: string[]; confirmed_status: string; importance: number; confidence: number; market_awareness: number; primary_effects: { node_id: string; direction: number; mechanism: string[] }[] }
-interface Resp { available: boolean; reason?: string; issues: { issue: IssueJ; affected_stocks: { ticker: string; hops: number; swing: number }[]; affected_sectors: string[] }[]; injection_flags: Record<string, string[]> }
+interface Resp { available: boolean; pending?: boolean; refreshing?: boolean; as_of?: string; reason?: string; issues: { issue: IssueJ; affected_stocks: { ticker: string; hops: number; swing: number }[]; affected_sectors: string[] }[]; injection_flags: Record<string, string[]> }
 interface Detail { issue: IssueJ; impacts: CompanyIssueImpact[]; direct: string[]; indirect: string[] }
 
 const STATUS_KO: Record<string, string> = { CONFIRMED: "공식 확인", REPORTED: "보도", RUMOR: "루머" };
 
 export default function Issues() {
-  const r = useApi<Resp>("/issues");
+  const r = useSettling<Resp>("/issues");
   const [sel, setSel] = useState<string | null>(null);
   const d = useApi<Detail>(sel ? `/issues/${sel}` : null);
-  if (r.state === "loading") return <Loading what="이슈" />;
+  if (r.state === "loading" || r.data?.pending) return <Loading what="이슈(뉴스 수집·분류)" />;
   if (!r.data) return <Err error={r.error} retry={r.reload} />;
   if (!r.data.available) return <div className="ribbon warn" role="alert"><span className="cap">⚠ 뉴스 없음</span><div className="msg">뉴스/이슈 데이터를 받지 못했습니다: {r.data.reason} — ‘이슈 없음’과 다릅니다. 이슈 점수는 계산하지 않습니다.</div></div>;
   return (
     <div className="grid">
+      {r.data.as_of ? <div className="caption" data-testid="issues-as-of">이슈 기준 시각 {stamp(r.data.as_of)}{r.data.refreshing ? " · 최신 뉴스로 다시 묶는 중(끝나면 바뀝니다)" : ""}</div> : null}
       <div className="explain">뉴스를 헤드라인이 아니라 ‘사건’으로 묶었습니다. 왼쪽은 기사와 출처에 나온 사실, 오른쪽은 MarketLens가 계산한 해석입니다 — 해석은 인과관계를 확인한 것이 아니라 노출 경로에 따른 추정입니다. 행을 누르면 종목별 영향 경로를 봅니다.</div>
       {Object.keys(r.data.injection_flags).length > 0 && <div className="ribbon warn" role="note"><span className="cap">⚠ 외부 텍스트</span><div className="msg">기사 {Object.keys(r.data.injection_flags).length}건에서 프롬프트 주입 패턴이 발견되어 신뢰할 수 없는 외부 텍스트로만 취급했습니다.</div></div>}
       <Card className="flush">

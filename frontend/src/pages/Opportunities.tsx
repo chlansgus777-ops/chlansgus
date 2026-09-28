@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { OppTable } from "../components/OppTable";
+import { OppTable, StalePriceNote, stalePriceCause } from "../components/OppTable";
 import { Empty, Err, Loading, StaleData } from "../components/ui";
 import { NotReady, ReadinessBanner } from "../components/Readiness";
 import { useApi } from "../components/useApi";
@@ -24,10 +24,12 @@ export default function Opportunities() {
     && (!onlyCurrent || r.current_status === "CURRENT")
     && (filter === "" || `${r.ticker} ${r.company} ${r.sector}`.toLowerCase().includes(filter.toLowerCase())));
   const scan = o.data.scan;
+  const stale = stalePriceCause(o.data.rows);
   return (
     <div className="grid">
       <ReadinessBanner r={o.data.readiness} />
       <StaleData error={o.error} at={o.fetchedAt} retry={o.reload} />
+      {stale && <StalePriceNote c={stale} />}
       {o.data.readiness?.scanner_status === "SCANNER_NOT_READY" && !o.data.rows.length && <NotReady r={o.data.readiness} onChange={o.reload} />}
       <section className="card flush">
         <div className="row spread" style={{ padding: "16px 18px 12px", borderBottom: "1px solid var(--line)" }}>
@@ -42,7 +44,7 @@ export default function Opportunities() {
           <span className="caption">{rows.length.toLocaleString("ko-KR")}개 · {scan ? `스캔 #${scan.id} · 분석 ${stamp(scan.as_of)} · ${scan.scoring_model_version}` : "스캔 없음"}</span>
         </div>
         <div style={{ padding: "4px 8px 8px" }}>
-          {rows.length ? <OppTable rows={rows} /> : o.data.readiness?.scanner_status === "SCANNER_NOT_READY"
+          {rows.length ? <OppTable rows={rows} commonStale={!!stale} /> : o.data.readiness?.scanner_status === "SCANNER_NOT_READY"
             ? <div style={{ padding: 12 }}><Empty hint="데이터 준비가 100%에 가까워지면 다시 스캔하세요.">데이터 준비 중이라 후보를 계산하지 못했습니다(‘살 종목이 없음’이 아님).</Empty></div>
             : <div style={{ padding: 12 }}><Empty>조건에 맞는 후보가 없습니다.</Empty></div>}
         </div>

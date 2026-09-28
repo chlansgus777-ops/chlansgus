@@ -141,6 +141,9 @@ class MarketSync:
                 self.store.set_setting("bars_backfill_complete", "")
         # 2a) universe — after the day's bars are stored (a name missing from the SEC file while its bars keep
         #     arriving is a data gap, not a delisting) and before splits (rename links decide which bars a split rescales)
+        # every step says when it starts, so the screen never shows the last finished count while a long one runs
+        # (owner report 2026-09-28: "가격이력 263/263 · 1분 미만" for ten minutes while these steps ran unreported)
+        _p("universe", 0, 1, "SEC 종목 목록")
         try:
             secs = self.reg.chain("universe").call("list_securities", None).value
             rep.universe = self.store.sync_universe(secs, today, unloaded)
@@ -163,6 +166,7 @@ class MarketSync:
         ny_today = to_ny(now).date()
         splitter = _find(self.reg, "price", "get_splits")
         if splitter is not None:
+            _p("splits", 0, 1, "주식분할 기록")
             since_s = self.store.get_setting("splits_checked_through")
             since = date.fromisoformat(since_s) - timedelta(days=7) if since_s else today - timedelta(days=3 * 365)
             try:
@@ -171,6 +175,8 @@ class MarketSync:
             except ProviderError as e:
                 rep.errors.append(f"splits: {e}")
         rep.bars_split_adjusted = self.store.adjust_bars_for_splits(ny_today)
+        if splitter is not None:
+            _p("splits", 1, 1, "")
         # 2c) consensus snapshot for every upcoming report (Finnhub earnings calendar, a few requests),
         #     once per day — the append-only history MarketLens accumulates its own revisions from
         cal = _find(self.reg, "analyst", "get_calendar_estimates")
@@ -179,8 +185,10 @@ class MarketSync:
             try:
                 obs = []
                 for k in range(4):  # ~100 days ahead in 25-day windows
+                    _p("estimates", k, 4, f"{25 * k}~{25 * k + 24}일 뒤")
                     start = ny_today + timedelta(days=25 * k)
                     obs += cal.get_calendar_estimates(start, start + timedelta(days=24), ny_today)
+                _p("estimates", 4, 4, "")
                 rep.estimate_snapshots = self.store.save_estimates(obs)
                 self.store.set_setting("estimates_snapshot_day", ny_today.isoformat())
             except ProviderError as e:
@@ -188,6 +196,7 @@ class MarketSync:
         # 3) shares outstanding → market caps
         sec = _find(self.reg, "universe", "shares_outstanding_all")
         if sec is not None:
+            _p("shares", 0, 1, "발행주식수(SEC)")
             try:
                 by_cik = sec.shares_outstanding_all(today)
                 # the company's shares go to its FIRST ticker in the SEC file (the primary equity): handing them to every
@@ -200,10 +209,13 @@ class MarketSync:
             except ProviderError as e:
                 rep.errors.append(f"shares: {e}")
         rep.market_caps = self.store.refresh_market_caps()
+        if sec is not None:
+            _p("shares", 1, 1, "")
         if sec is not None and hasattr(sec, "shares_outstanding_of"):
-            self._fill_missing_shares(sec, rep, now, today, min_dollar_volume, min_price, max_share_lookups)
+            self._fill_missing_shares(sec, rep, now, today, min_dollar_volume, min_price, max_share_lookups, progress=_p)
         # 4) sector profiles for candidates that could pass eligibility
         if sec is not None and hasattr(sec, "company_profile"):
+            _p("profiles", 0, 1, "대상 종목 고르는 중")
             bars = self.store.last_bars_all(today - timedelta(days=40), today)
             todo = []
             eligible = 0
@@ -236,7 +248,8 @@ class MarketSync:
         log.info("sync finished", extra={"fields": {"bars": rep.bar_days_loaded, "missing": rep.bar_days_missing, "profiles": rep.profiles_updated}})
         return rep
 
-    def _fill_missing_shares(self, sec: Any, rep: SyncReport, now: Any, today: date, min_dollar_volume: float, min_price: float, limit: int) -> None:
+    def _fill_missing_shares(self, sec: Any, rep: SyncReport, now: Any, today: date, min_dollar_volume: float, min_price: float, limit: int,
+                             progress: Progress | None = None) -> None:
         """Liquid stocks (the scanner's price and dollar-volume limits) still without a market cap after the quarterly
         frames: their shares company by company, most liquid first, bounded per round (owner report 2026-09-28: 70 %).
         Every attempt is in the ingestion manifest (dataset 'shares'): a company without the facts is asked again after
@@ -244,6 +257,8 @@ class MarketSync:
         from marketlens.providers.contracts import NotSupported, RateLimited
         from marketlens.providers.live.nasdaq_symbols import COMMON_KINDS, canonical
 
+        _p: Progress = progress or (lambda *_a: None)
+        _p("share_lookups", 0, 1, "대상 종목 고르는 중")
         recent = self.store.last_bars_all(today - timedelta(days=40), today)
         kinds = self.store.instrument_kinds()
         man = self.store.ingestion_all("shares")
@@ -262,7 +277,9 @@ class MarketSync:
         todo.sort()
         rep.shares_pending = max(0, len(todo) - limit)
         got: dict[str, tuple[float, date]] = {}
-        for _adv, t in todo[:limit]:
+        batch = todo[:limit]
+        for i, (_adv, t) in enumerate(batch):
+            _p("share_lookups", i, len(batch), t)
             try:
                 got[t] = sec.shares_outstanding_of(t, today)
                 self.store.record_ingestion("shares", t, now, "OK", rows=1)
@@ -273,6 +290,7 @@ class MarketSync:
                 self.store.record_ingestion("shares", t, now, "NOT_SUPPORTED", str(e))
             except ProviderError as e:
                 self.store.record_ingestion("shares", t, now, "FAILED", str(e))
+        _p("share_lookups", len(batch), len(batch), "")
         rep.shares_looked_up = len(got)
         if got:
             rep.shares_updated += self.store.set_shares(got)

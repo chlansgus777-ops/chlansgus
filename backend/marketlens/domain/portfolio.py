@@ -29,6 +29,9 @@ class Portfolio:
     holdings: tuple[Holding, ...]
     cash: float
     notes: tuple[str, ...] = ()  # e.g. a trade record set that could not be computed (never silently dropped)
+    # entered lines not used because the trade records decide that holding: (ticker, quantity) — the screen offers to
+    # remove them (owner report 2026-09-28: the notice stayed forever with no way to act on it)
+    unused_manual: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

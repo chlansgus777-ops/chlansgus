@@ -1,11 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ago, clockPair, stampEt } from "../format";
 import { HEALTH_KO, QUALITY_INFO, READINESS_KO, SESSION_KO } from "../i18n";
 import type { SystemInfo } from "../types";
 import { QuoteFeedStatus } from "./LivePrice";
 import type { ReadinessInfo, SyncJob } from "./Readiness";
-import { type ApiState, useApi, usePoll } from "./useApi";
+import { type ApiState, invalidateAfterSync, invalidateApi, useApi, usePoll } from "./useApi";
 
 /** /scan/status — the last scan's progress and how much of the list it judged. */
 export interface ScanStatus {
@@ -57,6 +57,15 @@ export function StatusProvider({ children }: { children: ReactNode }) {
   usePoll(scan.reload, 3_000, scanRunning);
   usePoll(sync.reload, 5_000, syncRunning);
   usePoll(readiness.reload, 30_000, syncRunning);
+  usePoll(readiness.reload, 4_000, !syncRunning && !!readiness.data?.stats_pending); // a background recount: take it when done
+  // a preparation or scan that just ended changed prices / recommendations: screens cached before it ask again
+  const was = useRef({ sync: false, scan: false });
+  const scanServerRunning = scan.data?.state?.status === "RUNNING";
+  useEffect(() => {
+    if (was.current.sync && !syncRunning) invalidateAfterSync();
+    if (was.current.scan && !scanServerRunning) invalidateApi(["/dashboard", "/opportunities", "/stocks/", "/watchlist", "/performance", "/issues"]);
+    was.current = { sync: syncRunning, scan: scanServerRunning };
+  }, [syncRunning, scanServerRunning]);
   const clock = useCallback(() => setTick(Date.now()), []);
   usePoll(clock, 20_000);
   // the server's clock, not the PC's: offset measured when /system arrived
