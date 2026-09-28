@@ -29,7 +29,7 @@ def live():
     eng = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(eng)
     svc = MarketLensService(st, make_session_factory(eng), registry=reg, llm=UnavailableLLM(), now_fn=lambda: NOW)
-    sync = svc.sync_market(max_bar_calls=250, max_profiles=10)
+    sync = svc.sync_market(max_bar_calls=300, max_profiles=10)  # one round covers the whole window (sync.BACKFILL_DAYS ≈ 262 sessions)
     scan = svc.run_scan(run_committee=True)
     return svc, sync, scan, seen
 

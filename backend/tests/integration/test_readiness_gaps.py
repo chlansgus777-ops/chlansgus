@@ -267,3 +267,16 @@ def test_company_shares_come_from_the_cover_page_else_the_balance_sheet_and_neve
     assert sec.shares_outstanding_of("BBB", date(2026, 9, 25)) == (5e8, date(2026, 6, 30))
     with pytest.raises(NotSupported):
         sec.shares_outstanding_of("CCC", date(2026, 9, 25))  # three years old: never used as today's shares
+
+
+def test_the_sync_window_holds_a_full_year_of_sessions():
+    """Owner report 2026-09-28: '가격 이력(1년)' stayed at 0 % — the sync kept 300 calendar days (~206 sessions) while
+    the one-year share counts tickers with 240 sessions."""
+    from datetime import date, timedelta
+
+    from marketlens.application.sync import BACKFILL_DAYS
+    from marketlens.domain.market_calendar import is_trading_day
+
+    for end in (date(2026, 9, 25), date(2026, 1, 2), date(2025, 7, 7)):
+        n = sum(1 for k in range(BACKFILL_DAYS + 1) if is_trading_day(end - timedelta(days=k)))
+        assert n >= 250, (end, n)

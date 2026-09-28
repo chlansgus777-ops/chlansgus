@@ -32,6 +32,12 @@ FUNDAMENTALS_REFRESH = timedelta(days=7)  # look for a new 10-Q/10-K weekly; sto
 RECENT_EMPTY = timedelta(days=7)
 
 
+# calendar days of market-wide daily bars the sync keeps: about 262 sessions — enough for the one-year history
+# (240 sessions, readiness "가격 이력(1년)") and the 200-day average. It was 300 days (~206 sessions), so the one-year
+# share could never leave 0 % (owner report 2026-09-28).
+BACKFILL_DAYS = 380
+
+
 @dataclass
 class SyncReport:
     universe: dict[str, int] = field(default_factory=dict)
@@ -73,7 +79,7 @@ class MarketSync:
         self.reg = registry
         self.store = store
 
-    def run(self, now: Any, backfill_days: int = 300, max_bar_calls: int = 30, max_profiles: int = 300,
+    def run(self, now: Any, backfill_days: int = BACKFILL_DAYS, max_bar_calls: int = 30, max_profiles: int = 300,
             min_market_cap: float = 1e9, min_dollar_volume: float = 2e7, max_fundamentals: int = 150, max_share_lookups: int = 300,
             min_price: float = 5.0,
             fundamentals_refresh: timedelta = FUNDAMENTALS_REFRESH, progress: Progress | None = None) -> SyncReport:
