@@ -279,3 +279,18 @@ def test_alpha_vantage_list_is_one_spaced_call_and_a_burst_answer_is_retried_onc
 
     rows = A.av_delisted("key", sleep=sleeps.append, transport=httpx.MockTransport(handler))
     assert rows[0]["symbol"] == "HIDN" and sleeps == [15, 65]
+
+
+def test_bars_start_reads_back_whether_stored_plain_or_json_quoted(tmp_path):
+    """Run 36396716134 collected every day to 2026-09-25, then crashed on json.loads("2016-01-04"): set_meta stores a
+    str as is, so the date must read back from a plain ISO string (and from an older JSON-quoted one)."""
+    from datetime import date as _d
+
+    from marketlens.backtest.schema import bt_engine, get_meta_date, set_meta
+
+    eng = bt_engine(str(tmp_path / "m.db"))
+    set_meta(eng, "bars.start", "2016-01-04")
+    assert get_meta_date(eng, "bars.start") == _d(2016, 1, 4)
+    set_meta(eng, "bars.start", '"2016-01-05"')
+    assert get_meta_date(eng, "bars.start") == _d(2016, 1, 5)
+    assert get_meta_date(eng, "missing") is None

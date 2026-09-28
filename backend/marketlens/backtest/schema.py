@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date
 from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlsplit
 
@@ -116,6 +117,18 @@ def bt_engine(path: str) -> Engine:
 def get_meta(eng: Engine, key: str) -> str | None:
     with eng.connect() as c:
         return c.execute(select(bt_meta.c.value).where(bt_meta.c.key == key)).scalar()
+
+
+def get_meta_date(eng: Engine, key: str) -> date | None:
+    """A date stored by ``set_meta`` — written as a plain ISO string (a str is stored as is), older runs may hold a
+    JSON-quoted one. Both read back as the same date (run 36396716134 crashed on json.loads("2016-01-04"))."""
+    v = get_meta(eng, key)
+    if not v:
+        return None
+    v = v.strip()
+    if v.startswith('"'):
+        v = json.loads(v)
+    return date.fromisoformat(v) if v else None
 
 
 def set_meta(eng: Engine, key: str, value: Any) -> None:

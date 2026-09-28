@@ -27,7 +27,8 @@ from sqlalchemy.engine import Engine
 
 from marketlens.backtest.identity import TickerRecord, build_ticker_map, weekly_times
 from marketlens.backtest.schema import (
-    RecordingTransport, bt_dividends, bt_engine, bt_profiles, bt_series, bt_ticker_map, bt_tickers, file_sha256, get_meta, set_meta,
+    RecordingTransport, bt_dividends, bt_engine, bt_profiles, bt_series, bt_ticker_map, bt_tickers, file_sha256, get_meta,
+    get_meta_date, set_meta,
 )
 from marketlens.domain.corporate_actions import SplitEvent
 from marketlens.domain.market import Bar
@@ -151,8 +152,7 @@ def first_entitled_day(poly: Polygon, today: date) -> date:
 
 def collect_bars(eng: Engine, store: Any, poly: Polygon, today: date, deadline: float) -> None:
     last = last_completed_session(datetime.now().astimezone())
-    start_s = get_meta(eng, "bars.start")
-    start = date.fromisoformat(json.loads(start_s)) if start_s else first_entitled_day(poly, today)
+    start = get_meta_date(eng, "bars.start") or first_entitled_day(poly, today)
     set_meta(eng, "bars.start", start.isoformat())
     have = store.grouped_days()
     empty = set(json.loads(get_meta(eng, "bars.empty") or "[]"))
@@ -380,7 +380,7 @@ def run(db_path: str, today: date, max_minutes: float = 330) -> dict[str, Any]:
     if not get_meta(eng, "done.map"):
         build_map(eng, sec_current)
     collect_bars(eng, store, poly, today, deadline)
-    start = date.fromisoformat(json.loads(get_meta(eng, "bars.start") or '""') or today.isoformat())
+    start = get_meta_date(eng, "bars.start") or today
     if get_meta(eng, "done.bars") and not get_meta(eng, "done.prune"):
         prune_bars(eng)
     collect_splits(eng, store, poly, start - timedelta(days=4 * 365))

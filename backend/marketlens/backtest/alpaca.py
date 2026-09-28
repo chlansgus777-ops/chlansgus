@@ -47,7 +47,7 @@ from sqlalchemy import insert, select
 from sqlalchemy.engine import Engine
 
 from marketlens.backtest.identity import TickerInterval
-from marketlens.backtest.schema import bt_dividends, bt_engine, bt_ticker_map, bt_unresolved, file_sha256, get_meta, set_meta
+from marketlens.backtest.schema import bt_dividends, bt_engine, bt_ticker_map, bt_unresolved, file_sha256, get_meta, get_meta_date, set_meta
 
 log = logging.getLogger("marketlens.backtest.alpaca")
 
@@ -460,7 +460,7 @@ def run(db_path: str, max_minutes: float = 320, start: date = ALPACA_START) -> d
     eng = bt_engine(db_path)
     if not get_meta(eng, "done.bars") or not get_meta(eng, "bars.start"):
         raise SystemExit("the Polygon collection (task=collect) must finish its bars first: resume it, then run this on its database")
-    poly_start = date.fromisoformat(json.loads(get_meta(eng, "bars.start") or '""'))
+    poly_start = get_meta_date(eng, "bars.start")
     store = MarketStore(make_session_factory(eng), "LIVE")
     poly = C.Polygon(os.environ["POLYGON_API_KEY"])
     collect_early_reference(eng, store, poly, start, poly_start)
