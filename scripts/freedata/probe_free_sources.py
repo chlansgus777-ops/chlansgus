@@ -44,11 +44,26 @@ CASES = [
 
 
 def _av_csv(c: httpx.Client, state: str) -> list[dict[str, str]]:
+    """Two back-to-back calls answered '{}' (HTTP 200): the free key's burst limit — space the calls, retry once."""
     key = os.environ.get("ALPHAVANTAGE_API_KEY") or ""
-    r = c.get(AV, params={"function": "LISTING_STATUS", "state": state, "apikey": key}, timeout=60)
-    if r.status_code != 200 or r.text.lstrip().startswith("{"):
-        raise RuntimeError(f"Alpha Vantage LISTING_STATUS {state}: HTTP {r.status_code} {r.text[:120].replace(key, '<key>')}")
-    return list(csv.DictReader(io.StringIO(r.text)))
+    for wait in (15, 65):
+        time.sleep(wait)
+        r = c.get(AV, params={"function": "LISTING_STATUS", "state": state, "apikey": key}, timeout=60)
+        if r.status_code == 200 and not r.text.lstrip().startswith("{"):
+            return list(csv.DictReader(io.StringIO(r.text)))
+    raise RuntimeError(f"Alpha Vantage LISTING_STATUS {state}: HTTP {r.status_code} {r.text[:120].replace(key, '<key>')}")
+
+
+def _nasdaq_current(c: httpx.Client) -> set[str]:
+    """Current listings from the Nasdaq Trader directory (ACT/Nasdaq symbols, class suffix written with a dot)."""
+    out: set[str] = set()
+    for name, col in (("nasdaqlisted.txt", 0), ("otherlisted.txt", 0)):
+        r = c.get(f"https://www.nasdaqtrader.com/dynamic/SymDir/{name}", timeout=60)
+        for ln in r.text.splitlines()[1:]:
+            f = ln.split("|")
+            if len(f) > 3 and not ln.startswith("File Creation"):
+                out.add(f[col].replace("-", ".").upper())
+    return out
 
 
 def _bars_one(c: httpx.Client, sym: str, start: str, end: str, asof: str | None) -> list[dict[str, Any]]:
@@ -85,10 +100,10 @@ def alpaca_delisted_and_reused(c: httpx.Client, sample: int = 150, seed: int = 2
     import random
 
     delisted = [r for r in _av_csv(c, "delisted") if r.get("assetType") == "Stock" and (r.get("delistingDate") or "") >= "2016-02-01"]
-    active = {r["symbol"] for r in _av_csv(c, "active")}
-    reused = sorted({r["symbol"] for r in delisted if r["symbol"] in active})
+    active = _nasdaq_current(c)
+    reused = sorted({r["symbol"] for r in delisted if r["symbol"].replace("-", ".").upper() in active})
     rng = random.Random(seed)
-    pool = [r for r in delisted if r["symbol"] not in active]
+    pool = [r for r in delisted if r["symbol"].replace("-", ".").upper() not in active]
     picks = rng.sample(pool, min(sample, len(pool)))
     rows, ok, near_end = [], 0, 0
     for r in picks:
