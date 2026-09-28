@@ -51,6 +51,7 @@ from marketlens.domain.valuation import RelativeValuation, ValuationMultiples, c
 from marketlens.domain.what_changed import AnalysisDigest, ChangeItem, diff, material_reasons
 
 CORE_FIELDS = ("price", "price_history", "fundamentals")
+COVERAGE_VETO_COMPONENTS = ("fundamental", "valuation")
 MIN_BARS = 60
 MIN_QUARTERS = 4
 EDGAR_CUTOFF = time(17, 30)  # EDGAR filings accepted after 17:30 ET receive the next business day's date
@@ -606,7 +607,10 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
     )
     card = score(si, cfg.scoring_model)
     # the sector model must be able to judge the business and its price; a gap here is "unknown", not "bad"
-    coverage_gaps = tuple(f"{n}({card.component(n).coverage:.0%})" for n in ("fundamental", "valuation") if not card.component(n).available)
+    # the backtest configuration (backtest/engine.backtest_config) may narrow this list — only for components whose inputs
+    # cannot exist in the past (docs/backtest/PREREGISTRATION.md); the operating configuration has no such key
+    veto_components = tuple((cfg.raw.get("backtest") or {}).get("coverage_veto_components", COVERAGE_VETO_COMPONENTS))
+    coverage_gaps = tuple(f"{n}({card.component(n).coverage:.0%})" for n in veto_components if not card.component(n).available)
 
     # ---------------------------------------------------------------- what changed + decision
     guidance_sig = hashlib.sha1(json.dumps(encode(last_er.guidance), sort_keys=True).encode()).hexdigest()[:10] if last_er is not None else None

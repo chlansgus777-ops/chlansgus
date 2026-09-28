@@ -6,11 +6,19 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "probe | collect"
+        description: "probe | collect | run"
         required: true
         default: "probe"
       resume_run_id:
         description: "collect: continue the database of this earlier run (its backtest-db artifact); empty = start fresh"
+        required: false
+        default: ""
+      data_run_id:
+        description: "run: the collect run whose backtest-db artifact to measure"
+        required: false
+        default: ""
+      run_args:
+        description: "run: extra arguments for marketlens.backtest.run (e.g. --leak-checks 20)"
         required: false
         default: ""
 permissions:
@@ -68,3 +76,40 @@ jobs:
             coverage.json
           retention-days: 90
           compression-level: 0
+      # ---------------------------------------------------------------- measurement (offline: no secrets, no network)
+      - name: Backtest database
+        if: inputs.task == 'run'
+        uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          run-id: ${{ inputs.data_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run the backtest twice (reproduction) with the network removed
+        if: inputs.task == 'run'
+        run: |
+          gunzip -f backtest.db.gz
+          sha256sum -c backtest.db.sha256
+          # an empty network namespace when the runner allows one; the Python socket guard refuses connections either way
+          PREFIX=""
+          if unshare -rn true 2>/dev/null; then PREFIX="unshare -rn"; echo "network namespace: none (unshare -rn)"; fi
+          export BACKTEST_NETNS="${PREFIX:-socket-guard-only}"
+          cd backend
+          $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out ../bt-out ${{ inputs.run_args }}
+          $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out ../bt-out-repro --leak-checks 0 ${{ inputs.run_args }}
+          cd ..
+          python - <<'PY'
+          import json
+          a = json.load(open("bt-out/manifest.json")); b = json.load(open("bt-out-repro/manifest.json"))
+          print("results_sha256", a["results_sha256"], "reproduction", b["results_sha256"])
+          assert a["results_sha256"] == b["results_sha256"], "the reproduction gave a different results.json"
+          PY
+          gzip -f bt-out/rows.db
+          rm -f bt-out-repro/rows.db
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.task == 'run'
+        with:
+          name: backtest-results
+          path: |
+            bt-out
+            bt-out-repro
+          retention-days: 90

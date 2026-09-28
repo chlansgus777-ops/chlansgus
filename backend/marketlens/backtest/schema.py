@@ -118,8 +118,8 @@ def set_meta(eng: Engine, key: str, value: Any) -> None:
 class RecordingTransport(httpx.BaseTransport):
     """Forwards to the network and stores every answer under its credential-free request key."""
 
-    def __init__(self, eng: Engine) -> None:
-        self._real = httpx.HTTPTransport(retries=2)
+    def __init__(self, eng: Engine, inner: httpx.BaseTransport | None = None) -> None:
+        self._real = inner or httpx.HTTPTransport(retries=2)  # ``inner``: a fixture transport in tests
         self._eng = eng
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
@@ -132,8 +132,9 @@ class RecordingTransport(httpx.BaseTransport):
         return httpx.Response(resp.status_code, content=resp.content, headers={"content-type": "application/json"}, request=request)
 
 
-class NetworkBlocked(RuntimeError):
-    """A backtest asked for something outside the collected data (leak check 4: no network)."""
+class NetworkBlocked(httpx.TransportError):
+    """A backtest asked for something outside the collected data (leak check 4: no network). An httpx transport
+    error, so the app's HttpClient turns it into ProviderUnavailable — the input is MISSING, never fetched."""
 
 
 class ReplayTransport(httpx.BaseTransport):
@@ -142,14 +143,18 @@ class ReplayTransport(httpx.BaseTransport):
     def __init__(self, eng: Engine) -> None:
         self._eng = eng
         self.served = 0
+        self.misses: list[str] = []
+        self.urls: list[str] = []  # credential-free URLs served (time audit: the vintages asked for)
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         key, clean = request_key(str(request.url))
         with self._eng.connect() as c:
             row = c.execute(select(bt_http.c.status, bt_http.c.body).where(bt_http.c.key == key)).first()
         if row is None:
-            raise NetworkBlocked(f"not in the collected data: {clean[:200]}")
+            self.misses.append(clean)
+            raise NetworkBlocked(f"not in the collected data: {clean[:200]}", request=request)
         self.served += 1
+        self.urls.append(clean)
         return httpx.Response(row[0], content=row[1].encode(), headers={"content-type": "application/json"}, request=request)
 
 

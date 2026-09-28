@@ -274,13 +274,13 @@ def collect_sec(eng: Engine, store: Any, sec: Any, deadline: float) -> None:
         set_meta(eng, "done.sec", {"candidates": len(cands), "failed": len(failed)})
 
 
-def collect_fred(eng: Engine, fred_key: str, start: date, end: date, deadline: float) -> None:
+def collect_fred(eng: Engine, fred_key: str, start: date, end: date, deadline: float, inner: Any = None) -> None:
     """Record the app's own FRED requests for every weekly analysis time (ALFRED vintages), to replay offline."""
     from marketlens.domain.macro import ALL_SERIES
     from marketlens.providers.live.fred import FredMacroProvider
 
     done = set(json.loads(get_meta(eng, "fred.done") or "[]"))
-    prov = FredMacroProvider(fred_key, transport=RecordingTransport(eng))
+    prov = FredMacroProvider(fred_key, transport=RecordingTransport(eng, inner), **({"rate_per_s": 1e6} if inner is not None else {}))
     for t in weekly_times(start, end):
         if t.isoformat() in done:
             continue
