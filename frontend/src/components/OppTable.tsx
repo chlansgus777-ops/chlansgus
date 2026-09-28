@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { num, pct, price, stamp } from "../format";
 import { RISK_KO, ko } from "../i18n";
 import type { OppRow } from "../types";
+import { useQuote } from "../quotes";
 import { LivePrice } from "./LivePrice";
 import { Action, Quality, StatusBadge, Vetoes } from "./ui";
 
@@ -17,6 +18,19 @@ const COLS: [Key, string, string, boolean][] = [
   ["rr", "손익비", "(목표가−현재가)÷(현재가−손절가) — 도달 확률이 아님", true], ["current_status", "현재 유효성", "추천 이후 거래일 경과·현재가로 다시 판정", false],
   ["risk", "이벤트 위험", "가까운 실적·일정의 위험 수준", false],
 ];
+
+/** The latest quote when the app has one for this name; otherwise the analysis-time price, labelled as such — never
+ * a bare dash above it. */
+function PriceCell({ r }: { r: OppRow }) {
+  const { row } = useQuote(r.ticker);
+  const basis = <span className="caption" title={`분석 기준가 · 출처 ${r.price_source ?? "N/A"} · ${stamp(r.price_timestamp)}`}>{row?.price != null ? <>분석 {price(r.price)}</> : "분석 시점 가격"}{r.price_quality !== "FRESH" ? <> <Quality q={r.price_quality} /></> : null}</span>;
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
+      {row?.price != null ? <LivePrice ticker={r.ticker} size="sm" showState={false} /> : <span>{price(r.price)}</span>}
+      {basis}
+    </span>
+  );
+}
 
 export function OppTable({ rows, compact = false }: { rows: OppRow[]; compact?: boolean }) {
   const [sort, setSort] = useState<Key>("rank");
@@ -77,13 +91,7 @@ function cell(r: OppRow, k: Key) {
     case "score":
       return <span className="score-mini"><b>{num(r.score, 1)}</b><span className="bar"><span style={{ display: "block", height: "100%", width: `${Math.max(0, Math.min(100, r.score))}%`, borderRadius: 99, background: r.score >= 80 ? "var(--buy)" : r.score >= 72 ? "rgba(114,184,255,.6)" : "var(--faint)" }} /></span></span>;
     case "price":
-      // the latest quote from the app-wide store; the analysis-time price stays visible under it as the basis
-      return (
-        <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
-          <LivePrice ticker={r.ticker} size="sm" showState={false} />
-          <span className="caption" title={`분석 기준가 · 출처 ${r.price_source ?? "N/A"} · ${stamp(r.price_timestamp)}`}>분석 {price(r.price)}{r.price_quality !== "FRESH" ? <> <Quality q={r.price_quality} /></> : null}</span>
-        </span>
-      );
+      return <PriceCell r={r} />;
     case "max_buy": {
       const d = r.price != null && r.max_buy != null ? r.max_buy / r.price - 1 : null;
       return <span>{price(r.max_buy)}{d != null ? <span className={`caption ${d < 0 ? "warn" : ""}`} style={{ display: "block" }}>{d < 0 ? `${pct(-d, 1, false)} 초과` : `여유 ${pct(d, 1, false)}`}</span> : null}</span>;
