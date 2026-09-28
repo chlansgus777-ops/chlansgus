@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "probe | collect | run"
+        description: "probe | collect | run | diagnose"
         required: true
         default: "probe"
       resume_run_id:
@@ -48,6 +48,17 @@ jobs:
         with:
           name: backtest-probe
           path: probe.json
+      - name: Diagnose readiness gaps (app providers against the real sources)
+        if: inputs.task == 'diagnose'
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: python scripts/diagnose_readiness.py --out diagnose.json
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.task == 'diagnose'
+        with:
+          name: readiness-diagnose
+          path: diagnose.json
       - name: Previous database (resume)
         if: inputs.task == 'collect' && inputs.resume_run_id != ''
         uses: actions/download-artifact@v4
