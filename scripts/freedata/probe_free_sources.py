@@ -1,0 +1,147 @@
+"""Free-data feasibility probe (docs/freedata/FREE_DATA_FEASIBILITY.md): what the FREE official sources actually return.
+
+Every answer is judged from the real response — an HTTP 200 carrying an error message, an empty array or a missing
+page is never counted as success. Secrets come from the environment and are never printed (only "set"/"not set").
+No new subscription, no multi-key rotation, no rate-limit evasion: each source is called within its published limit.
+
+    python scripts/freedata/probe_free_sources.py --out free_probe.json
+
+Sources (docs checked 2026-09-28, see the owner's instruction §7):
+- Alpaca Market Data v2 historical bars, feed=sip, adjustment=raw (Basic plan: free, history from 2016, 200 req/min)
+- Alpha Vantage LISTING_STATUS (active / delisted on a date since 2010; 25 requests/day on the free key)
+- Nasdaq Trader symbol directory (nasdaqlisted.txt / otherlisted.txt, current listings)
+- FINRA daily short-sale VOLUME files (CNMS since 2018-08-01) — short interest is a different dataset (API key)
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import io
+import json
+import os
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import httpx
+
+ALPACA = "https://data.alpaca.markets/v2/stocks/bars"
+AV = "https://www.alphavantage.co/query"
+
+# boundary cases (owner's instruction §3.A: survivors, delistings, mergers, ticker changes, share classes, ADRs,
+# reverse splits) — each checked for first/last day and gaps, never generalised from one success
+CASES = [
+    ("AAPL", "survivor, 4:1 split 2020-08-31"), ("MSFT", "survivor"), ("SPY", "ETF benchmark"),
+    ("NVDA", "10:1 split 2024-06-10"), ("TSLA", "3:1 split 2022-08-25"), ("GOOGL", "class A"), ("GOOG", "class C"),
+    ("BRK.B", "class B, dot ticker"), ("BF.B", "class B, dot ticker"), ("META", "renamed from FB 2022-06-09"), ("FB", "old ticker of META"),
+    ("TWTR", "taken private 2022-10-27 (delisted)"), ("ATVI", "acquired by MSFT 2023-10-13"), ("XLNX", "acquired by AMD 2022-02-14"),
+    ("SIVB", "bank failure 2023-03, delisted"), ("FRC", "bank failure 2023-05, delisted"), ("BBBY", "bankruptcy 2023, OTC"),
+    ("GE", "reverse split 1:8 2021-08-02, spin-offs"), ("C", "survivor"), ("TSM", "ADR"), ("BABA", "ADR"), ("SHOP", "foreign, 10:1 split 2022"),
+    ("CELG", "acquired by BMY 2019-11-20"), ("RTN", "merged into RTX 2020-04-03"), ("UTX", "renamed RTX 2020-04-03"),
+    ("DWDP", "DowDuPont 2017–2019"), ("KHC", "merger 2015-07"), ("WBA", "taken private 2025"), ("X", "acquired 2025"), ("AMC", "reverse split 2023-08-24"),
+]
+
+
+def secret_state() -> dict[str, str]:
+    names = ["APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "ALPHAVANTAGE_API_KEY", "FINRA_API_KEY", "FINRA_API_SECRET", "POLYGON_API_KEY", "SEC_USER_AGENT", "FRED_API_KEY"]
+    return {n: ("set" if os.environ.get(n) else "not set") for n in names}
+
+
+def alpaca_bars(c: httpx.Client, symbols: list[str], start: str, end: str, asof: str | None = None) -> dict[str, Any]:
+    kid, sec = os.environ.get("APCA_API_KEY_ID"), os.environ.get("APCA_API_SECRET_KEY")
+    if not kid or not sec:
+        return {"status": "BLOCKED", "reason": "APCA_API_KEY_ID / APCA_API_SECRET_KEY not set (free Alpaca account keys needed)"}
+    headers = {"APCA-API-KEY-ID": kid, "APCA-API-SECRET-KEY": sec}
+    params: dict[str, Any] = {"symbols": ",".join(symbols), "timeframe": "1Day", "start": start, "end": end, "feed": "sip", "adjustment": "raw", "limit": 10000}
+    if asof:
+        params["asof"] = asof
+    per: dict[str, dict[str, Any]] = {s: {"bars": 0, "first": None, "last": None} for s in symbols}
+    pages, token, http = 0, None, None
+    while True:
+        if token:
+            params["page_token"] = token
+        time.sleep(0.35)  # ≤ 200 requests/minute
+        r = c.get(ALPACA, params=params, headers=headers, timeout=60)
+        http = r.status_code
+        pages += 1
+        if r.status_code != 200:
+            return {"status": "BLOCKED" if r.status_code in (401, 403) else "FAILED", "http": r.status_code, "message": r.text[:300], "pages": pages}
+        body = r.json()
+        for sym, bars in (body.get("bars") or {}).items():
+            p = per.setdefault(sym, {"bars": 0, "first": None, "last": None})
+            p["bars"] += len(bars)
+            if bars:
+                p["first"] = p["first"] or bars[0]["t"][:10]
+                p["last"] = bars[-1]["t"][:10]
+        token = body.get("next_page_token")
+        if not token or pages >= 50:
+            break
+    return {"status": "OK", "http": http, "pages": pages, "per_symbol": per}
+
+
+def alphavantage_listing(c: httpx.Client, day: str, state: str) -> dict[str, Any]:
+    key = os.environ.get("ALPHAVANTAGE_API_KEY")
+    if not key:
+        return {"status": "BLOCKED", "reason": "ALPHAVANTAGE_API_KEY not set"}
+    r = c.get(AV, params={"function": "LISTING_STATUS", "date": day, "state": state, "apikey": key}, timeout=60)
+    text = r.text
+    if r.status_code != 200 or text.lstrip().startswith("{"):
+        return {"status": "FAILED", "http": r.status_code, "message": text[:300].replace(key, "<key>")}  # an error in a 200
+    rows = list(csv.DictReader(io.StringIO(text)))
+    if not rows:
+        return {"status": "FAILED", "http": 200, "message": "empty CSV"}
+    ex, types = {}, {}
+    for x in rows:
+        ex[x.get("exchange")] = ex.get(x.get("exchange"), 0) + 1
+        types[x.get("assetType")] = types.get(x.get("assetType"), 0) + 1
+    return {"status": "OK", "http": 200, "header": list(rows[0].keys()), "rows": len(rows), "exchanges": ex, "asset_types": types,
+            "ipo_range": [min(x.get("ipoDate") or "9" for x in rows), max(x.get("ipoDate") or "" for x in rows)],
+            "delisting_range": [min((x.get("delistingDate") or "9") for x in rows), max((x.get("delistingDate") or "") for x in rows)],
+            "sample": rows[:3]}
+
+
+def nasdaq_directory(c: httpx.Client) -> dict[str, Any]:
+    out = {}
+    for name in ("nasdaqlisted.txt", "otherlisted.txt"):
+        r = c.get(f"https://www.nasdaqtrader.com/dynamic/SymDir/{name}", timeout=60)
+        lines = r.text.splitlines() if r.status_code == 200 else []
+        out[name] = {"http": r.status_code, "rows": max(0, len(lines) - 2), "header": lines[0] if lines else None, "footer": lines[-1] if lines else None}
+    return out
+
+
+def finra_short_volume(c: httpx.Client) -> dict[str, Any]:
+    """The first CNMS daily short-sale volume file available (documented start 2018-08-01) and a recent one."""
+    out = {}
+    for d in ("20180801", "20180802", "20190102", "20240102"):
+        r = c.get(f"https://cdn.finra.org/equity/regsho/daily/CNMSshvol{d}.txt", timeout=60)
+        lines = r.text.splitlines() if r.status_code == 200 else []
+        out[d] = {"http": r.status_code, "rows": max(0, len(lines) - 1), "header": lines[0] if lines else None}
+        time.sleep(1)
+    return out
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", default="free_probe.json")
+    a = ap.parse_args()
+    end = (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat()
+    res: dict[str, Any] = {"run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "secrets": secret_state()}
+    with httpx.Client() as c:
+        res["alpaca_sip_raw_3"] = alpaca_bars(c, ["AAPL", "MSFT", "SPY"], "2016-01-01", end)
+        if res["alpaca_sip_raw_3"].get("status") == "OK":
+            res["alpaca_cases"] = alpaca_bars(c, [s for s, _ in CASES], "2016-01-01", end)
+            res["alpaca_cases_notes"] = dict(CASES)
+            res["alpaca_asof_fb_2020"] = alpaca_bars(c, ["FB", "META"], "2020-01-01", "2020-01-10", asof="2020-01-06")
+            res["alpaca_asof_raw_ticker"] = alpaca_bars(c, ["FB", "META"], "2020-01-01", "2020-01-10", asof="-")
+        res["alphavantage_listing_2016_active"] = alphavantage_listing(c, "2016-01-04", "active")
+        res["alphavantage_listing_2016_delisted"] = alphavantage_listing(c, "2016-01-04", "delisted")
+        res["nasdaq_symbol_directory"] = nasdaq_directory(c)
+        res["finra_short_volume"] = finra_short_volume(c)
+    with open(a.out, "w", encoding="utf-8") as f:
+        json.dump(res, f, indent=1, ensure_ascii=False)
+    print(json.dumps(res, indent=1, ensure_ascii=False)[:60000])
+
+
+if __name__ == "__main__":
+    main()
