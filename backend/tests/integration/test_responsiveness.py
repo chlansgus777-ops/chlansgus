@@ -66,6 +66,16 @@ def test_max_age_zero_always_refreshes_even_when_the_clock_has_not_ticked():
     assert r.wait("k", 2).value == "first"
     r.get("k", lambda: "second", max_age=0)
     assert r.wait("k", 2).value == "second"
+
+    def down():  # noqa: ANN202
+        raise RuntimeError("down")
+
+    r.get("k", down, max_age=0)  # fails within the same clock tick as the last success
+    s = r.wait("k", 2)
+    assert s.value == "second" and s.error and "down" in s.error  # still reported, and backed off:
+    runs = r.runs
+    r.get("k", down, max_age=0, retry_after=60)
+    assert r.runs == runs
     r.shutdown()
 
 

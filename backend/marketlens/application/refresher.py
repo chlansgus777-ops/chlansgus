@@ -64,7 +64,7 @@ class Refresher:
             e = self._entries.setdefault(key, _Entry())
             now = self._clock()
             fresh = e.at is not None and now - e.at < max_age  # strict: max_age=0 always refreshes, even on a coarse clock
-            backing_off = e.failed_at is not None and now - e.failed_at < retry_after and (e.at is None or e.failed_at > e.at)
+            backing_off = e.failed_at is not None and now - e.failed_at < retry_after  # set only by a failure after the last success
             if not fresh and key not in self._inflight and not backing_off and not self._closed:
                 started = self._submit(key, fn)
         if started is not None and e.at is None and wait > 0:
@@ -92,7 +92,7 @@ class Refresher:
             e = self._entries.get(key) or _Entry()
             fut = self._inflight.get(key)
             return Snapshot(e.value, e.wall, None if e.at is None else max(0.0, self._clock() - e.at), fut is not None and not fut.done(),
-                            e.error if (e.failed_at is not None and (e.at is None or e.failed_at > e.at)) else None)
+                            e.error if e.failed_at is not None else None)
 
     def invalidate(self, prefix: str = "") -> None:
         """Forget values whose key starts with ``prefix`` (after a scan, sync or holdings change). A job already
