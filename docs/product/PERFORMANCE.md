@@ -104,7 +104,7 @@
   - 예상보다 오래 걸리면 "1분 미만" 대신 "남은 시간 계산 중"으로 표시합니다.
 
 ## 실행한 테스트
-- 백엔드 1,890개 통과(신규 14개: `tests/integration/test_responsiveness.py`).
+- 백엔드 1,892개 통과(신규 14개: `tests/integration/test_responsiveness.py`).
 - 브라우저 e2e 17개 통과.
 - 프런트엔드 121개 통과(신규 6개: `useApi.test.tsx`).
 - 타입 검사와 빌드 통과.
