@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { OppTable } from "../components/OppTable";
-import { Card, Empty, Err, Loading } from "../components/ui";
+import { Card, Empty, Err, Loading, StaleData } from "../components/ui";
 import { NotReady, ReadinessBanner } from "../components/Readiness";
 import { useApi } from "../components/useApi";
 import { stamp } from "../format";
@@ -19,10 +19,11 @@ export default function Opportunities() {
     && (filter === "" || `${r.ticker} ${r.company} ${r.sector}`.toLowerCase().includes(filter.toLowerCase())));
   return (
     <div className="grid">
-      <div className="page-head"><div><h1>기회 찾기</h1><div className="t-sub">미국 전체 상장 종목을 단계별로 걸러 남은 후보입니다. 표 머리글에 마우스를 올리면 각 항목 설명이 나옵니다. 종목을 누르면 자세한 판단과 매수 계획을 볼 수 있습니다.</div></div></div>
+      <div className="page-head"><div><h1>기회 찾기</h1><div className="t-sub">마지막 스캔에서 종목 목록을 단계별로 걸러 남은 후보입니다(매수·대기·관찰 모두). 표 머리글에 마우스를 올리면 각 항목 설명이 나옵니다. 종목을 누르면 자세한 판단과 가격 계획을 볼 수 있습니다.</div></div></div>
       <ReadinessBanner r={o.data.readiness} />
+      <StaleData error={o.error} at={o.fetchedAt} retry={o.reload} />
       {o.data.readiness?.scanner_status === "SCANNER_NOT_READY" && !o.data.rows.length && <NotReady r={o.data.readiness} onChange={o.reload} />}
-      <Card right={<span className="muted">{o.data.scan ? `스캔 #${o.data.scan.id} · ${stamp(o.data.scan.as_of)} · ${o.data.scan.scoring_model_version}` : "스캔 없음"}</span>}>
+      <Card right={<span className="muted">{o.data.scan ? `스캔 #${o.data.scan.id} · 분석 ${stamp(o.data.scan.as_of)} · ${o.data.scan.scoring_model_version}` : "스캔 없음"}</span>}>
         <div className="row" style={{ marginBottom: 10 }}>
           <input placeholder="종목 / 회사명 / 섹터 검색" value={filter} onChange={(e) => setFilter(e.target.value)} />
           <select value={action} onChange={(e) => setAction(e.target.value)} aria-label="추천 필터">

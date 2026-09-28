@@ -24,7 +24,11 @@ export default function Guide() {
           <li>시각은 미국 동부시간(ET)을 먼저, 한국시간(KST)을 괄호 안에 함께 표시합니다(YYYY-MM-DD HH:mm).</li>
           <li>신뢰도는 판정의 견고성(데이터 완결성·기준선과의 거리)이며 성공 확률이 아닙니다.</li>
           <li>손익비 = (1차 목표가 − 현재가) ÷ (현재가 − 손절가). 최대 매수가는 손익비 2가 되는 가격입니다.</li>
+          <li>가격·수익률 같은 숫자는 모든 숫자의 폭이 같은 글꼴 설정(tabular-nums)으로 표시해, 값이 바뀌어도 자리가 흔들리지 않습니다.</li>
         </ul>
+      </Card>
+      <Card title="글꼴 · 라이선스">
+        <div className="explain">화면 글꼴은 앱에 포함된 Pretendard Variable(Copyright © 2021 Kil Hyung-jin, SIL Open Font License 1.1)입니다. PC에 글꼴을 설치하지 않아도 같은 모습으로 보입니다. <a href="./licenses/Pretendard-OFL-1.1.txt" target="_blank" rel="noreferrer">라이선스 전문 보기</a></div>
       </Card>
     </div>
   );

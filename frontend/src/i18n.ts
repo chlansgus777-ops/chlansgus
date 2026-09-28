@@ -86,3 +86,34 @@ export const READINESS_KO: Record<string, { label: string; tone: string; help: s
   "PAPER ONLY": { label: "연습용(모의)", tone: "info", help: "모의 데이터입니다. 실제 투자 판단에 쓰면 안 됩니다." },
   "NOT READY": { label: "준비 안 됨", tone: "neg", help: "데이터 준비가 끝나지 않았거나 필요한 API 키가 없습니다. 지금의 추천(또는 빈 목록)은 판단 근거가 될 수 없습니다." },
 };
+
+/** What each action means in one plain sentence (a description of the category — no numbers of its own). */
+export const ACTION_PLAIN: Record<string, string> = {
+  "BUY": "매수 조건을 모두 통과했습니다. 가격 계획 안에서 매수를 검토할 수 있습니다.",
+  "BUY SMALL": "조건은 대체로 맞지만, 평소보다 작은 비중으로만 검토할 수 있습니다.",
+  "ADD": "보유 중인 종목이며, 추가 매수 구간에 있습니다.",
+  "HOLD": "보유를 유지합니다. 팔 이유도, 더 살 이유도 아직 뚜렷하지 않습니다.",
+  "WATCH": "아직 매수할 만큼 매력적이지 않아 지켜보는 단계입니다.",
+  "WAIT": "종목은 괜찮지만, 지금 가격이나 일정 때문에 기다리는 편이 낫습니다.",
+  "REDUCE": "보유 중이며 점수가 보유 기준 아래로 내려가 비중 축소를 검토할 때입니다.",
+  "SELL": "보유 중이며 투자 근거가 깨져 매도를 검토할 때입니다.",
+  "DATA INSUFFICIENT": "핵심 자료가 부족해 이번에는 판단하지 않았습니다.",
+};
+
+/** Rail / tone family of an action. Price colours (up/down) are never used for actions. */
+export function actionTone(a: string | null | undefined, expired = false): "buy" | "wait" | "sell" | "hold" | "none" | "expired" {
+  if (expired) return "expired";
+  if (a === "BUY" || a === "BUY SMALL" || a === "ADD") return "buy";
+  if (a === "WAIT") return "wait";
+  if (a === "REDUCE" || a === "SELL") return "sell";
+  if (a === "HOLD" || a === "WATCH") return "hold";
+  return "none";
+}
+
+export const HEALTH_KO: Record<string, string> = { HEALTHY: "정상", DEGRADED: "불안정", DOWN: "중단", UNKNOWN: "미확인" };
+
+/** The conclusion in plain words, shown large on the stock page (a name for the backend's action, nothing more). */
+export const VERDICT_KO: Record<string, string> = {
+  "BUY": "매수 검토 가능", "BUY SMALL": "소량 매수 검토", "ADD": "추가 매수 검토", "HOLD": "보유 유지", "WATCH": "지켜보기",
+  "WAIT": "지금은 기다리기", "REDUCE": "비중 축소 검토", "SELL": "매도 검토", "DATA INSUFFICIENT": "판단 보류 — 자료 부족",
+};

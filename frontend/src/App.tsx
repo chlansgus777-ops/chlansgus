@@ -1,8 +1,6 @@
-import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
-import { Err, ModeBanner } from "./components/ui";
-import { useApi } from "./components/useApi";
-import { ModeSwitch } from "./mode";
-import { READINESS_KO } from "./i18n";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { ModeBanner, StatePanel } from "./components/ui";
+import { StatusBar, StatusProvider, useStatus } from "./components/status";
 import type { SystemInfo } from "./types";
 import Dashboard from "./pages/Dashboard";
 import Opportunities from "./pages/Opportunities";
@@ -25,7 +23,6 @@ const ADVANCED: [string, string, string][] = [
   ["/committee", "◈", "AI 위원회"], ["/performance", "↗", "성과 분석"], ["/macro", "∿", "시장·거시 지표"], ["/health", "●", "시스템 상태"], ["/settings", "⚙", "설정"],
 ];
 
-
 /** Which build is running (the commit it was built from): after installing a new version the owner can check it. */
 export function versionLabel(sys: SystemInfo): string {
   const v = sys.versions ?? {};
@@ -33,40 +30,46 @@ export function versionLabel(sys: SystemInfo): string {
 }
 
 export default function App() {
-  const sys = useApi<SystemInfo>("/system");
-  const ready = useApi<{ recommendation_readiness: string }>("/readiness");
+  return (
+    <StatusProvider>
+      <Shell />
+    </StatusProvider>
+  );
+}
+
+function Shell() {
+  const st = useStatus()!;
+  const sys = st.system;
   const loc = useLocation();
   const isStock = loc.pathname.startsWith("/stocks/");
   const inAdvanced = ADVANCED.some(([to]) => loc.pathname.startsWith(to));
-  const rr = ready.data ? READINESS_KO[ready.data.recommendation_readiness] : undefined;
   return (
     <div className="layout">
       <nav className="nav" aria-label="주 메뉴">
-        <div className="brand">◎ MarketLens<small>미국 주식 투자 판단 도우미</small></div>
+        <div className="brand"><span className="logo" aria-hidden>◎</span>MarketLens<small>미국 주식 투자 판단 도우미</small></div>
         {NAV.map(([to, icon, label]) => (
           <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => (isActive || (to === "/stocks" && isStock) ? "active" : "")}>
-            <span aria-hidden>{icon}</span>{label}
+            <span className="ico" aria-hidden>{icon}</span>{label}
           </NavLink>
         ))}
         <details className="nav-more" open={inAdvanced || undefined}>
           <summary>고급 기능</summary>
           {ADVANCED.map(([to, icon, label]) => (
-            <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}><span aria-hidden>{icon}</span>{label}</NavLink>
+            <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}><span className="ico" aria-hidden>{icon}</span>{label}</NavLink>
           ))}
         </details>
         <div className="foot">MarketLens는 주문을 넣지 않습니다. 모든 매매는 직접 판단·실행하세요. 가격은 모두 미국 달러(USD)입니다.
           {sys.data && <div data-testid="app-version">{versionLabel(sys.data)}</div>}</div>
       </nav>
       <div style={{ minWidth: 0 }}>
-        {sys.data && <ModeBanner mode={sys.data.mode} />}
-        <div className="topbar">
-          <span className="caption">{sys.data ? `데이터: ${sys.data.mode === "MOCK" ? "모의(MOCK)" : "실데이터(LIVE)"} · AI 위원회 ${sys.data.llm.available ? "사용 가능" : "사용 불가"}` : ""}</span>
-          <div className="row">
-            {rr && <Link to="/health" className={`badge ${rr.tone}`} title={rr.help} data-testid="readiness-badge">추천 준비도: {rr.label}</Link>}
-            <Link to="/guide">용어·판정 설명</Link><ModeSwitch />
+        {sys.data && sys.data.mode === "MOCK" && <ModeBanner mode="MOCK" />}
+        <StatusBar />
+        {sys.data && sys.data.mode === "LIVE" && <ModeBanner mode="LIVE" />}
+        {sys.error && (
+          <div style={{ padding: "12px 28px 0" }}>
+            <StatePanel kind="disconnected" what={`백엔드 연결 실패: ${sys.error}`} actions={<button onClick={st.refresh}>다시 시도</button>} />
           </div>
-        </div>
-        {sys.error && <div style={{ padding: "10px 28px" }}><Err error={`백엔드 연결 실패: ${sys.error}`} retry={sys.reload} /></div>}
+        )}
         <main className="main">
           <Routes>
             <Route path="/" element={<Dashboard />} />

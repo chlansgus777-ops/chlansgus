@@ -38,9 +38,9 @@ export function ModeSwitch() {
 export function More({ title, children, hint }: { title: string; children: ReactNode; hint?: string }) {
   const { mode } = useMode();
   return (
-    <details open={mode === "advanced"} className="card" key={mode}>
-      <summary>{title}{hint && <span className="caption"> · {hint}</span>}</summary>
-      {children}
+    <details open={mode === "advanced"} className="disclosure" key={mode}>
+      <summary>{title}{hint && <span className="hint">· {hint}</span>}</summary>
+      <div className="body">{children}</div>
     </details>
   );
 }

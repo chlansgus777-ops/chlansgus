@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import { stamp } from "../format";
 import { READINESS_KO } from "../i18n";
-import { Card, Notice } from "./ui";
+import { Card, Notice, Ribbon, StatePanel } from "./ui";
 import { useApi } from "./useApi";
 
 export interface ReadinessInfo {
@@ -38,13 +38,13 @@ export function ReadinessBanner({ r }: { r: ReadinessInfo | undefined | null }) 
   if (!r) return null;
   const info = READINESS_KO[r.recommendation_readiness];
   if (!info) return null;
-  const tone: "info" | "warn" | "neg" = info.tone === "neg" ? "neg" : info.tone === "warn" ? "warn" : "info";
+  const tone: "info" | "warn" | "danger" = info.tone === "neg" ? "danger" : info.tone === "warn" ? "warn" : "info";
   const why = r.recommendation_readiness === "NOT READY" ? firstReason(r) : undefined;
   return (
-    <Notice tone={tone}>
+    <Ribbon tone={tone} cap="추천 준비도" testId="readiness-ribbon">
       <b>추천 준비도: {info.label}</b> — {info.help} <Link to="/health">자세히 보기</Link>
       {why ? <div>이유: {why}</div> : null}
-    </Notice>
+    </Ribbon>
   );
 }
 
@@ -172,6 +172,7 @@ export function SyncControl({ onChange }: { onChange?: () => void }) {
 export function NotReady({ r, onChange }: { r: ReadinessInfo; onChange?: () => void }) {
   return (
     <Card title="데이터를 준비하는 중입니다" icon="⏳" tone="warn" explain="데이터가 준비되지 않아 추천 종목이 없는 것처럼 보일 수 있습니다. 이 목록이 비어 있어도 ‘살 종목이 없다’는 뜻이 아닙니다.">
+      <div style={{ marginBottom: 12 }}><StatePanel kind="collecting" /></div>
       {r.mode === "LIVE" && <SyncControl onChange={onChange} />}
       <ProgressBars p={r.progress} />
       <ul className="list">{r.scanner_reasons.map((x, i) => <li key={i}><span className="dot warn">!</span><span>{x}</span></li>)}</ul>

@@ -1,5 +1,5 @@
 import { Fragment } from "react";
-import { Card, Err, Loading } from "../components/ui";
+import { Card, Err, Loading, StatePanel } from "../components/ui";
 import { ProgressBars, ReadinessBanner, statusKo, SyncControl, type ReadinessInfo } from "../components/Readiness";
 import { useApi } from "../components/useApi";
 import { num, pct, stamp } from "../format";
@@ -15,10 +15,14 @@ export default function Health() {
   const r = useApi<ReadinessInfo>("/readiness");
   if (h.state === "loading") return <Loading what="시스템 상태" />;
   if (!h.data) return <Err error={h.error} retry={h.reload} />;
-  const cls = (s: string) => (s === "HEALTHY" ? "pos" : s === "DOWN" ? "neg" : "warn");
+  const cls = (s: string) => (s === "HEALTHY" ? "ok" : s === "DOWN" ? "danger" : "warn");
   return (
     <div className="grid">
-      <div className="row spread"><h1>시스템 상태</h1><button onClick={() => { h.reload(); r.reload(); }}>새로고침</button></div>
+      <div className="page-head"><h1>시스템 상태</h1><button onClick={() => { h.reload(); r.reload(); }}>새로고침</button></div>
+      {h.data.providers.some((p) => p.status === "DOWN" && p.mode === "LIVE") && (
+        <StatePanel kind="provider_failure" what={`중단된 공급자: ${h.data.providers.filter((p) => p.status === "DOWN" && p.mode === "LIVE").map((p) => `${p.name}(${p.kind})${p.last_error ? ` — ${p.last_error.slice(0, 80)}` : ""}`).join(" · ")}`} />
+      )}
+      {!h.data.llm.available && <StatePanel kind="ai_unavailable" what={`AI 공급자: ${h.data.llm.provider} — ${ST_KO[h.data.llm.status] ?? h.data.llm.status}`} />}
       {r.data && (
         <>
           <ReadinessBanner r={r.data} />
@@ -41,8 +45,8 @@ export default function Health() {
         </>
       )}
       <Card title="데이터 공급자">
-        <table><thead><tr><th>공급자</th><th>종류</th><th>모드</th><th>상태</th><th>데이터 시점</th><th>지연</th><th>마지막 성공</th><th>오류율</th><th>차단기</th><th>요청 제한</th><th>마지막 오류</th></tr></thead>
-          <tbody>{h.data.providers.map((p) => <tr key={p.name}><td>{p.name}</td><td>{p.kind}</td><td>{p.mode}</td><td className={cls(p.status)}>{ST_KO[p.status] ?? p.status}</td><td>{stamp(p.freshness)}</td><td>{p.latency_ms === null ? "N/A" : `${num(p.latency_ms, 0)} ms`}</td><td>{stamp(p.last_success)}</td><td>{pct(p.error_rate, 0, false)}</td><td>{p.breaker_state}</td><td>{p.rate_limit_state}</td><td className="muted" title={p.last_error ?? ""}>{(p.last_error ?? "").slice(0, 40)}</td></tr>)}</tbody></table>
+        <div className="scroll"><table><thead><tr><th>공급자</th><th>종류</th><th>모드</th><th>상태</th><th>데이터 시점</th><th>지연</th><th>마지막 성공</th><th>오류율</th><th>차단기</th><th>요청 제한</th><th>마지막 오류</th></tr></thead>
+          <tbody>{h.data.providers.map((p) => <tr key={p.name}><td>{p.name}</td><td>{p.kind}</td><td>{p.mode}</td><td className={cls(p.status)}>{p.status === "HEALTHY" ? "✓ " : p.status === "DOWN" ? "⛔ " : "! "}{ST_KO[p.status] ?? p.status}</td><td>{stamp(p.freshness)}</td><td>{p.latency_ms === null ? "N/A" : `${num(p.latency_ms, 0)} ms`}</td><td>{stamp(p.last_success)}</td><td>{pct(p.error_rate, 0, false)}</td><td>{p.breaker_state}</td><td>{p.rate_limit_state}</td><td className="muted" title={p.last_error ?? ""}>{(p.last_error ?? "").slice(0, 40)}</td></tr>)}</tbody></table></div>
       </Card>
       <Card title="공급자 구성 (1순위 → 대체)">
         <table><tbody>{h.data.configured.map((c, i) => <tr key={i}><td>{c.kind}</td><td>{c.provider}</td><td>{c.mode}</td><td className={c.configured ? "pos" : "neg"}>{c.configured ? "설정됨" : "미설정"}</td><td className="muted">{c.reason ?? ""}</td></tr>)}</tbody></table>

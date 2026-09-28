@@ -1,13 +1,47 @@
 import { useState } from "react";
 import { SIZE_KO, STANCE_KO, ko } from "../i18n";
 import type { CommitteeResult, Evidence } from "../types";
-import { Action, Card, Empty, EvidenceChips, Stance } from "./ui";
+import { Action, Card, Empty, EvidenceChips, Ribbon, Stance, StatePanel, Tile } from "./ui";
 
 const ORDER = ["fundamental", "earnings", "valuation", "macro", "technical", "news", "risk_analyst"];
 const AGENT_KO: Record<string, string> = { fundamental: "펀더멘털 분석가", earnings: "실적 분석가", valuation: "밸류에이션 분석가", macro: "거시 분석가", technical: "기술적 분석가", news: "뉴스·이슈 분석가", risk_analyst: "리스크 분석가" };
 const STATUS_KO: Record<string, string> = { COMPLETED: "완료", PARTIAL: "일부 완료(무효 출력 제외)", UNAVAILABLE: "사용 불가", SKIPPED: "생략", REUSED: "이전 결과 재사용" };
 const LEVEL_KO: Record<string, string> = { LOW: "낮음", MEDIUM: "보통", HIGH: "높음", EXTREME: "극단적" };
 const FIT_KO: Record<string, string> = { GOOD: "적합", NEUTRAL: "보통", POOR: "부적합" };
+
+const AGREE_KO: Record<string, string> = { HIGH: "높음", MEDIUM: "보통", LOW: "낮음" };
+
+/** The committee in four lines first — the strongest case for, the strongest case against, the biggest open
+ * question and the overall stance — kept apart from the deterministic result it may only lower. The debate and each
+ * analyst's report stay folded (CommitteeView). */
+export function CommitteeSummary({ c }: { c: CommitteeResult }) {
+  if (c.status === "UNAVAILABLE") return <StatePanel kind="ai_unavailable" what={c.reason ?? "AI 공급자를 쓸 수 없습니다."} />;
+  if (c.status === "SKIPPED") return <div className="muted">{c.reason ?? "위원회 생략"} — 결정론적 분석 결과는 그대로 유효합니다.</div>;
+  const s = c.synthesis;
+  const lowered = c.final_action !== c.deterministic_action;
+  return (
+    <div className="grid" style={{ gap: 12 }} data-testid="committee-summary">
+      {c.status === "REUSED" && (
+        <Ribbon tone="info" cap="이전 결과 재사용" testId="committee-reused-summary">
+          이번 분석에서 AI를 다시 부르지 않았습니다: {c.reason ?? "이전 위원회 결과 재사용"}{c.reused_from != null ? ` (원본 추천 #${c.reused_from})` : ""}. 의견과 근거는 그 당시 데이터 기준입니다.
+        </Ribbon>
+      )}
+      {c.injection_flags.length > 0 && <Ribbon tone="warn" cap="외부 문구 차단">뉴스에서 AI 지시처럼 보이는 문구를 발견해({c.injection_flags.join(", ")}) 신뢰할 수 없는 자료로만 다뤘습니다.</Ribbon>}
+      <div className="tiles" style={{ marginTop: 0 }}>
+        <Tile title="▲ 긍정 근거" text value={s?.strongest_bull_argument || "없음"} tone="ok" />
+        <Tile title="▼ 반대 근거" text value={s?.strongest_bear_argument || "없음"} tone="warn" />
+        <Tile title="? 가장 큰 불확실성" text value={s?.unresolved_uncertainty?.[0] ?? "없음"} />
+        <Tile title="◈ 종합" text value={s ? `${STANCE_KO[s.advisory_stance] ?? s.advisory_stance} 의견 · 합의 ${AGREE_KO[s.committee_agreement] ?? s.committee_agreement}` : "종합 의견 없음"}
+              sub={c.risk_review ? `리스크 검토: 위험 ${LEVEL_KO[c.risk_review.risk_level] ?? c.risk_review.risk_level}` : undefined} />
+      </div>
+      <div className="explain" style={{ color: "var(--sub)" }}>
+        결정론적 판단 <Action a={c.deterministic_action} /> → AI 검토 후 <Action a={c.final_action} />{" "}
+        {lowered ? <b className="warn">— {c.action_changed_by ?? "AI 위원회"}의 검토로 한 단계 낮췄습니다.</b> : "— AI는 판단을 바꾸지 않았습니다."}
+        {" "}AI는 결정론적 판단을 올릴 수 없고 낮추기만 할 수 있습니다. 합의도 {c.consensus_pct ?? "N/A"}%는 AI 분석가들끼리 의견이 맞은 정도이지 상승 확률이 아닙니다.
+      </div>
+    </div>
+  );
+}
 
 export function CommitteeView({ c, evidence }: { c: CommitteeResult; evidence: Map<string, Evidence> }) {
   const [full, setFull] = useState(false);

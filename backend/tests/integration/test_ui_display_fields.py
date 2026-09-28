@@ -1,0 +1,56 @@
+"""Display-only fields the redesigned first screen reads (UI overhaul, 2026-09-28).
+
+They are read from what the backend already has — the exchange calendar and the analysis stored with each
+recommendation — so the screen never guesses a session from the clock or writes its own reason for a candidate."""
+
+from datetime import datetime, timezone
+
+from fastapi.testclient import TestClient
+
+from marketlens.api.app import create_app
+from marketlens.api.routes import _card_facts
+from marketlens.infrastructure.db import repository as repo
+from tests.integration.test_service_api import make_service
+
+
+def _client(svc):
+    return TestClient(create_app(svc.settings, service=svc, run_migrations=False), headers={"X-MarketLens-Client": "test"})
+
+
+def test_system_reports_the_session_from_the_exchange_calendar():
+    svc = make_service(universe=40)
+    with _client(svc) as c:
+        m = c.get("/api/system").json()["market"]
+        assert m["session"] == "REGULAR"  # conftest NOW: Friday 11:00 ET
+        assert m["ny_time"].startswith("2026-09-25T11:00") and m["last_completed_session"] == "2026-09-24"
+        svc._clock["t"] = datetime(2026, 11, 26, 16, 0, tzinfo=timezone.utc)  # Thanksgiving 11:00 ET: a weekday, but closed
+        assert c.get("/api/system").json()["market"]["session"] == "CLOSED"
+        svc._clock["t"] = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)  # 08:00 ET
+        assert c.get("/api/system").json()["market"]["session"] == "PREMARKET"
+
+
+def test_dashboard_cards_carry_a_stored_reason_and_risk():
+    svc = make_service(universe=80)
+    svc.run_scan(run_committee=False)
+    with _client(svc) as c:
+        top = c.get("/api/dashboard").json()["top_opportunities"]
+    assert top
+    with svc.sf() as s:
+        for r in top:
+            assert "key_reason" in r and "key_risk" in r
+            res = repo.get_recommendation(s, r["id"]).result
+            positives = [x["text"] for comp in res["scorecard"]["components"] for x in comp["reasons"] if x["sign"] > 0]
+            assert r["key_reason"] is None or r["key_reason"] in positives  # one of the stored sentences, never new text
+
+
+def test_card_facts_order_veto_then_event_then_negative():
+    comp = lambda name, w, sub, reasons: {"name": name, "weight": w, "subscore": sub, "available": True, "reasons": [{"text": t, "sign": g} for t, g in reasons]}  # noqa: E731
+    res = {"scorecard": {"components": [comp("entry_rr", 30, 1.0, [("손익비 3", 1)]), comp("valuation", 10, 0.2, [("싸다", 1), ("비싼 편", -1)]),
+                                        comp("fundamental", 20, 0.9, [("마진 우수", 1), ("부채 많음", -1)])]},
+           "decision": {"vetoes": []}, "event_risk": {"level": "LOW"}}
+    assert _card_facts(res) == {"key_reason": "마진 우수", "key_risk": {"kind": "negative", "code": None, "text": "부채 많음"}}
+    res["event_risk"] = {"level": "HIGH", "reasons": ["실적 발표 2일 전"]}
+    assert _card_facts(res)["key_risk"] == {"kind": "event", "code": "HIGH", "text": "실적 발표 2일 전"}
+    res["decision"] = {"vetoes": ["STALE_PRICE"]}
+    assert _card_facts(res)["key_risk"]["code"] == "STALE_PRICE"
+    assert _card_facts({}) == {"key_reason": None, "key_risk": None}

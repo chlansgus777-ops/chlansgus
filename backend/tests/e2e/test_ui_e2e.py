@@ -67,7 +67,7 @@ def test_dashboard_answers_the_first_questions(page, server):
     page.goto(f"{server}/#/")
     page.get_by_text("오늘의 미국 주식 한눈에 보기").wait_for()
     assert "모의 데이터(MOCK)" in page.get_by_test_id("banner-mock").inner_text()
-    for title in ("오늘 시장 분위기", "지금 가장 유망한 종목", "가장 조심할 위험", "다가오는 중요한 일정", "내 포트폴리오", "모의투자 성과", "추천이 바뀐 종목", "관심 종목 알림", "시스템 상태"):
+    for title in ("오늘 시장 분위기", "지금 검토할 후보", "가장 조심할 위험", "다가오는 중요한 일정", "내 포트폴리오", "모의투자 성과", "추천이 바뀐 종목", "관심 종목 알림", "시스템 상태"):
         assert page.get_by_role("heading", name=title, exact=True).is_visible(), title
     assert page.get_by_role("link", name="기회 찾기").is_visible()
     assert page.errors == []  # type: ignore[attr-defined]
@@ -79,13 +79,13 @@ def test_stock_detail_puts_the_answer_on_top(page, server):
     first = page.locator("table tbody tr td a").first
     ticker = first.inner_text()
     first.click()
-    page.get_by_role("heading", name="매수 계획", exact=True).wait_for()
+    page.get_by_role("heading", name="가격 계획", exact=True).wait_for()
     for title in ("좋은 이유", "주의할 이유", "현재 이슈 영향", "투자 논리가 깨지는 조건", "내 포트폴리오에 넣어도 될까?", "왜 이런 판단이 나왔나요?"):
         assert page.get_by_role("heading", name=title, exact=True).is_visible(), title
     assert ticker in page.locator("h1").first.inner_text()
     assert " ET (" in page.content() and "KST)" in page.content()  # ET with KST alongside
     hero = page.locator("section.hero")
-    hero_box, plan_box = hero.bounding_box(), page.get_by_role("heading", name="매수 계획", exact=True).bounding_box()
+    hero_box, plan_box = hero.bounding_box(), page.get_by_role("heading", name="가격 계획", exact=True).bounding_box()
     assert hero_box and plan_box and hero_box["y"] < plan_box["y"]  # the decision comes before the details
     # beginner mode folds raw data; advanced mode opens it
     fresh = page.locator("details", has_text="데이터 종류별 신선도")
@@ -108,7 +108,7 @@ def test_narrow_window_stacks_cards(page, server):
     page.set_viewport_size({"width": 760, "height": 1000})
     page.goto(f"{server}/#/")
     page.get_by_text("오늘의 미국 주식 한눈에 보기").wait_for()
-    boxes = [page.get_by_role("heading", name=t).bounding_box() for t in ("오늘 시장 분위기", "지금 가장 유망한 종목")]
+    boxes = [page.get_by_role("heading", name=t).bounding_box() for t in ("오늘 시장 분위기", "지금 검토할 후보")]
     assert boxes[0] and boxes[1] and boxes[1]["y"] > boxes[0]["y"]  # one column on narrow windows
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")  # no horizontal page scroll
     page.set_viewport_size({"width": 1400, "height": 1000})
@@ -123,7 +123,7 @@ def _rows(page, server):
 
 def _open_stock(page, server, ticker):
     page.goto(f"{server}/#/stocks/{ticker}")
-    page.get_by_role("heading", name="매수 계획", exact=True).wait_for()
+    page.get_by_role("heading", name="가격 계획", exact=True).wait_for()
 
 
 def test_navigation_is_simple_and_readiness_is_visible(page, server):
@@ -142,7 +142,7 @@ def test_ticker_switch_never_shows_the_previous_stock(page, server):
     _open_stock(page, server, a)
     assert a in page.locator("h1").first.inner_text()
     page.evaluate(f"window.location.hash = '#/stocks/{b}'")
-    page.get_by_role("heading", name="매수 계획", exact=True).wait_for()
+    page.get_by_role("heading", name="가격 계획", exact=True).wait_for()
     page.wait_for_function(f"document.querySelector('h1') && document.querySelector('h1').innerText.startsWith('{b}')")
     assert a not in page.locator("h1").first.inner_text()
 

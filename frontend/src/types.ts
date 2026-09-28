@@ -7,6 +7,8 @@ export interface OppRow {
   current_status: string | null; current_status_reason: string | null; sessions_since: number | null; actionable_now: boolean | null;
   action_ko: string; valuation_price_basis: string | null; sector_known: boolean;
   revalidated_price?: number | null; status_problems?: string[]; version?: number; supersedes_id?: number | null; issued_at?: string | null;
+  /** dashboard only: one reason and one risk read from the stored analysis (never written by the screen) */
+  key_reason?: string | null; key_risk?: { kind: "veto" | "event" | "negative"; code: string | null; text: string | null } | null;
 }
 
 export interface FreshnessCheck { data_type: string; quality: string; effective: string | null; published: string | null; age: number | null; unit: string; fresh_max: number; usable_max: number; reason_ko: string }
@@ -17,6 +19,8 @@ export interface Opportunities { scan: ScanInfo | null; rows: OppRow[]; readines
 
 export interface SystemInfo {
   mode: "MOCK" | "LIVE"; mock_banner: boolean; now: string; versions: Record<string, string>;
+  /** the US session now, from the backend's exchange calendar (holidays and early closes included) */
+  market?: { session: string; ny_time: string; last_completed_session: string };
   llm: { provider: string; available: boolean; fast_model: string; deep_model: string };
   providers: { kind: string; provider: string; mode: string; configured: boolean; reason: string | null }[];
 }

@@ -16,7 +16,7 @@ from marketlens.config import AGENT_PROMPT_VERSION, SCHEMA_VERSION, code_version
 from marketlens.domain.enums import ACTION_KO, BULLISH_ACTIONS, Action, Horizon
 from marketlens.domain.issues import compute_issue_impacts
 from marketlens.domain.macro import detect_regimes, factor_moves, primary_regime
-from marketlens.domain.market_calendar import last_completed_session, to_ny
+from marketlens.domain.market_calendar import classify_session, last_completed_session, to_ny
 from marketlens.domain.portfolio import portfolio_snapshot
 from marketlens.infrastructure.db import repository as repo
 
@@ -45,10 +45,14 @@ def system(req: Request) -> dict[str, Any]:
     s = svc(req)
     cfg = s.model_config()
     st = s.settings
+    now = s.now()
     return {
         "mode": s.mode.value,
         "mock_banner": s.mode.value == "MOCK",
-        "now": s.now().isoformat(),
+        "now": now.isoformat(),
+        # display only: the US session right now from the exchange calendar (holidays, early closes) — the UI shows it
+        # instead of guessing from the clock
+        "market": {"session": classify_session(now).value, "ny_time": to_ny(now).isoformat(), "last_completed_session": last_completed_session(now).isoformat()},
         "versions": {
             "app_version": __version__,
             "code_version": code_version(),
@@ -259,6 +263,29 @@ def calendar(req: Request, days: int = 45) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- dashboard
+def _card_facts(res: dict[str, Any]) -> dict[str, Any]:
+    """One stored reason and one stored risk for a dashboard card, read from the analysis saved with the recommendation
+    (display only: no new analysis, no quote fetch, nothing recomputed).
+
+    key_reason: the first positive reason of the component that added the most weighted points (the entry/price-plan
+    component is left out — the card shows the plan itself). key_risk: the first hard veto, else a HIGH/EXTREME event
+    risk, else the first negative reason of the heaviest component; None when the analysis recorded none."""
+    comps = [c for c in ((res.get("scorecard") or {}).get("components") or []) if c.get("available")]
+    heavy = sorted(comps, key=lambda c: -(float(c.get("weight") or 0) * float(c.get("subscore") or 0)))
+    reason = next((r["text"] for c in heavy if c.get("name") != "entry_rr" for r in (c.get("reasons") or []) if (r.get("sign") or 0) > 0), None)
+    dec, er = res.get("decision") or {}, res.get("event_risk") or {}
+    risk: dict[str, Any] | None = None
+    if dec.get("vetoes"):
+        risk = {"kind": "veto", "code": dec["vetoes"][0], "text": None}
+    elif er.get("level") in ("HIGH", "EXTREME"):
+        risk = {"kind": "event", "code": er["level"], "text": "; ".join(er.get("reasons") or []) or ((er.get("nearest") or {}).get("title"))}
+    else:
+        neg = next((r["text"] for c in sorted(comps, key=lambda c: -float(c.get("weight") or 0)) for r in (c.get("reasons") or []) if (r.get("sign") or 0) < 0), None)
+        if neg:
+            risk = {"kind": "negative", "code": None, "text": neg}
+    return {"key_reason": reason, "key_risk": risk}
+
+
 @router.get("/dashboard")
 def dashboard(req: Request) -> dict[str, Any]:
     s = svc(req)
@@ -274,12 +301,15 @@ def dashboard(req: Request) -> dict[str, Any]:
     m = macro(req)
     cal = calendar(req, 21)
     changes = []
+    top_ids = {r["id"] for r in top}
     for r in rows:
         with s.sf() as ss:
             rec = repo.get_recommendation(ss, r["id"])
             items = [c for c in ((rec.result or {}).get("changes") or []) if c.get("kind") == "action"] if rec else []
         if items:
             changes.append({"ticker": r["ticker"], "text": items[0]["text"], "action": r["action"]})
+        if r["id"] in top_ids:
+            r.update(_card_facts((rec.result or {}) if rec else {}))
     alerts = []
     with s.sf() as ss:
         pf = s.portfolio(ss)

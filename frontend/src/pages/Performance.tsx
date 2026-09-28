@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { api } from "../api";
-import { Card, Empty, Err, LineChart, Loading } from "../components/ui";
+import { Card, Empty, Err, LineChart, Loading, Ribbon, StaleData } from "../components/ui";
+import { useStatus } from "../components/status";
 import { useApi } from "../components/useApi";
 import { day, num, pct, price } from "../format";
 import { REGIME_KO, ko } from "../i18n";
@@ -44,11 +45,14 @@ export function SegmentTable({ segments }: { segments: Record<string, SegmentInf
   );
 }
 
+const PERIOD_KO: Record<string, string> = { "30d": "최근 30일", "90d": "최근 90일", "1y": "최근 1년", all: "전체" };
 const CAL_KO: Record<string, string> = { INSUFFICIENT_SAMPLES: "표본 부족(가중치 변경 없음)", NO_SIGNAL: "유의한 신호 없음", SHADOW_STARTED: "섀도 모델 시작", SHADOW_CONTINUES: "섀도 검증 계속", PROMOTED: "승격(운영 반영)" };
 
 export default function Performance() {
   const [period, setPeriod] = useState("all");
   const p = useApi<Perf>(`/performance?period=${period}`, [period]);
+  const st = useStatus();
+  const mode = st?.system.data?.mode;
   const c = useApi<Cal>("/calibration");
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -60,7 +64,7 @@ export default function Performance() {
   const acct = x.paper_account;
   return (
     <div className="grid">
-      <div className="row spread">
+      <div className="page-head">
         <h1>성과 · 모의투자(PAPER)</h1>
         <div className="row">
           {[["30d", "30일"], ["90d", "90일"], ["1y", "1년"], ["all", "전체"]].map(([k, l]) => <button key={k} disabled={k === period} onClick={() => setPeriod(k!)}>{l}</button>)}
@@ -69,10 +73,24 @@ export default function Performance() {
         </div>
       </div>
       <Err error={err} />
+      <StaleData error={p.error} at={p.fetchedAt} retry={p.reload} />
+      {mode === "MOCK" && <Ribbon tone="danger" cap="모의 데이터 성과" testId="perf-mock">모의(MOCK) 데이터로 만든 추천과 가격으로 계산한 결과입니다. 실전 성과가 아니며, 실데이터(LIVE) 성과와 섞어 보지 마세요.</Ribbon>}
+      {mode === "LIVE" && <Ribbon tone="info" cap="실데이터 기반 모의투자" testId="perf-live">실데이터(LIVE) 가격으로 추천을 따라 했을 때를 계산한 모의투자(Paper)입니다. 실제 주문·체결이 아닙니다.</Ribbon>}
       <div className="banner paper" data-testid="banner-paper">모의투자(PAPER) — 실제 주문이 아닌 시뮬레이션입니다. {x.paper_disclaimer}</div>
+      <Card title="이 성과를 읽기 전에" icon="ℹ" testId="perf-basis">
+        <div className="kv">
+          <span className="k">기간 · 기준일</span><span>{PERIOD_KO[period] ?? period} · {day(x.as_of)}</span>
+          <span className="k">추천 표본</span><span>전체 {x.samples.toLocaleString("ko-KR")}개 · 독립 표본 {x.independent_samples.toLocaleString("ko-KR")}개(같은 날 반복 추천은 1개로 계산)</span>
+          <span className="k">결과 확정(20거래일 경과)</span><span>{x.mature_20d.toLocaleString("ko-KR")}개</span>
+          <span className="k">아직 결과 대기(미성숙)</span><span>{Math.max(0, x.samples - x.mature_20d).toLocaleString("ko-KR")}개 — 성과 계산에서 빠집니다</span>
+          <span className="k">모의투자에서 평가하지 못한 신호</span><span>{x.paper_skipped}개(가격 없음 등)</span>
+          <span className="k">비교 기준(벤치마크)</span><span>SPY(S&P 500 ETF)</span>
+        </div>
+        <div className="explain" style={{ marginTop: 8 }}>표본이 적을수록 적중률·수익률이 우연일 가능성이 큽니다. 적중률은 과거 결과이며 앞으로의 상승 확률이 아닙니다.</div>
+      </Card>
       <div className="grid g4">
         <Card title="표본"><div className="big-action">{x.independent_samples.toLocaleString("ko-KR")}</div><div className="muted">독립 표본(같은 날 반복 추천 1건으로 계산) · 전체 {x.samples.toLocaleString("ko-KR")} · 20일 성숙 {x.mature_20d}</div></Card>
-        <Card title="20일 적중률 (매수 계열 추천)"><div className="big-action">{pct(x.recommendation_hit_rate["20"]?.hit_rate ?? null, 0, false)}</div><div className="muted">독립 표본 n={x.recommendation_hit_rate["20"]?.n_independent ?? 0}</div></Card>
+        <Card title="20일 적중률 (매수 계열 추천)"><div className="big-action">{pct(x.recommendation_hit_rate["20"]?.hit_rate ?? null, 0, false)}</div><div className="muted">독립 표본 n={x.recommendation_hit_rate["20"]?.n_independent ?? 0}{(x.recommendation_hit_rate["20"]?.n_independent ?? 0) === 0 ? " — 결과가 확정된 표본이 아직 없습니다" : ""}</div></Card>
         <Card title="모의 계좌"><div className="big-action">{acct ? price(acct.equity.length ? acct.equity[acct.equity.length - 1]![1] : acct.cash) : "N/A"}</div><div className="muted">{acct ? `시작 ${price(acct.starting_capital)} · 실현 ${price(acct.realized_pnl)} · 평가 ${price(acct.unrealized_pnl)} · ${day(acct.as_of)}` : "갱신 전"}</div></Card>
         <Card title="최대 낙폭 / SPY 대비"><div className="big-action">{pct(x.paper["max_drawdown"] ?? null)}</div><div className="muted">초과수익 {pct(x.paper["excess_vs_benchmark"] ?? null)} · 생략된 신호 {x.paper_skipped}</div></Card>
       </div>

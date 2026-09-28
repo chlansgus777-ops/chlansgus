@@ -95,3 +95,38 @@ export function day(iso: string | null | undefined): string {
 export function actionClass(a: string | null | undefined): string {
   return `badge a-${(a ?? "").replace(/ /g, "-")}`;
 }
+
+const WD = ["일", "월", "화", "수", "목", "금", "토"];
+function short(d: Date, timeZone: string): string {
+  const f = new Intl.DateTimeFormat("en-CA", { timeZone, month: "2-digit", day: "2-digit", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+  const p = Object.fromEntries(f.formatToParts(d).map((x) => [x.type, x.value]));
+  const wd = WD[["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday ?? "")] ?? "";
+  return `${p.month}-${p.day}(${wd}) ${p.hour === "24" ? "00" : p.hour}:${p.minute}`;
+}
+
+/** Compact clock pair for the status bar: New York time and Korea time, labelled. */
+export function clockPair(iso: string | null | undefined): { et: string; kst: string } | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return { et: short(d, "America/New_York"), kst: short(d, "Asia/Seoul") };
+}
+
+/** "09-25(금) 16:00 ET" — a short US-market timestamp. */
+export function stampEt(iso: string | null | undefined): string {
+  const c = clockPair(iso);
+  return c ? `${c.et} ET` : dash;
+}
+
+/** How long ago, from the server's clock: "방금" · "12분 전" · "3시간 전" · "2일 전". */
+export function ago(iso: string | null | undefined, nowMs: number): string {
+  if (!iso) return dash;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return dash;
+  const m = Math.floor((nowMs - t) / 60_000);
+  if (m < 1) return "방금";
+  if (m < 60) return `${m}분 전`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}시간 전`;
+  return `${Math.floor(h / 24)}일 전`;
+}

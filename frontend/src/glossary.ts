@@ -5,7 +5,7 @@ export type Dir = "low_good" | "high_good" | "neutral";
 export interface Entry { name: string; short: string; why?: string; dir?: Dir }
 
 export const GLOSSARY: Record<string, Entry> = {
-  score: { name: "점수", short: "펀더멘털·밸류에이션·실적·이슈·거시·위험·진입가를 합친 0~100점 종합 평가", why: "80점 이상이면 매수, 72점 이상이면 소액 매수 후보", dir: "high_good" },
+  score: { name: "점수", short: "펀더멘털·밸류에이션·실적·이슈·거시·위험·진입가를 합친 0~100점 종합 평가. 주가가 오를 확률이 아닙니다", why: "80점 이상이면 매수, 72점 이상이면 소액 매수 후보", dir: "high_good" },
   confidence: { name: "분석 신뢰도(0~100)", short: "데이터 완성도·데이터 간 일치도·기준선과의 거리·AI 위원회 합의로 계산한 점수", why: "주가가 오를 확률이 아닙니다. ‘이 판단이 데이터로 얼마나 잘 뒷받침되는지’입니다", dir: "high_good" },
   eps_revision: { name: "EPS 추정치 변화(리비전)", short: "애널리스트들의 향후 이익 예상치가 최근 올라가고 있는지 보여줍니다", why: "무료 데이터에서는 일부 기간만 공급자가 제공하고, 나머지는 MarketLens가 매일 저장해 직접 계산합니다(누적 중이면 ‘누적 중 42/90일’)", dir: "high_good" },
   fcf: { name: "FCF(잉여현금흐름)", short: "영업으로 번 현금에서 설비투자를 뺀 돈. 배당·자사주·부채 상환에 쓸 수 있는 현금", dir: "high_good" },
@@ -18,7 +18,7 @@ export const GLOSSARY: Record<string, Entry> = {
   add_zone: { name: "추가매수 구간", short: "이미 보유했다면 더 사도 되는 가격대", dir: "neutral" },
   stop: { name: "손절가", short: "이 가격 아래로 마감하면 매수 근거가 깨졌다고 보고 정리하는 가격", why: "손실을 미리 정해 두는 안전장치", dir: "neutral" },
   target: { name: "목표가", short: "가까운 저항선 등으로 계산한 1차·2차 이익 실현 가격", dir: "neutral" },
-  rr: { name: "손익비", short: "(목표가−현재가) ÷ (현재가−손절가). 2면 1을 잃을 위험에 2를 벌 기회", why: "2 미만이면 매수하지 않습니다", dir: "high_good" },
+  rr: { name: "손익비(R/R)", short: "(목표가−현재가) ÷ (현재가−손절가). 손익비 2:1 → 계획상 손실 위험 1에 비해 목표 이익이 2라는 뜻입니다. 목표 달성 확률을 의미하지 않습니다.", why: "2 미만이면 매수하지 않습니다", dir: "high_good" },
   trailing_pe: { name: "PER(과거 12개월)", short: "주가 ÷ 지난 1년 주당순이익. 낮을수록 이익 대비 싸다는 뜻", why: "업종마다 적정 수준이 달라 같은 업종끼리 비교해야 합니다", dir: "low_good" },
   forward_pe: { name: "선행 PER", short: "앞으로 예상 이익 기준 주가 수준. 낮을수록 상대적으로 저렴할 수 있음", why: "성장주는 높게, 경기민감주는 낮게 나오는 경향", dir: "low_good" },
   peg: { name: "PEG", short: "PER을 이익 성장률로 나눈 값. 1 안팎이면 성장 대비 적정", why: "비싸 보여도 성장이 빠르면 괜찮을 수 있는지 보는 지표", dir: "low_good" },
@@ -71,6 +71,8 @@ export const GLOSSARY: Record<string, Entry> = {
   revenue_growth_yoy: { name: "매출 성장률(전년비)", short: "같은 분기 작년 대비 매출 증가율", dir: "high_good" },
   eps_growth_yoy: { name: "EPS 성장률(전년비)", short: "같은 분기 작년 대비 주당순이익 증가율", dir: "high_good" },
   net_debt_to_ebitda: { name: "순부채/EBITDA", short: "빚을 현금성 이익 몇 년치로 갚을 수 있는지. 낮을수록 안전", dir: "low_good" },
+  iv: { name: "IV(내재변동성)", short: "옵션 가격에 담긴 앞으로의 예상 변동 크기. 높을수록 시장이 큰 움직임을 예상한다는 뜻", why: "방향(오를지 내릴지)은 알려주지 않습니다", dir: "neutral" },
+  thesis: { name: "판단 철회 조건", short: "가격과 상관없이, 이 조건이 생기면 투자 근거(논리)가 깨졌다고 보고 판단을 거두는 조건", why: "손절가(가격 기준)와는 별개입니다. 가격이 괜찮아도 논리가 깨지면 다시 봐야 합니다", dir: "neutral" },
   session: { name: "거래 세션", short: "프리마켓(04:00~09:30 ET), 정규장(09:30~16:00), 애프터마켓(16:00~20:00)", dir: "neutral" },
 };
 

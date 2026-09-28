@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
-import { Card, Donut, Empty, Err, Loading, Notice, Term } from "../components/ui";
+import { Card, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } from "../components/ui";
 import { Ledger } from "../components/Ledger";
 import { useApi } from "../components/useApi";
 import { day, num, pct, price, shares, usdWithKo } from "../format";
@@ -53,11 +53,17 @@ export default function Portfolio() {
   return (
     <div className="grid">
       <div className="page-head"><div><h1>내 포트폴리오</h1><div className="t-sub">{x.note}</div></div></div>
-      {x.notes.map((n, i) => <Notice key={i} tone="warn">{n}</Notice>)}
+      <StaleData error={p.error} at={p.fetchedAt} retry={p.reload} />
+      {x.missing_prices.length > 0 && (
+        <Ribbon tone="warn" cap="가격 없음" testId="missing-prices">
+          <b>{x.missing_prices.join(", ")}</b>의 종가를 받지 못해 평가금액·비중·손익 계산에서 뺐습니다. 매입가로 대신 계산하지 않습니다. 그래서 아래 합계와 비중은 이 종목을 뺀 값입니다.
+        </Ribbon>
+      )}
+      {x.notes.filter((n) => !(x.missing_prices.length && n.startsWith("가격 데이터 없는 보유 종목"))).map((n, i) => <Notice key={i} tone="warn">{n}</Notice>)}
       <Err error={err} />
       <div className="g4">
         <Card title="총 평가금액"><div className="t-key">{price(x.nav)}</div><div className="caption">{usdWithKo(x.nav)} · 기준일 {day(x.valuation_day)}</div></Card>
-        <Card title="평가손익"><div className={`t-key ${x.unrealized_pnl >= 0 ? "pos" : "neg"}`}>{x.unrealized_pnl >= 0 ? "▲" : "▼"} {price(x.unrealized_pnl)}</div><div className="caption">매입금액 대비 {pct(pnlPct)}</div></Card>
+        <Card title="평가손익"><div className={`t-key ${x.unrealized_pnl >= 0 ? "pos" : "neg"}`}>{x.unrealized_pnl >= 0 ? "▲" : "▼"} {price(x.unrealized_pnl)}</div><div className="caption">매입금액 대비 {pct(pnlPct)}{x.missing_prices.length ? " · 가격 없는 종목 제외" : ""}</div></Card>
         <Card title="현금"><div className="t-key">{price(x.cash)}</div><div className="caption">전체의 {pct(x.nav > 0 ? x.cash / x.nav : null, 0, false)}</div></Card>
         <Card title="분산 정도"><div className="t-key">{x.hhi < 0.15 ? "좋음" : x.hhi < 0.3 ? "보통" : "쏠림"}</div><div className="caption"><Term k="hhi">집중도(HHI)</Term> {num(x.hhi, 2)} · <Term k="beta">베타</Term> {num(x.beta, 2)}</div></Card>
       </div>
@@ -97,9 +103,9 @@ export default function Portfolio() {
       <Ledger today={nyToday()} onChange={p.reload} />
       <More title="보유 종목 상세" hint="모든 종목을 같은 거래일 종가로 평가">
         {x.holdings.length ? (
-          <table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th></tr></thead>
-            <tbody>{x.holdings.map((h) => <tr key={h.ticker}><td>{h.ticker}</td><td>{h.source === "ledger" ? shares(h.quantity) : num(h.quantity, 0)}{h.source === "ledger" ? <span className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}> 거래 기록 기준</span> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{price(h.price)} <span className="caption">{day(h.price_day)}</span></td>
-              <td>{price(h.market_value)}</td><td className={(h.unrealized_pnl ?? 0) >= 0 ? "pos" : "neg"}>{price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</td><td>{pct(h.weight, 1, false)}</td><td>{h.sector}</td></tr>)}</tbody></table>
+          <div className="scroll"><table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th></tr></thead>
+            <tbody>{x.holdings.map((h) => <tr key={h.ticker}><td>{h.ticker}</td><td>{h.source === "ledger" ? shares(h.quantity) : num(h.quantity, 0)}{h.source === "ledger" ? <span className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}> 거래 기록 기준</span> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)} <span className="caption">{day(h.price_day)}</span></>}</td>
+              <td>{h.market_value === null ? "—" : price(h.market_value)}</td><td className={h.unrealized_pnl === null ? "" : h.unrealized_pnl >= 0 ? "pos" : "neg"}>{h.unrealized_pnl === null ? "계산 안 함" : <>{h.unrealized_pnl >= 0 ? "▲" : "▼"} {price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</>}</td><td>{h.weight === null ? "—" : pct(h.weight, 1, false)}</td><td>{h.sector}</td></tr>)}</tbody></table></div>
         ) : <Empty>보유 종목이 없습니다.</Empty>}
         {x.correlations.length > 0 && <div className="caption" style={{ marginTop: 8 }}><Term k="correlation">상관계수</Term>: {x.correlations.map(([a, b, c]) => `${a}↔${b} ${num(c, 2)}`).join(" · ")}</div>}
       </More>

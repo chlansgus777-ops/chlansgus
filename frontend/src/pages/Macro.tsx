@@ -18,8 +18,8 @@ const SERIES_KO: Record<string, string> = {
 
 export function SeriesTable({ data, ids }: { data: MacroResp; ids: string[] }) {
   return (
-    <table><thead><tr><th>지표</th><th>값</th><th>20일 변화</th><th>출처</th><th>기준 시점</th><th>품질</th></tr></thead>
-      <tbody>{ids.map((id) => { const s = data.series[id]; return <tr key={id}><td>{SERIES_KO[id] ?? id}</td><td>{s ? num(s.latest.value) : <span className="neg">없음(MISSING)</span>}</td><td>{s ? (s.pct_change_20d !== null ? pct(s.pct_change_20d) : num(s.change_20d)) : "N/A"}</td><td>{s?.latest.source ?? "—"}</td><td title={s?.latest.note ?? ""}>{stamp(s?.latest.source_ts)}</td><td><Quality q={s?.latest.quality ?? "MISSING"} /></td></tr>; })}</tbody></table>
+    <div className="scroll"><table><thead><tr><th>지표</th><th>값</th><th>20일 변화</th><th>출처</th><th>기준 시점</th><th>품질</th></tr></thead>
+      <tbody>{ids.map((id) => { const s = data.series[id]; return <tr key={id}><td>{SERIES_KO[id] ?? id}</td><td>{s ? num(s.latest.value) : <span className="danger">없음(MISSING)</span>}</td><td>{s ? (s.pct_change_20d !== null ? pct(s.pct_change_20d) : num(s.change_20d)) : "N/A"}</td><td>{s?.latest.source ?? "—"}</td><td title={s?.latest.note ?? ""}>{stamp(s?.latest.source_ts)}</td><td><Quality q={s?.latest.quality ?? "MISSING"} /></td></tr>; })}</tbody></table></div>
   );
 }
 
@@ -39,7 +39,7 @@ export default function Macro() {
       <div className="grid g2">
         <Card title="금리 · 물가 · 고용 · 환율 · 원자재"><SeriesTable data={d} ids={MACRO_SERIES} /><div className="muted">장단기 금리차(10년−2년): {num(d.yield_curve_2s10s ?? null)}%p · 월간/분기 지표는 발표 시각이 없어 전일 기준 공개값(ALFRED 빈티지)만 사용</div></Card>
         <Card title="시장 국면 (강도 · 신뢰 · 근거)">
-          <table><tbody>{d.regimes.map((r) => <tr key={r.regime}><td className={r.active ? "pos" : "muted"}>{r.active ? "● " : "○ "}{ko(REGIME_KO, r.regime)}</td><td>{num(r.score)}</td><td>{num(r.confidence)}</td><td style={{ whiteSpace: "normal" }} className="muted">{r.evidence.join("; ")}</td></tr>)}</tbody></table>
+          <div className="scroll"><table><tbody>{d.regimes.map((r) => <tr key={r.regime}><td className={r.active ? "pos" : "muted"}>{r.active ? "● " : "○ "}{ko(REGIME_KO, r.regime)}</td><td>{num(r.score)}</td><td>{num(r.confidence)}</td><td style={{ whiteSpace: "normal" }} className="muted">{r.evidence.join("; ")}</td></tr>)}</tbody></table></div>
         </Card>
       </div>
       <Card title="기업 노출도로 전달되는 거시 요인 변화">
