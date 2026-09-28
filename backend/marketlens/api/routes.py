@@ -465,11 +465,10 @@ def _view_bars(s: MarketLensService, tickers: list[str], start: date, end: date,
             s.refresher.get(k, lambda t=t: s.data.bars(t, start, end).value or [], max_age=600.0, retry_after=120.0)
             continue
         need[t] = k
-    for t, k in need.items():  # nothing current stored: this request starts the fetch and waits briefly for it
-        s.refresher.get(k, lambda t=t: s.data.bars(t, start, end).value or [], max_age=600.0, retry_after=120.0)
     deadline = time.monotonic() + wait
-    for t, k in need.items():
-        v = s.refresher.wait(k, max(0.0, deadline - time.monotonic()))
+    for t, k in need.items():  # nothing current stored: the request that starts the fetch waits briefly for it
+        v = s.refresher.get(k, lambda t=t: s.data.bars(t, start, end).value or [], max_age=600.0, retry_after=120.0,
+                            wait=max(0.0, deadline - time.monotonic()))
         if v.ready:
             out[t] = v.value
             continue
