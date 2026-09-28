@@ -13,6 +13,7 @@ from marketlens.application.codec import encode
 from marketlens.application.evaluation_service import PAPER_DISCLAIMER, EvaluationService
 from marketlens.application.services import MarketLensService
 from marketlens.config import AGENT_PROMPT_VERSION, SCHEMA_VERSION, code_version
+from marketlens.application.brief import build_brief
 from marketlens.domain.enums import ACTION_KO, BULLISH_ACTIONS, Action, Horizon
 from marketlens.domain.issues import compute_issue_impacts
 from marketlens.domain.macro import detect_regimes, factor_moves, primary_regime
@@ -167,6 +168,9 @@ def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
         summary = _row_summary(row, s, fetch_quote=True)
         return {
             "recommendation": summary,
+            # the five-question reading of this analysis, on today's share basis (product overhaul 2026-09-28)
+            "brief": build_brief(row.result, row.inputs if isinstance(row.inputs, dict) else None, s.levels_now(row), s.base_cfg.decision, row.final_action, row.score,
+                                 _issue_titles(s)),
             "position_plan": _position_plan(s, ss, row, summary),
             "analysis": row.result,
             # on today's share basis like the plan drawn over it: a split after the analysis divides the stored closes too
@@ -178,6 +182,13 @@ def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
                          "provider": row.provider_version, "schema": row.schema_version, "code": row.code_version, "app": row.app_version, "llm_models": row.llm_model_ids,
                          "input_fingerprint": row.input_fingerprint},
         }
+
+
+def _issue_titles(s: MarketLensService) -> dict[str, str]:
+    """Issue headlines of the shared market context (the stored analysis keeps only the issue ids)."""
+    ctx = s.last_scan_context
+    issues = getattr(getattr(ctx, "issues", None), "issues", None) or []
+    return {i.issue_id: i.title for i in issues}
 
 
 def _position_plan(s: MarketLensService, ss: Any, row: Any, summary: dict[str, Any]) -> dict[str, Any]:
