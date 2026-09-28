@@ -61,7 +61,7 @@ const globalListeners = new Set<() => void>();
 const linkListeners = new Set<() => void>();
 let status: QuoteStatus | null = null;
 let link: Link = "idle";
-let linkSnap = { link, status };
+let linkSnap: { link: Link; status: QuoteStatus | null } = { link, status };
 let refs = 0;
 let abort: AbortController | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;

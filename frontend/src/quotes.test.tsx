@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 /** App-wide quote store (real-time quotes 2026-09-28) — offline unit tests, not a live verification. */
-import { act, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { LivePrice } from "./components/LivePrice";
 import { _resetQuotes, applyRows, effectiveState, handleEvent, stateLabel, type QuoteRow } from "./quotes";
@@ -9,7 +10,7 @@ const row = (o: Partial<QuoteRow>): QuoteRow => ({
   received_time: "2026-09-30T14:00:00.100000+00:00", source: "finnhub", feed: "stream", previous_close: 99, change_pct: 100 / 99 - 1, error: null, ...o,
 });
 
-afterEach(() => _resetQuotes());
+afterEach(() => { cleanup(); _resetQuotes(); });
 
 describe("quote store", () => {
   it("never lets an older version overwrite a newer one", () => {

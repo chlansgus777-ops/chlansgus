@@ -513,8 +513,8 @@ class FinnhubStream:
                 if conn is not None:
                     try:
                         conn.close()
-                    except Exception:  # noqa: BLE001
-                        pass
+                    except Exception as e:  # noqa: BLE001 - a dead socket may refuse to close; reconnect anyway
+                        log.debug("quote stream close: %s", type(e).__name__)
                 self.hub.set_connected(False)
             if self._stop.is_set():
                 break
