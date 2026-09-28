@@ -1,7 +1,7 @@
 name: backtest-data
-# Backtest data (docs/backtest): stage 0 probes how far back each free source answers; later tasks collect the
-# point-in-time data into a SEPARATE database that is uploaded as an artifact (never committed; its SHA-256 is).
-# Keys come from repository secrets and are never printed. Rate limits: Polygon 5/min, SEC 10/s.
+# Backtest data (docs/backtest): stage 0 probes how far back each free source answers; "collect" gathers the
+# point-in-time data into a SEPARATE database uploaded as an artifact (never committed; its SHA-256 is).
+# Keys come from repository secrets and are never printed. Rate limits: Polygon 5/min, SEC 10/s, FRED 2/s.
 on:
   workflow_dispatch:
     inputs:
@@ -9,10 +9,17 @@ on:
         description: "probe | collect"
         required: true
         default: "probe"
+      resume_run_id:
+        description: "collect: continue the database of this earlier run (its backtest-db artifact); empty = start fresh"
+        required: false
+        default: ""
+permissions:
+  contents: read
+  actions: read
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,3 +40,31 @@ jobs:
         with:
           name: backtest-probe
           path: probe.json
+      - name: Previous database (resume)
+        if: inputs.task == 'collect' && inputs.resume_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Collect point-in-time data
+        if: inputs.task == 'collect'
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: |
+          if [ -f backtest.db.gz ]; then gunzip -f backtest.db.gz; fi
+          python -m marketlens.backtest.collect --db backtest.db --out coverage.json --max-minutes 320
+          sha256sum backtest.db | tee backtest.db.sha256
+          gzip -f -k backtest.db
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.task == 'collect'
+        with:
+          name: backtest-db
+          path: |
+            backtest.db.gz
+            backtest.db.sha256
+            coverage.json
+          retention-days: 90
+          compression-level: 0
