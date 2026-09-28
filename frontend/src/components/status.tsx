@@ -94,6 +94,16 @@ const JOB_SHORT: Record<string, string> = { RUNNING: "받는 중", DONE: "끝남
 
 /** Always-visible status: data source, US session with New York and Korea time, the page's data time and its age,
  * collection and analysis progress, provider failures and AI availability. */
+/** The status bar's height as a CSS variable, so other sticky bars sit below it whatever it wraps to. */
+function measureBar(el: HTMLDivElement | null) {
+  if (!el || typeof ResizeObserver === "undefined") return;
+  const set = () => document.documentElement.style.setProperty("--sb-h", `${el.offsetHeight}px`);
+  set();
+  const ro = new ResizeObserver(set);
+  ro.observe(el);
+  return () => ro.disconnect();
+}
+
 export function StatusBar() {
   const st = useStatus();
   if (!st) return null;
@@ -111,7 +121,7 @@ export function StatusBar() {
   const p = st.page;
   const disconnected = !!st.system.error;
   return (
-    <div className="statusbar" role="region" aria-label="상태 표시줄" data-testid="statusbar">
+    <div className="statusbar" role="region" aria-label="상태 표시줄" data-testid="statusbar" ref={measureBar}>
       {sys ? (
         <Item tone={sys.mode === "MOCK" ? "danger" : "ok"} testId="sb-mode" title={sys.mode === "MOCK" ? "가상의 데이터입니다. 실제 투자 판단에 쓰지 마세요." : "실제 시장 데이터입니다."}>
           <b className="sb-mode">{sys.mode === "MOCK" ? "⚠ MOCK 모의" : "● LIVE 실데이터"}</b>

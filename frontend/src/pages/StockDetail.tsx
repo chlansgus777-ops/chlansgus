@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { advise, planNow, priceZone, quantityShown } from "../advice";
 import { api } from "../api";
@@ -133,6 +133,13 @@ function StockDetail({ ticker }: { ticker: string }) {
   const watched = Array.isArray(wl.data) && wl.data.some((w) => w?.ticker === ticker);  // an odd answer never breaks the page
   const mine = d.data && d.data.analysis.ticker === ticker ? d.data : null;
   const mineOk = !!mine;
+  const [heroVisible, setHeroVisible] = useState(true);
+  const heroRef = useCallback((el: HTMLElement | null) => {
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([en]) => setHeroVisible(!!en && en.isIntersecting), { rootMargin: "-80px 0px 0px 0px" });
+    io.observe(el);
+    return () => io.disconnect();  // React 19 calls a ref's cleanup on detach
+  }, []);
   useEffect(() => { if (mineOk) rememberStock(ticker); }, [ticker, mineOk]);  // for 최근 본 종목 and the quick search
   usePageTime(mine ? { label: ticker, priceTs: mine.analysis.price_timestamp, priceSession: mine.analysis.session, quality: mine.analysis.price_quality, analysedAt: mine.recommendation.as_of } : null);
   if (d.state === "loading") return <Loading what={`${ticker} 분석`} steps={["가격·재무 데이터 확인", "업종 모델 적용", "이슈·거시 반영", "가격 계획 계산"]} />;
@@ -186,8 +193,18 @@ function StockDetail({ ticker }: { ticker: string }) {
   const triggers = brief?.triggers ?? [];
   return (
     <div className="grid">
+      {/* a thin bar that keeps the answer in sight once the hero has scrolled away (the page is long) */}
+      {!heroVisible && (
+        <div className="sticky-sum" aria-label={`${a.ticker} 요약`}>
+          <b>{a.ticker}</b>
+          <LivePrice ticker={a.ticker} size="sm" />
+          <Action a={finalAction} status={rec.current_status} quality={rec.data_quality} />
+          {e ? <span className="caption">최대 매수 <b className="num">{price(e.max_buy)}</b> · 손절 <b className="num">{price(e.stop)}</b></span> : null}
+          <button className="sm ghost" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>맨 위로</button>
+        </div>
+      )}
       {/* ① 결론 — the answer first, with the numbers that decide it and the single biggest risk */}
-      <section className={`hero rail-${tone} enter`} aria-label="결론">
+      <section className={`hero rail-${tone} enter`} aria-label="결론" ref={heroRef}>
         <div className="eyebrow">
           <span><Link to="/stocks">종목</Link> / {a.security.exchange} · {a.sector_known === false ? <span className="warn">업종 분류 불명확</span> : a.security.industry}{a.security.is_adr ? ` · 해외 발행사(${a.security.country_of_incorporation})` : ""}</span>
           <span className="right">

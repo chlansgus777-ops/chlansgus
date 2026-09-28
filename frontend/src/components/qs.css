@@ -14,3 +14,11 @@
 .recent-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .recent-row a { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px; font-weight: 600; color: var(--text); text-decoration: none; }
 .recent-row a:hover, .recent-row a:focus-visible { border-color: var(--accent-line); background: var(--accent-soft); }
+/* Stock page: summary bar once the hero has scrolled away */
+.sticky-sum { position: sticky; top: calc(var(--sb-h, 52px) + 8px); z-index: 19; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: -6px 0 0;
+  padding: 9px 16px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--elevated) 92%, transparent);
+  backdrop-filter: blur(8px); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35); }
+.sticky-sum > b { font-size: 15px; }
+.sticky-sum button { margin-left: auto; }
+@media (prefers-reduced-motion: reduce) { .sticky-sum { backdrop-filter: none; } }
+@media (max-width: 980px) { .sticky-sum { top: 8px; } }  /* the status bar is not sticky there */
