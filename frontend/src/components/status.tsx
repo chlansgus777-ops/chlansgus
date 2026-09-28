@@ -2,8 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { Link } from "react-router-dom";
 import { ago, clockPair, stampEt } from "../format";
 import { HEALTH_KO, QUALITY_INFO, READINESS_KO, SESSION_KO } from "../i18n";
-import { ModeSwitch } from "../mode";
 import type { SystemInfo } from "../types";
+import { QuoteFeedStatus } from "./LivePrice";
 import type { ReadinessInfo, SyncJob } from "./Readiness";
 import { type ApiState, useApi, usePoll } from "./useApi";
 
@@ -139,11 +139,11 @@ export function StatusBar() {
         <Item icon="⌖" testId="sb-analysed"><span className="k">분석</span><b>{stampEt(p.analysedAt)}</b><span className="k">· {ago(p.analysedAt, st.nowMs)}</span></Item>
       )}
       {sys?.mode === "LIVE" && (job?.status === "RUNNING" ? (
-        <Item tone="info" icon="⏳" to="/health" testId="sb-sync"><span className="k">데이터 수집</span><b>{job.progress ? `${job.progress.percent}%` : "받는 중"}</b></Item>
+        <Item tone="info" icon="⏳" to="/settings?tab=data" testId="sb-sync"><span className="k">데이터 수집</span><b>{job.progress ? `${job.progress.percent}%` : "받는 중"}</b></Item>
       ) : rd && rd.recommendation_readiness === "NOT READY" ? (
-        <Item tone="danger" icon="!" to="/health" testId="sb-sync"><span className="k">데이터 준비</span><b>안 됨</b>{job ? <span className="k">· 마지막 수집 {JOB_SHORT[job.status] ?? job.status}</span> : null}</Item>
+        <Item tone="danger" icon="!" to="/settings?tab=data" testId="sb-sync"><span className="k">데이터 준비</span><b>안 됨</b>{job ? <span className="k">· 마지막 수집 {JOB_SHORT[job.status] ?? job.status}</span> : null}</Item>
       ) : rd ? (
-        <Item tone={rd.recommendation_readiness === "FULL" ? "ok" : "warn"} icon={rd.recommendation_readiness === "FULL" ? "✓" : "!"} to="/health" testId="sb-sync"><span className="k">데이터 준비</span><b>{rd.recommendation_readiness === "FULL" ? "완료" : "일부"}</b></Item>
+        <Item tone={rd.recommendation_readiness === "FULL" ? "ok" : "warn"} icon={rd.recommendation_readiness === "FULL" ? "✓" : "!"} to="/settings?tab=data" testId="sb-sync"><span className="k">데이터 준비</span><b>{rd.recommendation_readiness === "FULL" ? "완료" : "일부"}</b></Item>
       ) : null)}
       {st.scanning || scanState?.status === "RUNNING" ? (
         <Item tone="info" icon="⟳" testId="sb-scan"><span className="k">분석 중</span><b>{scanState?.status === "RUNNING" ? `${scanState.saved}/${scanState.total}` : "시작"}</b></Item>
@@ -155,18 +155,16 @@ export function StatusBar() {
       {sys && (sys.mode === "MOCK" ? (
         <Item icon="●" testId="sb-providers"><span className="k">공급자</span><b>모의</b></Item>
       ) : down.length ? (
-        <Item tone="danger" icon="⛔" to="/health" testId="sb-providers" title={down.map((d) => `${d.kind}: ${d.last_error ?? ""}`).join("\n")}><span className="k">공급자</span><b>{down.length}곳 중단</b><span className="k">({down.map((d) => d.kind).join(", ")})</span></Item>
+        <Item tone="danger" icon="⛔" to="/settings?tab=status" testId="sb-providers" title={down.map((d) => `${d.kind}: ${d.last_error ?? ""}`).join("\n")}><span className="k">공급자</span><b>{down.length}곳 중단</b><span className="k">({down.map((d) => d.kind).join(", ")})</span></Item>
       ) : shaky.length ? (
-        <Item tone="warn" icon="!" to="/health" testId="sb-providers"><span className="k">공급자</span><b>{shaky.length}곳 불안정</b></Item>
+        <Item tone="warn" icon="!" to="/settings?tab=status" testId="sb-providers"><span className="k">공급자</span><b>{shaky.length}곳 불안정</b></Item>
       ) : providers.some((x) => x.status === "HEALTHY") ? (
-        <Item tone="ok" icon="✓" to="/health" testId="sb-providers"><span className="k">공급자</span><b>{HEALTH_KO.HEALTHY}</b></Item>
-      ) : <Item icon="○" to="/health" testId="sb-providers"><span className="k">공급자</span><b>호출 전</b></Item>)}
-      {sys && <Item tone={sys.llm.available ? undefined : "warn"} icon="◈" testId="sb-ai" title="AI 위원회(LLM) 사용 가능 여부. 사용할 수 없어도 점수·추천·가격 계획은 그대로 유효합니다."><span className="k">AI</span><b>{sys.llm.available ? "가능" : "사용 불가"}</b></Item>}
+        <Item tone="ok" icon="✓" to="/settings?tab=status" testId="sb-providers"><span className="k">공급자</span><b>{HEALTH_KO.HEALTHY}</b></Item>
+      ) : <Item icon="○" to="/settings?tab=status" testId="sb-providers"><span className="k">공급자</span><b>호출 전</b></Item>)}
       <span className="grow" />
       <span className="tools">
-        {rr && <Link to="/health" className={`badge ${rr.tone}`} title={rr.help} data-testid="readiness-badge">추천 준비도: {rr.label}</Link>}
-        <Link to="/guide">용어·판정 설명</Link>
-        <ModeSwitch />
+        <QuoteFeedStatus />
+        {rr &&<Link to="/settings?tab=data" className={`readiness-link ${rr.tone}`} title={rr.help} data-testid="readiness-badge">추천 준비도 · {rr.label}</Link>}
       </span>
     </div>
   );

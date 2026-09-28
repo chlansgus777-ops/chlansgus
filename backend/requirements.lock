@@ -119,3 +119,5 @@ tzdata==2026.4
     # via marketlens (pyproject.toml)
 uvicorn==0.54.0
     # via marketlens (pyproject.toml)
+websockets==15.0.1
+    # via marketlens (pyproject.toml)

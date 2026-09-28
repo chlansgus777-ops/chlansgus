@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from marketlens import __version__
+from marketlens.api.quotes import router as quotes_router
 from marketlens.api.routes import router
 from marketlens.application.services import MarketLensService
 from marketlens.config import REPO_ROOT, Settings, load_settings
@@ -79,12 +80,18 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
             sched = BackgroundScheduler(app.state.service)
             sched.start()
         app.state.ready = True
+        start_quotes = getattr(app.state.service, "start_quotes", None)
+        if start_quotes is not None:
+            start_quotes()  # the app-wide quote stream: one connection, independent of analysis
         if getattr(app.state.service, "store", None) is not None:  # LIVE: compute the readiness counts once in the background
             import threading  # so the first dashboard / candidates screen does not wait for them
 
             threading.Thread(target=_warm, args=(app.state.service,), daemon=True, name="readiness-warmup").start()
         yield
         app.state.ready = False
+        stop_quotes = getattr(app.state.service, "stop_quotes", None)
+        if stop_quotes is not None:
+            stop_quotes()
         if sched:
             sched.stop()
         try:  # leave a complete .db file behind (no pending -wal content)
@@ -129,6 +136,7 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
     app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["content-type", CLIENT_HEADER, TOKEN_HEADER])
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.include_router(router, prefix="/api")
+    app.include_router(quotes_router, prefix="/api")
 
     @app.get("/api/health/live", include_in_schema=False)
     def live() -> dict[str, Any]:

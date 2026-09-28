@@ -1,25 +1,27 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { num, pct, price, stamp } from "../format";
-import { RISK_KO, SESSION_KO, ko } from "../i18n";
+import { RISK_KO, ko } from "../i18n";
 import type { OppRow } from "../types";
+import { LivePrice } from "./LivePrice";
 import { Action, Quality, StatusBadge, Vetoes } from "./ui";
 
-type Key = keyof OppRow;
+type Key = "rank" | "ticker" | "action" | "score" | "price" | "max_buy" | "rr" | "current_status" | "risk";
 
-const COLS: [Key, string, string][] = [
-  ["rank", "순위", ""], ["ticker", "종목", ""], ["company", "회사명", ""], ["sector", "섹터", ""],
-  ["price", "현재가(USD)", "분석 시점의 가격과 품질(최신/지연/오래됨)"], ["session", "세션", ""],
-  ["score", "점수", "0~100 결정론적 점수(AI가 바꿀 수 없음)"], ["confidence", "분석 신뢰도", "0~100. 주가 상승 확률이 아니라 데이터 완성도·일치도·모델 합의"],
-  ["action", "추천", "추천 행동. 만료된 매수 신호는 취소선으로 표시"], ["current_status", "현재 유효성", "추천 이후 거래일 경과 여부로 지금 다시 판정"],
-  ["ideal_entry", "이상적 진입가", ""], ["max_buy", "최대 매수가", "이 가격을 넘으면 손익비 2 미만"], ["target", "1차 목표가", ""],
-  ["downside", "손절까지", "손절가까지의 하락률"], ["rr", "손익비", "(목표가−현재가)÷(현재가−손절가)"], ["catalyst", "다음 촉매", ""],
-  ["risk", "이벤트 위험", ""], ["data_quality", "데이터", "전체 데이터 품질"],
+/** The columns that help choose between candidates; session and data-quality words that were the same on every row
+ * moved to the header / appear only where a row differs. */
+const COLS: [Key, string, string, boolean][] = [
+  ["rank", "순위", "", false], ["ticker", "종목", "", false], ["action", "판단", "추천 행동. 만료된 매수 신호는 취소선으로 표시", false],
+  ["score", "점수", "0~100 규칙 점수(AI가 올릴 수 없음). 80 이상 매수·72 이상 소량 매수 후보 — 상승 확률이 아님", true],
+  ["price", "현재가", "위: 최신 시세(앱 공용 스트림) · 아래: 분석 시점 가격(USD)", true], ["max_buy", "최대 매수가", "이 가격을 넘으면 손익비 2 미만 → 대기", true],
+  ["rr", "손익비", "(목표가−현재가)÷(현재가−손절가) — 도달 확률이 아님", true], ["current_status", "현재 유효성", "추천 이후 거래일 경과·현재가로 다시 판정", false],
+  ["risk", "이벤트 위험", "가까운 실적·일정의 위험 수준", false],
 ];
 
 export function OppTable({ rows, compact = false }: { rows: OppRow[]; compact?: boolean }) {
   const [sort, setSort] = useState<Key>("rank");
   const [asc, setAsc] = useState(true);
+  const nav = useNavigate();
   const sorted = useMemo(() => {
     const r = [...rows];
     r.sort((a, b) => {
@@ -32,26 +34,25 @@ export function OppTable({ rows, compact = false }: { rows: OppRow[]; compact?: 
     });
     return r;
   }, [rows, sort, asc]);
-  const compactKeys: Key[] = ["rank", "ticker", "company", "price", "score", "confidence", "action", "current_status", "max_buy", "rr", "risk"];
-  const cols = compact ? COLS.filter(([k]) => compactKeys.includes(k)) : COLS;
+  const cols = compact ? COLS.filter(([k]) => k !== "risk") : COLS;
   return (
     <div className="scroll">
       <table>
         <thead>
           <tr>
-            {cols.map(([k, l, help]) => (
-              <th key={k} title={help} onClick={() => { if (sort === k) setAsc(!asc); else { setSort(k); setAsc(true); } }}>
-                {l}{sort === k ? (asc ? " ▲" : " ▼") : ""}
+            {cols.map(([k, l, help, numeric]) => (
+              <th key={k} title={help} className={`sortable${numeric ? " num" : ""}`} aria-sort={sort === k ? (asc ? "ascending" : "descending") : "none"}
+                  tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (sort === k) setAsc(!asc); else { setSort(k); setAsc(true); } } }}
+                  onClick={() => { if (sort === k) setAsc(!asc); else { setSort(k); setAsc(true); } }}>
+                {l}{sort === k ? <span className="dir">{asc ? "▲" : "▼"}</span> : null}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
           {sorted.map((r) => (
-            <tr key={r.id} className={r.actionable_now === false ? "row-expired" : ""}>
-              {cols.map(([k]) => (
-                <td key={k}>{cell(r, k)}</td>
-              ))}
+            <tr key={r.id} className={r.actionable_now === false ? "row-expired" : ""} onDoubleClick={() => nav(`/stocks/${r.ticker}`)}>
+              {cols.map(([k, , , numeric]) => <td key={k} className={numeric ? "num" : undefined}>{cell(r, k)}</td>)}
             </tr>
           ))}
         </tbody>
@@ -62,39 +63,39 @@ export function OppTable({ rows, compact = false }: { rows: OppRow[]; compact?: 
 
 function cell(r: OppRow, k: Key) {
   switch (k) {
+    case "rank":
+      return <span className="muted">{r.rank ?? "—"}</span>;
     case "ticker":
-      return <Link to={`/stocks/${r.ticker}`}><b>{r.ticker}</b></Link>;
-    case "company":
-      return <span title={r.company}>{r.company.length > 26 ? `${r.company.slice(0, 26)}…` : r.company}</span>;
-    case "sector":
-      return r.sector_known === false ? <span className="warn" title="업종 분류 정보가 없어 일반 모델로 평가(신뢰도 하향)">분류 불명확</span> : r.sector;
-    case "price":
-      return <span title={`출처 ${r.price_source ?? "N/A"} · ${stamp(r.price_timestamp)}`}>{price(r.price)} <Quality q={r.price_quality} /></span>;
-    case "session":
-      return ko(SESSION_KO, r.session, "N/A");
-    case "score":
-      return <b>{num(r.score, 1)}</b>;
-    case "confidence":
-      return `${num(r.confidence, 0)}/100`;
+      return (
+        <div className="tk-cell">
+          <Link to={`/stocks/${r.ticker}`}>{r.ticker}</Link>
+          <span className="co" title={r.company}>{r.company}{r.sector_known === false ? " · 업종 불명확" : r.sector ? ` · ${r.sector}` : ""}</span>
+        </div>
+      );
     case "action":
-      return <><Action a={r.action} status={r.current_status} quality={r.data_quality} /> <Vetoes v={r.vetoes} /></>;
+      return <div className="row tight"><Action a={r.action} status={r.current_status} quality={r.data_quality} /><Vetoes v={r.vetoes} />{r.data_quality !== "FRESH" && r.data_quality !== "DELAYED" ? <Quality q={r.data_quality} /> : null}</div>;
+    case "score":
+      return <span className="score-mini"><b>{num(r.score, 1)}</b><span className="bar"><span style={{ display: "block", height: "100%", width: `${Math.max(0, Math.min(100, r.score))}%`, borderRadius: 99, background: r.score >= 80 ? "var(--buy)" : r.score >= 72 ? "rgba(114,184,255,.6)" : "var(--faint)" }} /></span></span>;
+    case "price":
+      // the latest quote from the app-wide store; the analysis-time price stays visible under it as the basis
+      return (
+        <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
+          <LivePrice ticker={r.ticker} size="sm" showState={false} />
+          <span className="caption" title={`분석 기준가 · 출처 ${r.price_source ?? "N/A"} · ${stamp(r.price_timestamp)}`}>분석 {price(r.price)}{r.price_quality !== "FRESH" ? <> <Quality q={r.price_quality} /></> : null}</span>
+        </span>
+      );
+    case "max_buy": {
+      const d = r.price != null && r.max_buy != null ? r.max_buy / r.price - 1 : null;
+      return <span>{price(r.max_buy)}{d != null ? <span className={`caption ${d < 0 ? "warn" : ""}`} style={{ display: "block" }}>{d < 0 ? `${pct(-d, 1, false)} 초과` : `여유 ${pct(d, 1, false)}`}</span> : null}</span>;
+    }
+    case "rr":
+      return <span className={r.rr != null && r.rr < 2 ? "warn" : undefined}>{num(r.rr, 2)}</span>;
     case "current_status":
       return <StatusBadge s={r.current_status} reason={r.current_status_reason} />;
-    case "ideal_entry": case "max_buy": case "target":
-      return price(r[k]);
-    case "downside":
-      return <span className="neg">{pct(r.downside)}</span>;
-    case "rr":
-      return num(r.rr, 2);
-    case "catalyst":
-      return r.catalyst ? <span title={r.catalyst_date ?? ""}>{r.catalyst.length > 24 ? `${r.catalyst.slice(0, 24)}…` : r.catalyst}</span> : "—";
     case "risk":
-      return <span className={r.risk === "EXTREME" || r.risk === "HIGH" ? "neg" : r.risk === "MEDIUM" ? "warn" : "pos"}>{ko(RISK_KO, r.risk, "N/A")}</span>;
-    case "data_quality":
-      return <Quality q={r.data_quality} />;
-    default: {
-      const v = r[k];
-      return v === null || v === undefined ? "N/A" : String(v);
-    }
+      return r.catalyst ? <span title={r.catalyst_date ?? ""}><span className={r.risk === "EXTREME" || r.risk === "HIGH" ? "neg" : r.risk === "MEDIUM" ? "warn" : "muted"}>{ko(RISK_KO, r.risk, "N/A")}</span> <span className="caption">· {r.catalyst.length > 22 ? `${r.catalyst.slice(0, 22)}…` : r.catalyst}</span></span>
+        : <span className={r.risk === "EXTREME" || r.risk === "HIGH" ? "neg" : r.risk === "MEDIUM" ? "warn" : "muted"}>{ko(RISK_KO, r.risk, "N/A")}</span>;
+    default:
+      return null;
   }
 }

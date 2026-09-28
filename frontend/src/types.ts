@@ -85,4 +85,12 @@ export interface CommitteeResult {
 }
 
 export interface PositionPlan { available: boolean; reason?: string; nav?: number; size_class?: string; weight?: number; amount?: number; shares?: number; price?: number; risk_amount?: number | null; risk_pct?: number | null; notes?: string[] }
-export interface StockDetail { position_plan?: PositionPlan; recommendation: OppRow; analysis: Analysis; price_history?: { day: string; close: number }[]; committee: CommitteeResult | null; committee_recommendation_id?: number | null; history: { id: number; as_of: string; score: number; action: string }[]; versions: Record<string, string> }
+/** The five-question reading of one analysis (backend application/brief.py): every statement typed FACT/CALC/VIEW/ASSUME. */
+export interface BriefItem { kind: string; text: string; why?: string | null; tone?: string; source?: string | null; when?: string | null; evidence?: string[]; label?: string | null }
+export interface Brief {
+  changed: BriefItem[]; support: BriefItem[]; against: BriefItem[];
+  valuation: { summary: string | null; items: BriefItem[]; plan: BriefItem[]; assumptions: string[]; limits: string[] };
+  unknowns: { text: string; impact: string; fix: string | null; label: string }[];
+  triggers: BriefItem[]; as_of?: string | null;
+}
+export interface StockDetail { position_plan?: PositionPlan; brief?: Brief; recommendation: OppRow; analysis: Analysis; price_history?: { day: string; close: number }[]; committee: CommitteeResult | null; committee_recommendation_id?: number | null; history: { id: number; as_of: string; score: number; action: string }[]; versions: Record<string, string> }

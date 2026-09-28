@@ -1,0 +1,35 @@
+name: quote-soak
+# LIVE measurement of the real-time quote path (FinnhubStream → QuoteHub → SSE → client) against the REAL Finnhub
+# trade stream, from a GitHub-hosted runner (the development sandbox cannot reach finnhub.io). Nothing is mocked.
+# Run it while the US market is open; outside the session the report says which sessions it saw.
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Soak length in minutes"
+        required: false
+        default: "32"
+      tickers:
+        description: "Comma-separated tickers"
+        required: false
+        default: "AAPL,MSFT,NVDA,AMZN,TSLA,META,GOOGL,AMD,SPY,QQQ"
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend (lock file)
+        run: pip install -r backend/requirements.lock && pip install --no-deps -e ./backend
+      - name: Soak the live quote stream
+        env:
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: python backend/scripts/quote_soak.py --minutes "${{ inputs.minutes }}" --tickers "${{ inputs.tickers }}" --out quote_soak.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quote-soak-report
+          path: quote_soak.json

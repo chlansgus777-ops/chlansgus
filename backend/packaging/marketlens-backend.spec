@@ -21,7 +21,7 @@ a = Analysis(
     [str(ROOT / "backend" / "packaging" / "entry.py")],
     pathex=[str(ROOT / "backend")],
     datas=datas,
-    hiddenimports=collect_submodules("marketlens") + collect_submodules("uvicorn") + ["tzdata", "alembic", "sqlalchemy.dialects.sqlite"],
+    hiddenimports=collect_submodules("marketlens") + collect_submodules("uvicorn") + collect_submodules("websockets") +["tzdata", "alembic", "sqlalchemy.dialects.sqlite"],
     excludes=["tkinter", "matplotlib", "IPython", "cryptography", "playwright", "pytest", "PyInstaller"],
 )
 pyz = PYZ(a.pure)

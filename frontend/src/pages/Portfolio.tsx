@@ -2,6 +2,8 @@ import { useState } from "react";
 import { api } from "../api";
 import { Card, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } from "../components/ui";
 import { Ledger } from "../components/Ledger";
+import { LivePrice } from "../components/LivePrice";
+import { refreshQuoteSubscriptions } from "../quotes";
 import { useApi } from "../components/useApi";
 import { day, num, pct, price, shares, usdWithKo } from "../format";
 import { More } from "../mode";
@@ -47,7 +49,7 @@ export default function Portfolio() {
   const [err, setErr] = useState<string | null>(null);
   if (p.state === "loading") return <Loading what="포트폴리오 재계산" steps={["보유 종목 종가 확인", "평가금액·손익 계산", "쏠림·상관관계 점검"]} />;
   if (!p.data) return <Err error={p.error} retry={p.reload} />;
-  const save = async (body: unknown) => { setErr(null); try { await api.put("/portfolio", body); p.reload(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } };
+  const save = async (body: unknown) => { setErr(null); try { await api.put("/portfolio", body); p.reload(); refreshQuoteSubscriptions(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } };
   const x = p.data;
   const reading = interpret(x);
   const unvalued = x.valuation_status === "UNAVAILABLE";  // holdings exist but none could be valued (review 2026-09-28 F10)
@@ -105,11 +107,12 @@ export default function Portfolio() {
           </form>
         </Card>
       </div>
-      <Ledger today={nyToday()} onChange={p.reload} />
+      <Ledger today={nyToday()} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
       <More title="보유 종목 상세" hint="모든 종목을 같은 거래일 종가로 평가">
         {x.holdings.length ? (
-          <div className="scroll"><table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th></tr></thead>
+          <div className="scroll"><table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th title="표시용 최신 시세 — 평가액·손익은 모든 종목 같은 거래일 종가 기준">최신 시세</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th></tr></thead>
             <tbody>{x.holdings.map((h) => <tr key={h.ticker}><td>{h.ticker}</td><td>{h.source === "ledger" ? shares(h.quantity) : num(h.quantity, 0)}{h.source === "ledger" ? <span className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}> 거래 기록 기준</span> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)} <span className="caption">{day(h.price_day)}</span></>}</td>
+              <td><LivePrice ticker={h.ticker} size="sm" /></td>
               <td>{h.market_value === null ? "—" : price(h.market_value)}</td><td className={h.unrealized_pnl === null ? "" : h.unrealized_pnl >= 0 ? "pos" : "neg"}>{h.unrealized_pnl === null ? "계산 안 함" : <>{h.unrealized_pnl >= 0 ? "▲" : "▼"} {price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</>}</td><td>{h.weight === null ? "—" : pct(h.weight, 1, false)}</td><td>{h.sector}</td></tr>)}</tbody></table></div>
         ) : <Empty>보유 종목이 없습니다.</Empty>}
         {x.correlations.length > 0 && <div className="caption" style={{ marginTop: 8 }}><Term k="correlation">상관계수</Term>: {x.correlations.map(([a, b, c]) => `${a}↔${b} ${num(c, 2)}`).join(" · ")}</div>}

@@ -35,7 +35,14 @@ export function describeStatus(status: number): string {
   return STATUS_KO[status] ?? `요청 실패(HTTP ${status})`;
 }
 
-function baseUrl(): string {
+/** The headers every request carries (the event stream uses them too — EventSource cannot send headers). */
+export function clientHeaders(): Record<string, string> {
+  const h: Record<string, string> = { "X-MarketLens-Client": "marketlens-ui" };
+  if (typeof window !== "undefined" && window.__MARKETLENS_TOKEN__) h["X-MarketLens-Token"] = window.__MARKETLENS_TOKEN__;
+  return h;
+}
+
+export function baseUrl(): string {
   if (typeof window !== "undefined" && window.__MARKETLENS_API__) return window.__MARKETLENS_API__.replace(/\/$/, "");
   return ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
 }

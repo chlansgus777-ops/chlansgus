@@ -183,6 +183,49 @@ class MarketLensService:
         self._ctx_swap = threading.Lock()
         self._master: tuple[date, float, dict[str, Any]] | None = None  # (day, loaded at, ticker → Security)
         self._check_db_environment()
+        self.quotes, self._quote_stream = self._build_quotes()
+
+    # ------------------------------------------------------------------ live quotes (independent of analysis)
+    def _build_quotes(self) -> tuple[Any, Any]:
+        """One app-wide latest-quote state. LIVE with a Finnhub key: the official trade stream (one connection) plus
+        one REST snapshot per newly subscribed name; otherwise snapshots only (never labelled real-time)."""
+        from marketlens.application.live_quotes import FinnhubStream, QuoteHub
+
+        st = self.settings
+        key = getattr(st, "finnhub_api_key", None)
+        enabled = getattr(st, "live_quotes", True)
+        streaming = False
+        if self.mode == DataMode.LIVE and key and enabled:
+            try:
+                import websockets.sync.client  # noqa: F401
+
+                streaming = True
+            except ImportError:
+                log.warning("quote stream disabled: the 'websockets' package is not installed")
+        coverage = ("Finnhub 체결 스트림(무료 계정) — 거래소 범위·통합시세(SIP) 여부는 공식 문서로 확인되지 않아 '미국 통합 시세'로 표시하지 않음"
+                    if streaming else "스트림 없음 — REST 스냅샷(지연 가능)만 표시" if self.mode == DataMode.LIVE else "모의 데이터(MOCK) — 실제 시세 아님")
+        hub = QuoteHub(source="finnhub" if streaming else ("finnhub" if self.mode == DataMode.LIVE else "mock"),
+                       max_symbols=getattr(st, "quote_stream_max_symbols", 50), coverage_ko=coverage, streaming=streaming,
+                       snapshot=lambda t: self.data.quote(t).value, pinned_loader=self._quote_pins,
+                       snapshot_every=timedelta(minutes=5) if streaming else timedelta(minutes=2))
+        stream = FinnhubStream(hub, key) if streaming and key else None
+        return hub, stream
+
+    def _quote_pins(self) -> dict[str, list[str]]:
+        with self.sf() as s:
+            return {"holdings": sorted({h.ticker for h in self.portfolio(s).holdings}), "watchlist": [w.ticker for w in repo.watchlist(s)]}
+
+    def start_quotes(self) -> None:
+        if not getattr(self.settings, "live_quotes", True):
+            return
+        self.quotes.start()
+        if self._quote_stream is not None:
+            self._quote_stream.start()
+
+    def stop_quotes(self) -> None:
+        if self._quote_stream is not None:
+            self._quote_stream.stop()
+        self.quotes.stop()
 
     def _check_db_environment(self) -> None:
         """A database belongs to one data mode. MOCK and LIVE rows share tables (securities are keyed by
@@ -414,16 +457,22 @@ class MarketLensService:
         bullish = row.final_action in {a.value for a in BULLISH_ACTIONS}
         plan = PlanCheck(lv["price"], lv["max_buy"], lv["stop"], lv["target1"], self.base_cfg.decision.min_rr, bullish)
         f = self.data.peek_quote(row.ticker)
-        if f is None and fetch_quote:
+        live = self.quotes.latest(row.ticker)  # the app-wide stream/snapshot state: no provider call
+        if f is None and live is None and fetch_quote:
             f = self.data.quote(row.ticker)
-        q = f.value if f is not None else None
+        q: Any = f.value if f is not None else None
+        if live is not None and (q is None or getattr(q, "timestamp", None) is None or live.trade_ts > q.timestamp):
+            q = live
+            q_price, q_ts = live.price, live.trade_ts
+        else:
+            q_price, q_ts = getattr(q, "price", None), getattr(q, "timestamp", None)
         majors: tuple[str, ...] = ()
         ctx = self.last_scan_context
         if ctx is not None and ctx.issues is not None:
             cut = self.base_cfg.major_issue_importance
             majors = tuple(i.title for i in ctx.issues.issues if i.importance >= cut and i.publish_time > row.as_of and row.ticker in i.affected_companies)
         return recommendation_freshness(row.as_of, row.data_quality, self.now(), plan=plan,
-                                        quote_price=getattr(q, "price", None), quote_ts=getattr(q, "timestamp", None), new_major_events=majors)
+                                        quote_price=q_price, quote_ts=q_ts, new_major_events=majors, analysis_price_ts=row.price_timestamp)
 
     # ------------------------------------------------------------------ persistence
     def _persist(self, s: Session, r: AnalysisResult, inp: AnalysisInputs, cfg: ModelConfig, scan_id: int | None, rank: int | None, committee: CommitteeResult | None) -> RecommendationRow:

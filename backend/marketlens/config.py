@@ -209,6 +209,8 @@ class Settings:
     scheduler: bool = False
     scan_interval_minutes: int = 60
     data_dir: Path = field(default_factory=default_data_dir)
+    live_quotes: bool = True  # the app-wide quote stream (application/live_quotes.py)
+    quote_stream_max_symbols: int = 50  # the stream's concurrent symbol limit (Finnhub free: 50 — verify on the account)
 
     def secrets(self) -> list[str]:
         return [s for s in (self.finnhub_api_key, self.fred_api_key, self.polygon_api_key, self.alphavantage_api_key, self.finra_api_key, self.finra_api_secret, self.anthropic_api_key, self.openai_api_key) if s]
@@ -249,6 +251,8 @@ def load_settings() -> Settings:
         scheduler=_bool(os.environ.get("MARKETLENS_SCHEDULER"), False),
         scan_interval_minutes=int(os.environ.get("SCAN_INTERVAL_MINUTES", "60")),
         data_dir=data_dir,
+        live_quotes=_bool(os.environ.get("MARKETLENS_LIVE_QUOTES"), True),
+        quote_stream_max_symbols=max(1, int(os.environ.get("QUOTE_STREAM_MAX_SYMBOLS", "50"))),
     )
 
 

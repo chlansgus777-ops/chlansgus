@@ -15,7 +15,7 @@ Qualities:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Mapping
 
 from marketlens.domain.enums import DataQuality
@@ -198,6 +198,7 @@ def recommendation_freshness(
     quote_ts: datetime | None = None,
     new_major_events: tuple[str, ...] = (),
     policy: RevalidationPolicy | None = None,
+    analysis_price_ts: datetime | None = None,
 ) -> RecommendationFreshness:
     """A recommendation is a statement about prices *at* ``as_of``.
 
@@ -250,6 +251,11 @@ def recommendation_freshness(
         return RecommendationFreshness("CURRENT", recorded_quality, n, f"{when}; 분석 {minutes}분 경과 — 분석 시점 가격 기준(현재가 미확인, 최대 {limit}분)")
     if plan is None or not quote_ok:
         return RecommendationFreshness("NEEDS_REVALIDATION", recorded_quality, n, f"{when}; 장중 분석 후 {minutes}분 경과 — 가격이 바뀌었을 수 있어 현재가 확인 전에는 실행 불가")
+    # re-validating needs a NEW price: the quote the analysis itself used (or an older one), seen again after a
+    # restart, proves nothing about now (real-time quotes 2026-09-28)
+    base_ts = analysis_price_ts if analysis_price_ts is None or analysis_price_ts.tzinfo is not None else analysis_price_ts.replace(tzinfo=timezone.utc)
+    if quote_ts is not None and base_ts is not None and quote_ts <= base_ts:
+        return RecommendationFreshness("NEEDS_REVALIDATION", recorded_quality, n, f"{when}; 장중 분석 후 {minutes}분 경과 — 분석 이후 새 체결가가 없어 현재가로 재확인하지 못함")
     problems = _revalidate(plan, quote_price, pol)  # type: ignore[arg-type]
     if problems:
         return RecommendationFreshness("PLAN_INVALIDATED", recorded_quality, n, f"분석 후 {minutes}분 경과, 현재가 기준 조건 이탈: " + "; ".join(problems), problems=tuple(problems))
