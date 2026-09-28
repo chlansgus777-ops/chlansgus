@@ -70,7 +70,7 @@ jobs:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-        run: python scripts/freedata/probe_free_sources.py --out free_probe.json
+        run: python scripts/freedata/probe_free_sources.py --out free_probe.json ${{ inputs.run_args }}
       - uses: actions/upload-artifact@v4
         if: always() && inputs.task == 'freeprobe'
         with:

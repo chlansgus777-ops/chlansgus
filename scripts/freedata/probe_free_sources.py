@@ -80,11 +80,14 @@ def alpaca_bars(c: httpx.Client, symbols: list[str], start: str, end: str, asof:
     return {"status": "OK", "http": http, "pages": pages, "per_symbol": per}
 
 
-def alphavantage_listing(c: httpx.Client, day: str, state: str) -> dict[str, Any]:
+def alphavantage_listing(c: httpx.Client, day: str | None, state: str) -> dict[str, Any]:
     key = os.environ.get("ALPHAVANTAGE_API_KEY")
     if not key:
         return {"status": "BLOCKED", "reason": "ALPHAVANTAGE_API_KEY not set"}
-    r = c.get(AV, params={"function": "LISTING_STATUS", "date": day, "state": state, "apikey": key}, timeout=60)
+    params = {"function": "LISTING_STATUS", "state": state, "apikey": key}
+    if day:
+        params["date"] = day
+    r = c.get(AV, params=params, timeout=60)
     text = r.text
     if r.status_code != 200 or text.lstrip().startswith("{"):
         return {"status": "FAILED", "http": r.status_code, "message": text[:300].replace(key, "<key>")}  # an error in a 200
@@ -124,20 +127,28 @@ def finra_short_volume(c: httpx.Client) -> dict[str, Any]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="free_probe.json")
+    ap.add_argument("--only", default="", help="comma list: alpaca,av,av_delisted_all,nasdaq,finra (empty = all but av_delisted_all)")
     a = ap.parse_args()
     end = (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat()
     res: dict[str, Any] = {"run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "secrets": secret_state()}
+    only = {x for x in a.only.split(",") if x} or {"alpaca", "av", "nasdaq", "finra"}
     with httpx.Client() as c:
-        res["alpaca_sip_raw_3"] = alpaca_bars(c, ["AAPL", "MSFT", "SPY"], "2016-01-01", end)
-        if res["alpaca_sip_raw_3"].get("status") == "OK":
-            res["alpaca_cases"] = alpaca_bars(c, [s for s, _ in CASES], "2016-01-01", end)
-            res["alpaca_cases_notes"] = dict(CASES)
-            res["alpaca_asof_fb_2020"] = alpaca_bars(c, ["FB", "META"], "2020-01-01", "2020-01-10", asof="2020-01-06")
-            res["alpaca_asof_raw_ticker"] = alpaca_bars(c, ["FB", "META"], "2020-01-01", "2020-01-10", asof="-")
-        res["alphavantage_listing_2016_active"] = alphavantage_listing(c, "2016-01-04", "active")
-        res["alphavantage_listing_2016_delisted"] = alphavantage_listing(c, "2016-01-04", "delisted")
-        res["nasdaq_symbol_directory"] = nasdaq_directory(c)
-        res["finra_short_volume"] = finra_short_volume(c)
+        if "alpaca" in only:
+            res["alpaca_sip_raw_3"] = alpaca_bars(c, ["AAPL", "MSFT", "SPY"], "2016-01-01", end)
+            if res["alpaca_sip_raw_3"].get("status") == "OK":
+                res["alpaca_cases"] = alpaca_bars(c, [s for s, _ in CASES], "2016-01-01", end)
+                res["alpaca_cases_notes"] = dict(CASES)
+                res["alpaca_asof_fb_2020"] = alpaca_bars(c, ["FB", "META"], "2020-01-01", "2020-01-10", asof="2020-01-06")
+                res["alpaca_asof_raw_ticker"] = alpaca_bars(c, ["FB", "META"], "2020-01-01", "2020-01-10", asof="-")
+        if "av" in only:
+            res["alphavantage_listing_2016_active"] = alphavantage_listing(c, "2016-01-04", "active")
+            res["alphavantage_listing_2016_delisted"] = alphavantage_listing(c, "2016-01-04", "delisted")
+        if "av_delisted_all" in only:  # the whole delisted list (no date): delisting dates as lifespans (instruction §3.C)
+            res["alphavantage_listing_delisted_all"] = alphavantage_listing(c, None, "delisted")
+        if "nasdaq" in only:
+            res["nasdaq_symbol_directory"] = nasdaq_directory(c)
+        if "finra" in only:
+            res["finra_short_volume"] = finra_short_volume(c)
     with open(a.out, "w", encoding="utf-8") as f:
         json.dump(res, f, indent=1, ensure_ascii=False)
     print(json.dumps(res, indent=1, ensure_ascii=False)[:60000])
