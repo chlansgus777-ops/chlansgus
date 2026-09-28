@@ -245,3 +245,11 @@ def test_setup_screen_accepts_only_a_local_model_url_and_plain_names():
             validate_setup({"FAST_MODEL": bad})
     with pytest.raises(ValueError):
         validate_setup({"MARKETLENS_SCHEDULER": "yes"})
+
+
+def test_hub_uses_the_service_clock():
+    """The hub judges sessions with the same clock as the analysis (a fixed MOCK clock included)."""
+    from tests.integration.test_service_api import make_service
+
+    svc = make_service(universe=20)
+    assert svc.quotes._now() == svc.now()

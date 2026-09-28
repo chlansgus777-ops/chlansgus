@@ -205,7 +205,7 @@ class MarketLensService:
         coverage = ("Finnhub 체결 스트림(무료 계정) — 거래소 범위·통합시세(SIP) 여부는 공식 문서로 확인되지 않아 '미국 통합 시세'로 표시하지 않음"
                     if streaming else "스트림 없음 — REST 스냅샷(지연 가능)만 표시" if self.mode == DataMode.LIVE else "모의 데이터(MOCK) — 실제 시세 아님")
         hub = QuoteHub(source="finnhub" if streaming else ("finnhub" if self.mode == DataMode.LIVE else "mock"),
-                       max_symbols=getattr(st, "quote_stream_max_symbols", 50), coverage_ko=coverage, streaming=streaming,
+                       max_symbols=getattr(st, "quote_stream_max_symbols", 50), coverage_ko=coverage, streaming=streaming, now=self.now,
                        snapshot=lambda t: self.data.quote(t).value, pinned_loader=self._quote_pins,
                        snapshot_every=timedelta(minutes=5) if streaming else timedelta(minutes=2))
         stream = FinnhubStream(hub, key) if streaming and key else None
