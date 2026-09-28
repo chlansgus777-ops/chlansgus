@@ -139,3 +139,9 @@ export function CommitteeView({ c, evidence }: { c: CommitteeResult; evidence: M
     </div>
   );
 }
+
+/** A committee result is shown only for the ticker and recommendation on screen: a run that returns after the
+ * user picked another stock is dropped (moved here from the removed AI 위원회 page, 2026-09-28). */
+export function acceptRun(res: CommitteeResult, ticker: string | null, current: string | null): boolean {
+  return !!ticker && ticker === current && res.ticker === ticker;
+}

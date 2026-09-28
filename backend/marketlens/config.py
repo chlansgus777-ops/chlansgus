@@ -92,9 +92,12 @@ def _load_dotenv() -> None:
         load_dotenv(env_path, override=False, interpolate=False)  # a saved value is used as written: no ${…} expansion
 
 
-# what the first-run setup screen may write (nothing else: no path, URL or code setting is reachable from the UI)
-SETUP_KEYS = SECRET_ENV_KEYS + ("SEC_USER_AGENT", "MARKETLENS_MODE", "LLM_PROVIDER")
-_SETUP_VALUE = {"MARKETLENS_MODE": ("MOCK", "LIVE"), "LLM_PROVIDER": ("none", "anthropic", "openai", "openai_compatible")}
+# what the setup screen may write (nothing else: no path or code setting is reachable from the UI; the only URL is a
+# LOCAL model server — loopback only, so the screen can never point the app at another host)
+SETUP_KEYS = SECRET_ENV_KEYS + ("SEC_USER_AGENT", "MARKETLENS_MODE", "LLM_PROVIDER", "MARKETLENS_SCHEDULER", "OPENAI_BASE_URL", "FAST_MODEL", "DEEP_MODEL")
+_SETUP_VALUE = {"MARKETLENS_MODE": ("MOCK", "LIVE"), "LLM_PROVIDER": ("none", "anthropic", "openai", "openai_compatible"), "MARKETLENS_SCHEDULER": ("0", "1")}
+_LOCAL_URL = r"http://(?:127\.0\.0\.1|localhost)(?::\d{1,5})?(?:/[A-Za-z0-9._/-]*)?"
+_MODEL_NAME = r"[A-Za-z0-9._:/-]{1,100}"
 
 
 def validate_setup(values: dict[str, str]) -> dict[str, str]:
@@ -113,6 +116,12 @@ def validate_setup(values: dict[str, str]) -> dict[str, str]:
         if k in _SETUP_VALUE:
             if v not in _SETUP_VALUE[k]:
                 raise ValueError(f"{k}: {', '.join(_SETUP_VALUE[k])} 중 하나여야 합니다")
+        elif k == "OPENAI_BASE_URL":
+            if not _re.fullmatch(_LOCAL_URL, v):
+                raise ValueError("OPENAI_BASE_URL: 이 컴퓨터의 로컬 모델 서버 주소만 가능합니다 (예: http://127.0.0.1:11434/v1)")
+        elif k in ("FAST_MODEL", "DEEP_MODEL"):
+            if not _re.fullmatch(_MODEL_NAME, v):
+                raise ValueError(f"{k}: 영문·숫자·._:/- 로 된 모델 이름이어야 합니다 (예: qwen2.5:7b)")
         elif k == "SEC_USER_AGENT":
             if not _re.fullmatch(r"[^@\s]+(?: [^@\s]+)* [^@\s]+@[^@\s]+\.[^@\s]+", v):
                 raise ValueError("SEC_USER_AGENT: '이름 이메일' 형식이어야 합니다 (예: Hong Gildong hong@example.com). SEC가 요구합니다")

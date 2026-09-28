@@ -9,7 +9,7 @@ import { StatusBar, StatusProvider, usePageTime } from "../components/status";
 import { StaleData, StatePanel, Term, type StateKind } from "../components/ui";
 import type { CommitteeResult, OppRow, StockDetail as SD } from "../types";
 import Dashboard, { riskLine, scopeLine, splitCandidates } from "./Dashboard";
-import { acceptRun } from "./Committee";
+import { acceptRun } from "../components/CommitteeView";
 import Performance from "./Performance";
 import Portfolio from "./Portfolio";
 import StockDetailPage from "./StockDetail";

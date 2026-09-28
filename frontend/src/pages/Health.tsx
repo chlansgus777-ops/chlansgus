@@ -18,7 +18,7 @@ export default function Health() {
   const cls = (s: string) => (s === "HEALTHY" ? "ok" : s === "DOWN" ? "danger" : "warn");
   return (
     <div className="grid">
-      <div className="page-head"><h1>시스템 상태</h1><button onClick={() => { h.reload(); r.reload(); }}>새로고침</button></div>
+      <div className="row spread"><span className="caption">데이터 공급자 연결과 추천에 필요한 데이터 준비 상태</span><button onClick={() => { h.reload(); r.reload(); }}>새로고침</button></div>
       {h.data.providers.some((p) => p.status === "DOWN" && p.mode === "LIVE") && (
         <StatePanel kind="provider_failure" what={`중단된 공급자: ${h.data.providers.filter((p) => p.status === "DOWN" && p.mode === "LIVE").map((p) => `${p.name}(${p.kind})${p.last_error ? ` — ${p.last_error.slice(0, 80)}` : ""}`).join(" · ")}`} />
       )}

@@ -64,42 +64,46 @@ def page(server):
 
 
 def test_dashboard_answers_the_first_questions(page, server):
+    # product overhaul 2026-09-28: the home screen answers "what now" first (today hero, candidates) with the
+    # account, the calendar, the watchlist and the data connection in a side rail
     page.goto(f"{server}/#/")
-    page.get_by_text("오늘의 미국 주식 한눈에 보기").wait_for()
+    page.get_by_role("heading", name="지금 검토할 후보", exact=True).wait_for()
     assert "모의 데이터(MOCK)" in page.get_by_test_id("banner-mock").inner_text()
-    for title in ("오늘 시장 분위기", "지금 검토할 후보", "가장 조심할 위험", "다가오는 중요한 일정", "내 포트폴리오", "모의투자 성과", "추천이 바뀐 종목", "관심 종목 알림", "시스템 상태"):
+    for title in ("오늘", "지금 검토할 후보", "다가오는 일정", "관심 종목", "내 포트폴리오", "모의투자", "데이터 연결"):
         assert page.get_by_role("heading", name=title, exact=True).is_visible(), title
-    assert page.get_by_role("link", name="기회 찾기").is_visible()
+    assert page.get_by_role("navigation", name="주 메뉴").get_by_role("link", name="종목", exact=True).is_visible()
     assert page.errors == []  # type: ignore[attr-defined]
 
 
 def test_stock_detail_puts_the_answer_on_top(page, server):
-    page.goto(f"{server}/#/opportunities")
-    page.get_by_role("heading", name="기회 찾기").wait_for()
+    page.goto(f"{server}/#/opportunities")  # the old address still works (redirects to 종목 → 스캔 후보)
+    page.get_by_role("heading", name="종목", exact=True).wait_for()
     first = page.locator("table tbody tr td a").first
+    first.wait_for()
     ticker = first.inner_text()
     first.click()
     page.get_by_role("heading", name="가격 계획", exact=True).wait_for()
-    for title in ("좋은 이유", "주의할 이유", "현재 이슈 영향", "투자 논리가 깨지는 조건", "내 포트폴리오에 넣어도 될까?", "왜 이런 판단이 나왔나요?"):
+    for title in ("판단 이유", "주의할 이유", "모르는 것", "현재 이슈 영향", "판단 철회 조건", "내 포트폴리오에 넣어도 될까?"):
         assert page.get_by_role("heading", name=title, exact=True).is_visible(), title
     assert ticker in page.locator("h1").first.inner_text()
     assert " ET (" in page.content() and "KST)" in page.content()  # ET with KST alongside
     hero = page.locator("section.hero")
     hero_box, plan_box = hero.bounding_box(), page.get_by_role("heading", name="가격 계획", exact=True).bounding_box()
     assert hero_box and plan_box and hero_box["y"] < plan_box["y"]  # the decision comes before the details
-    # beginner mode folds raw data; advanced mode opens it
-    fresh = page.locator("details", has_text="데이터 종류별 신선도")
+    # raw data is folded by default and opens where it is (the global 쉽게/자세히 switch was removed in the overhaul)
+    fresh = page.locator("details", has_text="데이터 종류별 신선도").first
     assert fresh.get_attribute("open") is None
-    page.get_by_role("button", name="자세히 보기", exact=True).click()
-    assert page.locator("details", has_text="데이터 종류별 신선도").get_attribute("open") is not None
-    page.get_by_role("button", name="쉽게 보기", exact=True).click()
+    fresh.locator("summary").first.click()
+    assert fresh.get_attribute("open") is not None
+    # the latest quote and the analysis-time price are two separate, labelled prices
+    assert page.get_by_test_id("tile-price").is_visible() and "분석 기준가" in page.get_by_test_id("analysis-basis").inner_text()
     assert page.errors == []  # type: ignore[attr-defined]
 
 
 def test_state_changing_call_from_the_ui_passes_the_csrf_guard(page, server):
-    page.goto(f"{server}/#/stocks")
-    page.get_by_placeholder("종목 코드 추가").fill("NVDA")
-    page.get_by_role("button", name="관심종목 추가").click()
+    page.goto(f"{server}/#/stocks?tab=watch")
+    page.get_by_label("관심 종목 코드").fill("NVDA")
+    page.get_by_role("button", name="관심 종목 추가").click()
     page.get_by_test_id("watchlist").locator("table tbody tr td a", has_text="NVDA").wait_for()
     assert page.errors == []  # type: ignore[attr-defined]
 
@@ -107,8 +111,8 @@ def test_state_changing_call_from_the_ui_passes_the_csrf_guard(page, server):
 def test_narrow_window_stacks_cards(page, server):
     page.set_viewport_size({"width": 760, "height": 1000})
     page.goto(f"{server}/#/")
-    page.get_by_text("오늘의 미국 주식 한눈에 보기").wait_for()
-    boxes = [page.get_by_role("heading", name=t).bounding_box() for t in ("오늘 시장 분위기", "지금 검토할 후보")]
+    page.get_by_role("heading", name="지금 검토할 후보", exact=True).wait_for()
+    boxes = [page.get_by_role("heading", name=t, exact=True).bounding_box() for t in ("지금 검토할 후보", "관심 종목")]  # main column, then the rail
     assert boxes[0] and boxes[1] and boxes[1]["y"] > boxes[0]["y"]  # one column on narrow windows
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")  # no horizontal page scroll
     page.set_viewport_size({"width": 1400, "height": 1000})
@@ -128,11 +132,11 @@ def _open_stock(page, server, ticker):
 
 def test_navigation_is_simple_and_readiness_is_visible(page, server):
     page.goto(f"{server}/#/")
-    page.get_by_text("오늘의 미국 주식 한눈에 보기").wait_for()
+    page.get_by_role("heading", name="지금 검토할 후보", exact=True).wait_for()
     nav = page.get_by_role("navigation", name="주 메뉴")
-    for label in ("홈", "기회 찾기", "종목 분석", "내 포트폴리오", "시장 이슈"):
+    for label in ("홈", "종목", "포트폴리오", "시장", "성과"):
         assert nav.get_by_role("link", name=label, exact=True).is_visible(), label
-    assert not nav.get_by_role("link", name="AI 위원회").is_visible()  # folded under 고급 기능
+    assert nav.get_by_role("link", name="AI 위원회").count() == 0  # the committee lives on the stock page (AI 검토)
     assert "연습용(모의)" in page.get_by_test_id("readiness-badge").inner_text()
 
 
@@ -150,8 +154,8 @@ def test_ticker_switch_never_shows_the_previous_stock(page, server):
 def test_committee_run_creates_a_reviewed_version(page, server):
     target = next(r for r in _rows(page, server) if (r["rank"] or 0) > 20 and r["committee_status"] == "NOT_RUN" and r["action"] != "DATA INSUFFICIENT")
     _open_stock(page, server, target["ticker"])
-    page.get_by_role("button", name="AI 위원회 실행").click()
-    page.get_by_text("AI 위원회 검토본 v2").wait_for(timeout=30000)
+    page.get_by_role("button", name="AI 검토 실행").click()
+    page.get_by_text("AI 검토본 v2").wait_for(timeout=30000)
     assert page.errors == []  # type: ignore[attr-defined]
 
 
@@ -168,12 +172,12 @@ def test_late_committee_response_cannot_leak_into_another_stock(page, server):
     page.route("**/api/recommendations/*/committee", slow)
     try:
         _open_stock(page, server, c)
-        page.get_by_role("button", name="AI 위원회 실행").click()
+        page.get_by_role("button", name="AI 검토 실행").click()
         page.evaluate(f"window.location.hash = '#/stocks/{d}'")  # leave before the response arrives
         page.wait_for_function(f"document.querySelector('h1') && document.querySelector('h1').innerText.startsWith('{d}')")
         page.wait_for_timeout(2500)
         assert d in page.locator("h1").first.inner_text()
-        assert page.get_by_text("AI 위원회 검토본").count() == 0  # D has no committee; C's result never appears here
+        assert page.get_by_text("AI 검토본").count() == 0  # D has no committee; C's result never appears here
         assert page.get_by_text("아직 실행하지 않았습니다").is_visible()
     finally:
         page.unroute("**/api/recommendations/*/committee")
@@ -246,7 +250,8 @@ def test_portfolio_input_gives_a_plain_reading(page, server):
     page.get_by_placeholder("매입 단가(USD)").fill("100")
     page.get_by_role("button", name="저장", exact=True).click()
     page.get_by_text("현금 비중은").or_(page.get_by_text("현금이")).first.wait_for()
-    assert page.get_by_role("img", name="비중 도넛 차트").is_visible()
+    bar = page.locator(".alloc[role=img]").first  # the weight bar that replaced the donut (overhaul 2026-09-28)
+    assert bar.is_visible() and t in (bar.get_attribute("aria-label") or "")
 
 
 def test_a_trade_record_becomes_the_holding(page, server):
@@ -278,4 +283,4 @@ def test_provider_error_is_explained_with_a_retry(page, server):
     finally:
         page.unroute("**/api/dashboard")
     page.get_by_role("button", name="다시 시도").click()
-    page.get_by_text("오늘의 미국 주식 한눈에 보기").wait_for()
+    page.get_by_role("heading", name="지금 검토할 후보", exact=True).wait_for()

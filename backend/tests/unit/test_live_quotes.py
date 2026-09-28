@@ -226,3 +226,22 @@ def test_revalidation_needs_a_new_price_not_the_analysis_price_again():
     assert same.status == "NEEDS_REVALIDATION"
     newer = recommendation_freshness(as_of, "FRESH", REG, plan=plan, quote_price=100.2, quote_ts=REG - timedelta(seconds=5), analysis_price_ts=price_ts)
     assert newer.status == "CURRENT" and newer.revalidated_price == 100.2
+
+
+def test_setup_screen_accepts_only_a_local_model_url_and_plain_names():
+    """AI 검토 with a free local model (settings tab): loopback URLs only, so the screen can never point the app
+    (and the analysis it sends) at another host."""
+    import pytest
+
+    from marketlens.config import validate_setup
+
+    ok = validate_setup({"OPENAI_BASE_URL": "http://127.0.0.1:11434/v1", "FAST_MODEL": "qwen2.5:7b", "MARKETLENS_SCHEDULER": "1", "LLM_PROVIDER": "openai_compatible"})
+    assert ok["OPENAI_BASE_URL"] == "http://127.0.0.1:11434/v1" and ok["MARKETLENS_SCHEDULER"] == "1"
+    for bad in ("https://api.example.com/v1", "http://127.0.0.1.evil.com/v1", "http://localhost@evil.com/v1", "http://10.0.0.5:11434/v1", "file:///etc/passwd"):
+        with pytest.raises(ValueError):
+            validate_setup({"OPENAI_BASE_URL": bad})
+    for bad in ("qwen 7b", "a;rm -rf", "x" * 101):
+        with pytest.raises(ValueError):
+            validate_setup({"FAST_MODEL": bad})
+    with pytest.raises(ValueError):
+        validate_setup({"MARKETLENS_SCHEDULER": "yes"})

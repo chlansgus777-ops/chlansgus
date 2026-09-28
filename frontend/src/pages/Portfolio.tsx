@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { api } from "../api";
-import { Card, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } from "../components/ui";
+import { Card, Donut, Empty, Err, Loading, More, Notice, Ribbon, StaleData, Term } from "../components/ui";
 import { Ledger } from "../components/Ledger";
 import { LivePrice } from "../components/LivePrice";
 import { refreshQuoteSubscriptions } from "../quotes";
 import { useApi } from "../components/useApi";
 import { day, num, pct, price, shares, usdWithKo } from "../format";
-import { More } from "../mode";
+
 
 interface HoldingV { ticker: string; quantity: number; cost_basis: number; price: number | null; price_day: string | null; market_value: number | null; unrealized_pnl: number | null; unrealized_pct: number | null; weight: number | null; sector: string; split_adjusted?: number; source?: "manual" | "ledger"; realized_pnl?: number; dividends?: number }
 interface Pf {
