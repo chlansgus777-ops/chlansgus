@@ -286,7 +286,12 @@ def collect_fred(eng: Engine, fred_key: str, start: date, end: date, deadline: f
             continue
         if time.monotonic() > deadline:
             break
-        prov.get_series(list(ALL_SERIES), t)
+        try:  # the answer (an error included) is recorded either way and replayed as the app would have seen it
+            prov.get_series(list(ALL_SERIES), t)
+        except Exception as e:  # noqa: BLE001 - recorded, reported in the coverage
+            failed = json.loads(get_meta(eng, "fred.failed") or "{}")
+            failed[t.isoformat()] = f"{type(e).__name__}: {str(e)[:160]}"
+            set_meta(eng, "fred.failed", failed)
         done.add(t.isoformat())
         set_meta(eng, "fred.done", sorted(done))
     if len(done) >= len(weekly_times(start, end)):
