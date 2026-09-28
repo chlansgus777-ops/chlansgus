@@ -58,7 +58,10 @@ class Polygon:
             self._last = self._clock()
             self.calls += 1
             try:
-                r = self._c.get(url if url.startswith("http") else POLY + url, params={**params, "apiKey": self._key})
+                # a next_url carries its own cursor: httpx replaces a URL's query with ``params`` (the whole 2026-09-28 run
+                # re-read the first tickers page for 6 h), so its query is merged in, never dropped
+                full = httpx.URL(url if url.startswith("http") else POLY + url)
+                r = self._c.get(full.copy_merge_params({**params, "apiKey": self._key}))
             except httpx.HTTPError:
                 self._sleep(30 * (attempt + 1))
                 continue
@@ -73,6 +76,7 @@ class Polygon:
 
     def pages(self, path: str, **params: Any) -> Any:
         status, body = self.get(path, **params)
+        seen: set[str] = set()
         while True:
             if status != 200:
                 raise RuntimeError(f"Polygon {path}: HTTP {status} {str(body)[:200]}")
@@ -80,6 +84,9 @@ class Polygon:
             nxt = body.get("next_url")
             if not nxt:
                 return
+            if nxt in seen:
+                raise RuntimeError(f"Polygon {path}: the same next page came back twice (paging does not advance)")
+            seen.add(nxt)
             status, body = self.get(nxt)
 
 

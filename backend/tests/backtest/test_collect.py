@@ -70,3 +70,36 @@ def test_the_collector_builds_a_point_in_time_database(tmp_path, monkeypatch):
     cov = C.coverage(eng, store)
     assert cov["first_session"] == CUTOFF.isoformat() and cov["cik_match_rate_stocks"] == 1.0
     assert cov["companies_with_sec_quarters"] >= 1 and cov["dividend_records"] == 1
+
+
+def test_paging_follows_the_next_url_cursor_and_keeps_the_key():
+    """2026-09-28 collect run: httpx dropped next_url's cursor, so the first tickers page came back for 6 hours."""
+    seen = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        q = dict(req.url.params)
+        seen.append(q)
+        assert q["apiKey"] == "k"
+        if "cursor" not in q:
+            return httpx.Response(200, json={"results": [{"ticker": "A"}], "next_url": "https://api.polygon.io/v3/reference/tickers?cursor=p2"})
+        if q["cursor"] == "p2":
+            return httpx.Response(200, json={"results": [{"ticker": "B"}], "next_url": "https://api.polygon.io/v3/reference/tickers?cursor=p3"})
+        return httpx.Response(200, json={"results": [{"ticker": "C"}]})
+
+    poly = C.Polygon("k", sleep=lambda _s: None, transport=httpx.MockTransport(handler))
+    assert [r["ticker"] for r in poly.pages("/v3/reference/tickers", market="stocks")] == ["A", "B", "C"]
+    assert [q.get("cursor") for q in seen] == [None, "p2", "p3"]
+
+
+def test_paging_that_does_not_advance_stops_with_an_error():
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": [{"ticker": "A"}], "next_url": "https://api.polygon.io/v3/reference/tickers?cursor=same"})
+
+    poly = C.Polygon("k", sleep=lambda _s: None, transport=httpx.MockTransport(handler))
+    try:
+        list(poly.pages("/v3/reference/tickers"))
+    except RuntimeError as e:
+        assert "does not advance" in str(e)
+    else:
+        raise AssertionError("an endless page loop must stop")
+    assert poly.calls == 2

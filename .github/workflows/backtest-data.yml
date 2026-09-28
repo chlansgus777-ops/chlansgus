@@ -94,8 +94,7 @@ jobs:
         run: |
           if [ -f backtest.db.gz ]; then gunzip -f backtest.db.gz; fi
           python -m marketlens.backtest.collect --db backtest.db --out coverage.json --max-minutes 320
-          sha256sum backtest.db | tee backtest.db.sha256
-          gzip -f -k backtest.db
+        timeout-minutes: 335
       - name: Extend back to 2016 (Alpaca SIP bars, earlier splits and dividends, SEC and FRED for the earlier years)
         if: inputs.task == 'alpaca'
         env:
@@ -109,8 +108,11 @@ jobs:
           test -f backtest.db.gz || { echo "task=alpaca needs resume_run_id: the finished collect run whose backtest-db to extend"; exit 1; }
           gunzip -f backtest.db.gz
           python -m marketlens.backtest.alpaca --db backtest.db --out coverage.json --max-minutes 320
-          sha256sum backtest.db | tee backtest.db.sha256
-          gzip -f -k backtest.db
+        timeout-minutes: 335
+      - name: Pack the database (also after a failed or cut-off step, so the next run resumes from it)
+        if: always() && (inputs.task == 'collect' || inputs.task == 'alpaca')
+        run: |
+          if [ -f backtest.db ]; then sha256sum backtest.db | tee backtest.db.sha256; gzip -f -k backtest.db; fi
       - uses: actions/upload-artifact@v4
         if: always() && (inputs.task == 'collect' || inputs.task == 'alpaca')
         with:
