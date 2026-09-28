@@ -186,7 +186,11 @@ def alphavantage_listing(c: httpx.Client, day: str | None, state: str) -> dict[s
     params = {"function": "LISTING_STATUS", "state": state, "apikey": key}
     if day:
         params["date"] = day
-    r = c.get(AV, params=params, timeout=60)
+    for wait in (15, 65):  # the free key answers '{}' to back-to-back calls (burst limit): space them, retry once
+        time.sleep(wait)
+        r = c.get(AV, params=params, timeout=60)
+        if r.status_code == 200 and not r.text.lstrip().startswith("{"):
+            break
     text = r.text
     if r.status_code != 200 or text.lstrip().startswith("{"):
         return {"status": "FAILED", "http": r.status_code, "message": text[:300].replace(key, "<key>")}  # an error in a 200
@@ -241,6 +245,7 @@ def main() -> None:
                 res["alpaca_asof_raw_ticker"] = alpaca_bars(c, ["FB", "META"], "2020-01-01", "2020-01-10", asof="-")
         if "av" in only:
             res["alphavantage_listing_2016_active"] = alphavantage_listing(c, "2016-01-04", "active")
+        if "av" in only or "av_delisted_2016" in only:
             res["alphavantage_listing_2016_delisted"] = alphavantage_listing(c, "2016-01-04", "delisted")
         if "av_delisted_all" in only:  # the whole delisted list (no date): delisting dates as lifespans (instruction §3.C)
             res["alphavantage_listing_delisted_all"] = alphavantage_listing(c, None, "delisted")
