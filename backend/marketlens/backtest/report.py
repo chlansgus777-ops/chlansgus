@@ -87,11 +87,13 @@ def build(results: Engine, data: BacktestData, bt: Engine, signals_state: Any, p
         rows = [SimpleNamespace(**dict(r._mapping)) for r in c.execute(select(bt_rows).order_by(bt_rows.c.t, bt_rows.c.key))]
     by_t: dict[str, list[Any]] = {}
     universe: dict[str, dict[str, int]] = {}
+    ended = {ln.key for ln in data.lineages if data_end is not None and (data_end - ln.days[-1]).days > 7}
     for r in rows:
         by_t.setdefault(r.t, []).append(r)
-        u = universe.setdefault(r.t, {"universe": 0, "eligible": 0})
+        u = universe.setdefault(r.t, {"universe": 0, "eligible": 0, "eligible_later_delisted": 0})
         u["universe"] += 1
         u["eligible"] += r.eligible
+        u["eligible_later_delisted"] += int(bool(r.eligible) and r.key in ended)  # survivorship check: must not be 0 throughout
     spy_closes = [(d, row[3]) for d, row in zip(spy_ln.days, spy_ln.rows)] if spy_ln else []
 
     # ---------------------------------------------------------------- cross-sections with outcomes
