@@ -180,3 +180,90 @@ def test_shares_come_from_the_balance_sheet_when_no_cover_page_frame_has_the_com
     got = SecEdgarProvider("MarketLens test test@example.com", transport=httpx.MockTransport(handler)).shares_outstanding_all(date(2026, 9, 25))
     assert got[1] == (100.0, date(2026, 7, 25))  # the cover page wins
     assert got[2] == (50.0, date(2026, 6, 30))  # a company missing from the cover-page frames is not left without shares
+
+
+# ---------------------------------------------------------------- owner report 2026-09-28 (new build): 89 % / 70 % / 79 %
+def test_readiness_gates_count_what_the_scanner_can_use(tmp_path):
+    """Market cap / sector / filings: the stocks at the scanner's price and dollar-volume limits (the sync fetches filings
+    only for those; the scanner drops an illiquid stock whatever its market cap). Price history: a stock listed fewer
+    than 60 sessions ago is counted apart."""
+    from datetime import date
+
+    from marketlens.application.readiness import evaluate
+    from marketlens.domain.enums import Exchange
+    from marketlens.domain.market import Bar, Security
+    from marketlens.domain.market_calendar import add_trading_days
+    from tests.acceptance_a_grade.test_research_integrity import _store
+
+    st = _store(tmp_path)
+    today = date(2026, 9, 25)
+    days = [add_trading_days(date(2026, 3, 2), i) for i in range(145)]
+    days = [d for d in days if d <= today]
+    st.sync_universe([Security(t, t, Exchange.NASDAQ, "Tech", "x", None, cik=i) for i, t in enumerate(("LIQ", "THIN", "NEW"), 1)], today)
+    for d in days:
+        bars = {"LIQ": Bar(d, 50, 51, 49, 50, 1e6), "THIN": Bar(d, 50, 51, 49, 50, 1e3)}  # $50M vs $50K a day
+        if d >= days[-20]:
+            bars["NEW"] = Bar(d, 20, 21, 19, 20, 5e6)  # listed 20 sessions ago
+        st.save_grouped(d, bars, "polygon")
+    st.set_shares({"LIQ": (1e8, today)})  # THIN has no market cap: it does not count against the gate
+    st.refresh_market_caps()
+    stats = st.coverage_stats(today, 1e9, 2e7, 5.0)
+    assert stats["young"] == 1 and stats["bars_60"] == 2  # NEW is counted apart, not as missing history
+    assert stats["liquid"] == 2 and stats["liquid_with_market_cap"] == 1  # LIQ and NEW are liquid; THIN is not
+    from marketlens.application.registry import build_live_registry
+    from marketlens.config import Settings
+    from marketlens.domain.enums import DataMode
+
+    reg = build_live_registry(Settings(mode=DataMode.LIVE, database_url="sqlite:///:memory:", sec_user_agent="t t@example.com", llm_provider="none"))
+    rd = evaluate("LIVE", reg, {**stats, "market_days": 145}, None)
+    assert rd.progress["price_history"] == 1.0 and rd.progress["market_cap"] == 0.5
+    assert any("스캐너가 쓸 수 있는 주식 2종목 기준" in r for r in rd.scanner_reasons)
+
+
+def test_liquid_stocks_the_frames_missed_get_their_shares_company_by_company(tmp_path, monkeypatch):
+    from marketlens.application.sync import _find
+
+    svc = _live(tmp_path)
+    sec = _find(svc.registry, "universe", "shares_outstanding_all")
+    monkeypatch.setattr(sec, "shares_outstanding_all", lambda _d: {})  # the quarterly frames have nobody
+    asked = []
+
+    def one(t, as_of):  # noqa: ANN001, ANN202
+        asked.append(t)
+        return (LF.COMPANIES[t]["shares"], as_of)
+
+    monkeypatch.setattr(sec, "shares_outstanding_of", one)
+    rep = MarketSync(svc.registry, svc.store).run(LF.NOW)
+    caps = {s.ticker: s.market_cap for s in svc.store.securities(None)}
+    assert caps["NVDA"] and caps["JPM"]  # read company by company
+    assert "TINY" not in asked  # illiquid: never asked
+    assert rep.shares_looked_up >= 2
+    again = MarketSync(svc.registry, svc.store).run(LF.NOW)
+    assert again.shares_looked_up == 0  # nothing is asked twice
+
+
+def test_company_shares_come_from_the_cover_page_else_the_balance_sheet_and_never_stale():
+    from datetime import date
+
+    import httpx
+
+    from marketlens.providers.contracts import NotSupported
+    from marketlens.providers.live.sec_edgar import SecEdgarProvider
+
+    def handler(req):  # noqa: ANN001, ANN202
+        p = req.url.path
+        if p.endswith("company_tickers_exchange.json"):
+            return httpx.Response(200, json={"fields": ["cik", "name", "ticker", "exchange"], "data": [[1, "A", "AAA", "Nasdaq"], [2, "B", "BBB", "Nasdaq"], [3, "C", "CCC", "Nasdaq"]]})
+        if "CIK0000000001/dei/" in p:
+            return httpx.Response(200, json={"units": {"shares": [{"end": "2026-07-20", "val": 9e8, "filed": "2026-08-01"}, {"end": "2026-04-20", "val": 8e8, "filed": "2026-05-01"}]}})
+        if "CIK0000000002/us-gaap/CommonStockSharesOutstanding" in p:
+            return httpx.Response(200, json={"units": {"shares": [{"end": "2026-06-30", "val": 5e8, "filed": "2026-08-05"}]}})
+        if "CIK0000000003/dei/" in p:
+            return httpx.Response(200, json={"units": {"shares": [{"end": "2023-01-20", "val": 1e8, "filed": "2023-02-01"}]}})
+        return httpx.Response(404)
+
+    sec = SecEdgarProvider("MarketLens test test@example.com", transport=httpx.MockTransport(handler))
+    assert sec.shares_outstanding_of("AAA", date(2026, 9, 25)) == (9e8, date(2026, 7, 20))
+    assert sec.shares_outstanding_of("BBB", date(2026, 9, 25)) == (5e8, date(2026, 6, 30))
+    with pytest.raises(NotSupported):
+        sec.shares_outstanding_of("CCC", date(2026, 9, 25))  # three years old: never used as today's shares

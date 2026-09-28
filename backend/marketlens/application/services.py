@@ -621,6 +621,7 @@ class MarketLensService:
         sc = self.base_cfg.scanner
         limits.setdefault("min_market_cap", sc.min_market_cap)
         limits.setdefault("min_dollar_volume", sc.min_avg_dollar_volume)
+        limits.setdefault("min_price", sc.min_price)
         # another sync (the background job, POST /api/sync, the CLI, the scheduler) waits for the running one and then
         # computes its own missing days from the store: no session is downloaded twice
         with self._sync_run:
@@ -659,13 +660,14 @@ class MarketLensService:
         try:
             for i in range(max_rounds):
                 out = self.sync_market(progress=self._on_sync_progress)
-                progressed = bool(out["bar_days_loaded"] or out["bar_days_empty"] or out["fundamentals_ingested"] or out["profiles_updated"])
+                progressed = bool(out["bar_days_loaded"] or out["bar_days_empty"] or out["fundamentals_ingested"] or out["profiles_updated"]
+                                  or out.get("shares_looked_up"))
                 state.update(round=i + 1, bar_days_remaining=out["bar_days_remaining"], fundamentals_pending=out["fundamentals_pending"],
                              errors=out["errors"][:3], missing=out.get("missing", []), updated_at=self.now().isoformat())
                 state["failures"] = list(dict.fromkeys(state.get("failures", []) + out.get("failures", [])))[:3]
                 state["progress"] = self._progress_summary()
                 # profiles have no pending count: a round that still added some may have left more (bounded per round)
-                if out["status"] == "SYNC_COMPLETE" and not out["fundamentals_pending"] and not out["profiles_updated"]:
+                if out["status"] == "SYNC_COMPLETE" and not out["fundamentals_pending"] and not out["profiles_updated"] and not out.get("shares_pending"):
                     state["status"] = "DONE"
                     break
                 if not progressed:  # the next round would repeat the same calls: stop and say why
@@ -778,7 +780,8 @@ class MarketLensService:
         from marketlens.application.readiness import evaluate
         from marketlens.domain.market_calendar import last_completed_session
 
-        stats = self.store.coverage_stats(last_completed_session(self.now()), self.base_cfg.scanner.min_market_cap) if self.store is not None else None
+        sc = self.base_cfg.scanner
+        stats = self.store.coverage_stats(last_completed_session(self.now()), sc.min_market_cap, sc.min_avg_dollar_volume, sc.min_price) if self.store is not None else None
         sync_state = self.store.get_setting("last_sync") if self.store is not None else None
         verified = json.loads(self.store.get_setting("live_verified") or "{}") if self.store is not None else {}
         return evaluate(self.mode.value, self.registry, stats, sync_state, verified).as_dict()

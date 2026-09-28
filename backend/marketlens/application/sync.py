@@ -40,6 +40,8 @@ class SyncReport:
     bar_days_empty: int = 0  # trading days the provider returned no rows for (outside its history window)
     bar_days_pending: int = 0  # recent sessions the provider has not published yet (asked again next sync)
     shares_updated: int = 0
+    shares_looked_up: int = 0  # liquid stocks without a market cap whose shares were read company by company
+    shares_pending: int = 0
     market_caps: int = 0
     profiles_updated: int = 0
     fundamentals_ingested: int = 0  # SEC quarterly facts fetched this run (bounded, see the manifest)
@@ -72,7 +74,8 @@ class MarketSync:
         self.store = store
 
     def run(self, now: Any, backfill_days: int = 300, max_bar_calls: int = 30, max_profiles: int = 300,
-            min_market_cap: float = 1e9, min_dollar_volume: float = 2e7, max_fundamentals: int = 150,
+            min_market_cap: float = 1e9, min_dollar_volume: float = 2e7, max_fundamentals: int = 150, max_share_lookups: int = 300,
+            min_price: float = 5.0,
             fundamentals_refresh: timedelta = FUNDAMENTALS_REFRESH, progress: Progress | None = None) -> SyncReport:
         """``progress(step, done, total, detail)`` is called after every stored item (a session's bars, a company's
         profile or filings) with the counts of the WHOLE preparation, not of this bounded round."""
@@ -191,6 +194,8 @@ class MarketSync:
             except ProviderError as e:
                 rep.errors.append(f"shares: {e}")
         rep.market_caps = self.store.refresh_market_caps()
+        if sec is not None and hasattr(sec, "shares_outstanding_of"):
+            self._fill_missing_shares(sec, rep, now, today, min_dollar_volume, min_price, max_share_lookups)
         # 4) sector profiles for candidates that could pass eligibility
         if sec is not None and hasattr(sec, "company_profile"):
             bars = self.store.last_bars_all(today - timedelta(days=40), today)
@@ -224,6 +229,48 @@ class MarketSync:
             self._ingest_fundamentals(fund, now, rep, max_fundamentals, fundamentals_refresh, min_market_cap, min_dollar_volume, today, progress=_p)
         log.info("sync finished", extra={"fields": {"bars": rep.bar_days_loaded, "missing": rep.bar_days_missing, "profiles": rep.profiles_updated}})
         return rep
+
+    def _fill_missing_shares(self, sec: Any, rep: SyncReport, now: Any, today: date, min_dollar_volume: float, min_price: float, limit: int) -> None:
+        """Liquid stocks (the scanner's price and dollar-volume limits) still without a market cap after the quarterly
+        frames: their shares company by company, most liquid first, bounded per round (owner report 2026-09-28: 70 %).
+        Every attempt is in the ingestion manifest (dataset 'shares'): a company without the facts is asked again after
+        30 days, a failure after the usual back-off — never in a tight loop."""
+        from marketlens.providers.contracts import NotSupported, RateLimited
+        from marketlens.providers.live.nasdaq_symbols import COMMON_KINDS, canonical
+
+        recent = self.store.last_bars_all(today - timedelta(days=40), today)
+        kinds = self.store.instrument_kinds()
+        man = self.store.ingestion_all("shares")
+        todo: list[tuple[float, str]] = []
+        for s in self.store.securities(None):
+            if s.market_cap is not None or s.is_etf or kinds.get(canonical(s.ticker), "unknown") not in COMMON_KINDS:
+                continue
+            b = recent.get(s.ticker, [])[-20:]
+            adv = sum(x.close * x.volume for x in b) / len(b) if b else 0.0
+            if adv < min_dollar_volume or b[-1].close < min_price:
+                continue
+            m = man.get(s.ticker)
+            if m is not None and m.next_attempt_at is not None and m.next_attempt_at > now:
+                continue
+            todo.append((-adv, s.ticker))
+        todo.sort()
+        rep.shares_pending = max(0, len(todo) - limit)
+        got: dict[str, tuple[float, date]] = {}
+        for _adv, t in todo[:limit]:
+            try:
+                got[t] = sec.shares_outstanding_of(t, today)
+                self.store.record_ingestion("shares", t, now, "OK", rows=1)
+            except RateLimited as e:
+                rep.errors.append(f"shares: 요청 한도 — 다음 동기화에서 계속 ({e})")
+                break
+            except NotSupported as e:
+                self.store.record_ingestion("shares", t, now, "NOT_SUPPORTED", str(e))
+            except ProviderError as e:
+                self.store.record_ingestion("shares", t, now, "FAILED", str(e))
+        rep.shares_looked_up = len(got)
+        if got:
+            rep.shares_updated += self.store.set_shares(got)
+            rep.market_caps = self.store.refresh_market_caps()
 
     def _ingest_fundamentals(self, fund: Any, now: Any, rep: SyncReport, budget: int, refresh: timedelta, min_market_cap: float, min_dollar_volume: float, today: date,
                              progress: Progress | None = None) -> None:

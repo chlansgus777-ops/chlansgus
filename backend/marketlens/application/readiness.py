@@ -107,10 +107,16 @@ def evaluate(mode: str, reg: Any, stats: dict[str, Any] | None, sync_state: str 
         prog = {"price_history": 0.0, "market_cap": 0.0, "sector": 0.0, "fundamentals": 0.0, "market_days": 0.0}
     else:
         listed, large = stats["listed"], max(1, stats["large"])
+        young = stats.get("young") or 0
+        mature = max(1, listed - young)
+        liquid = stats.get("liquid")
         prog = {
-            "price_history": round(stats["bars_60"] / listed, 4),
+            # a stock listed fewer than 60 sessions ago cannot have 60 sessions: counted apart (it fills in by itself)
+            "price_history": round(stats["bars_60"] / mature, 4),
             "long_history": round(stats["bars_240"] / listed, 4),
-            "market_cap": round(stats["with_market_cap"] / listed, 4),
+            # market caps of the stocks the scanner can use (price and dollar volume at its limits); an illiquid stock is
+            # dropped by the scanner whatever its market cap
+            "market_cap": round((stats["liquid_with_market_cap"] / max(1, liquid)) if liquid else stats["with_market_cap"] / listed, 4),
             "sector": round(stats["large_with_sector"] / large, 4),
             "fundamentals": round(stats["large_with_fundamentals"] / max(1, large - stats.get("large_fund_not_supported", 0)), 4),
             "market_days": round(min(1.0, stats["market_days"] / MIN_MARKET_DAYS), 4),
@@ -118,12 +124,15 @@ def evaluate(mode: str, reg: Any, stats: dict[str, Any] | None, sync_state: str 
         }
         if stats["market_days"] < MIN_MARKET_DAYS:
             reasons.append(f"저장된 거래일 {stats['market_days']}일 < {MIN_MARKET_DAYS}일 — 스캐너 최소 요건(60거래일) 미달")
-        basis = (f" (주식 {listed:,}종목 기준 — 우선주·워런트·유닛·채권·펀드 {stats['listed_non_stock']:,}종목 제외)"
-                 if stats.get("listed_non_stock") else "")
+        excluded = f"우선주·워런트·유닛·채권·펀드 {stats['listed_non_stock']:,}종목 제외" if stats.get("listed_non_stock") else ""
+        young_note = f"상장 60거래일 미만 {young:,}종목 별도" if young else ""
+        basis_hist = f" (주식 {listed - young:,}종목 기준 — " + ", ".join(x for x in (excluded, young_note) if x) + ")" if (excluded or young_note) else ""
+        basis_cap = (f" (스캐너가 쓸 수 있는 주식 {liquid:,}종목 기준 — 주가·20일 평균 거래대금이 스캐너 기준 이상)" if liquid
+                     else (f" (주식 {listed:,}종목 기준 — {excluded})" if excluded else ""))
         if prog["price_history"] < MIN_PRICE_HISTORY:
-            reasons.append(f"60거래일 이상 가격 이력이 있는 종목 {prog['price_history']:.0%} < {MIN_PRICE_HISTORY:.0%}{basis}")
+            reasons.append(f"60거래일 이상 가격 이력이 있는 종목 {prog['price_history']:.0%} < {MIN_PRICE_HISTORY:.0%}{basis_hist}")
         if prog["market_cap"] < MIN_MARKET_CAP:
-            reasons.append(f"시가총액 확인 종목 {prog['market_cap']:.0%} < {MIN_MARKET_CAP:.0%}{basis}")
+            reasons.append(f"시가총액 확인 종목 {prog['market_cap']:.0%} < {MIN_MARKET_CAP:.0%}{basis_cap}")
         if prog["sector"] < MIN_SECTOR:
             reasons.append(f"대형주 업종 정보 {prog['sector']:.0%} < {MIN_SECTOR:.0%}")
         if prog["fundamentals"] < MIN_FUNDAMENTALS:

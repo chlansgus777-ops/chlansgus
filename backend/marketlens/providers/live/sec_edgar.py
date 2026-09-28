@@ -234,6 +234,29 @@ class SecEdgarProvider:
         out.update(frames("dei/EntityCommonStockSharesOutstanding", 8))  # the cover page wins where it exists
         return out
 
+    def shares_outstanding_of(self, ticker: str, as_of: date, max_age_days: int = 400) -> tuple[float, date]:
+        """One company's latest shares outstanding (≤ ``max_age_days`` old): the cover page (dei), else the balance sheet
+        (us-gaap CommonStockSharesOutstanding) — two small companyconcept requests. For the liquid stocks the quarterly
+        frames miss (a cover page dated far from a quarter end)."""
+        self._require()
+        cik = self.cik_for(ticker)
+        for concept in ("dei/EntityCommonStockSharesOutstanding", "us-gaap/CommonStockSharesOutstanding"):
+            try:
+                data = self._data.get_json(f"/api/xbrl/companyconcept/CIK{cik:010d}/{concept}.json")
+            except ProviderDataError:
+                continue  # 404: the company does not report this concept
+            best: tuple[float, date, str] | None = None
+            for it in (data.get("units") or {}).get("shares", []):
+                try:
+                    end, val, filed = date.fromisoformat(it["end"]), float(it["val"]), str(it.get("filed", ""))
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if val > 0 and end <= as_of and (as_of - end).days <= max_age_days and (best is None or (end, filed) > (best[1], best[2])):
+                    best = (val, end, filed)
+            if best is not None:
+                return best[0], best[1]
+        raise NotSupported(f"{ticker}: SEC 발행주식수(표지·재무상태표) 없음 또는 {max_age_days}일보다 오래됨")
+
     # ------------------------------------------------------------------ fundamentals
     def get_quarterly(self, ticker: str) -> list[QuarterlyFinancials]:
         self._require()

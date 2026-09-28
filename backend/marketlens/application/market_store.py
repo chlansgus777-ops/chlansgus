@@ -557,8 +557,11 @@ class MarketStore:
         return {t: [d[k] for k in sorted(d)] for t, d in out.items()}
 
     # ------------------------------------------------------------------ coverage (readiness)
-    def coverage_stats(self, today: date, min_market_cap: float) -> dict[str, Any]:
-        """Aggregate counts for the scanner-readiness gate (SQL aggregates, no row loading)."""
+    def coverage_stats(self, today: date, min_market_cap: float, min_dollar_volume: float | None = None, min_price: float | None = None) -> dict[str, Any]:
+        """Counts for the scanner-readiness gate. With ``min_dollar_volume`` the market-cap, sector and filings gates count
+        the stocks the scanner can actually use — 20-day average dollar volume and price at the scanner's own limits
+        (owner report 2026-09-28: the gates counted illiquid stocks the scanner drops anyway and the sync never fetches
+        filings for); a stock listed fewer than 60 sessions ago cannot have 60 sessions yet and is counted apart."""
         with self.sf() as s:
             active = list(s.execute(select(SecurityRow.ticker, SecurityRow.market_cap, SecurityRow.sector, SecurityRow.exchange, SecurityRow.is_adr, SecurityRow.country_of_incorporation)
                                     .where(SecurityRow.mode == self.mode, SecurityRow.active.is_(True))).all())
@@ -573,7 +576,10 @@ class MarketStore:
             # the filings themselves show a foreign private issuer (annual 20-F/40-F us-gaap statements, no 10-Q): excluded
             # like a profile-confirmed one, even before its profile is fetched
             filed_foreign = {t for t, st, e in man_rows if st == "NOT_SUPPORTED" and e and "20-F/40-F" in e}
-        days = sum(1 for d in self.grouped_days() if today - timedelta(days=400) <= d <= today)
+        sessions = sorted((d for d in self.grouped_days() if d <= today), reverse=True)
+        days = sum(1 for d in sessions if d >= today - timedelta(days=400))
+        with self.sf() as s:
+            first_bar = dict(s.execute(select(PriceBarRow.ticker, func.min(PriceBarRow.day)).group_by(PriceBarRow.ticker)).all())
         kinds = self.instrument_kinds()
         from marketlens.providers.live.nasdaq_symbols import COMMON_KINDS, canonical
 
@@ -581,14 +587,30 @@ class MarketStore:
         # stocks only (Nasdaq Trader directory): preferreds, units, warrants, notes and funds are not what the scanner
         # analyses — a ticker the directory does not know is counted (unknown ≠ excluded)
         listed = [a for a in listed_all if kinds.get(canonical(a[0]), "unknown") in COMMON_KINDS]
-        big = [a for a in listed if a[1] is not None and a[1] >= min_market_cap]
+        # listed after the 60th newest stored session: 60 sessions cannot exist yet (counted apart, not as missing data)
+        cutoff = sessions[59] if len(sessions) >= 60 else None
+        young = {a[0] for a in listed if cutoff is not None and first_bar.get(a[0]) is not None and first_bar[a[0]] > cutoff}
+        liquid: set[str] | None = None
+        if min_dollar_volume is not None:
+            recent = self.last_bars_all(today - timedelta(days=40), today)
+            liquid = set()
+            for a in listed:
+                b = recent.get(a[0], [])[-20:]
+                if b and sum(x.close * x.volume for x in b) / len(b) >= min_dollar_volume and b[-1].close >= (min_price or 0.0):
+                    liquid.add(a[0])
+        big_all = [a for a in listed if a[1] is not None and a[1] >= min_market_cap]
+        big = [a for a in big_all if liquid is None or a[0] in liquid]  # what the sync fetches profiles and filings for
         return {
+            "young": len(young),
+            "liquid": len(liquid) if liquid is not None else None,
+            "liquid_with_market_cap": sum(1 for a in listed if liquid is not None and a[0] in liquid and a[1] is not None) if liquid is not None else None,
+            "large_all": len(big_all),
             "listed": len(listed),
             "listed_all": len(listed_all),
             "listed_non_stock": len(listed_all) - len(listed),
             "with_market_cap": sum(1 for a in listed if a[1] is not None),
             "large": len(big),
-            "bars_60": sum(1 for a in listed if counts.get(a[0], 0) >= 60),
+            "bars_60": sum(1 for a in listed if a[0] not in young and counts.get(a[0], 0) >= 60),  # of listed − young
             "bars_200": sum(1 for a in listed if counts.get(a[0], 0) >= 200),
             "bars_240": sum(1 for a in listed if counts.get(a[0], 0) >= 240),
             "large_with_sector": sum(1 for a in big if a[2] not in (None, "", "Unknown")),
