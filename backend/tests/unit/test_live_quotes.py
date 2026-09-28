@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 from marketlens.application import live_quotes as lq
@@ -298,7 +299,6 @@ def test_closed_market_does_not_refetch_a_final_close():
 def test_idle_snapshot_worker_sleeps_instead_of_spinning():
     """Perf review 2026-09-29: with nothing to fetch the worker woke itself ~450k times in 2 s (one CPU core) and
     made a 0.13 s portfolio request take 38 s. It must sleep — and still react at once to a real change."""
-    import resource
 
     calls: list[str] = []
 
@@ -308,13 +308,13 @@ def test_idle_snapshot_worker_sleeps_instead_of_spinning():
 
     h = QuoteHub(source="finnhub", max_symbols=5, coverage_ko="", now=lambda: REG, snapshot=lambda t: (calls.append(t), Q(t))[1],
                  snapshot_gap=0.0)
-    cpu0 = resource.getrusage(resource.RUSAGE_SELF).ru_utime
+    cpu0 = time.process_time()  # this process, every thread (portable: no 'resource' on Windows)
     h.start()
     try:
         import time as _t
         _t.sleep(2.0)
         assert h.stats.snapshot_loops <= 3, h.stats.snapshot_loops  # empty: essentially asleep
-        assert resource.getrusage(resource.RUSAGE_SELF).ru_utime - cpu0 < 0.5
+        assert time.process_time() - cpu0 < 0.5
         h.view(["AAPL"])  # a real change wakes it at once
         deadline = _t.monotonic() + 2
         while not calls and _t.monotonic() < deadline:

@@ -450,13 +450,25 @@ def _view_bars(s: MarketLensService, tickers: list[str], start: date, end: date,
     stored and lists the names still loading (owner report 2026-09-28: the portfolio waited on the price provider)."""
     if s.store is None:  # MOCK: generated in memory, nothing to wait for
         return {t: s.data.bars(t, start, end).value or [] for t in dict.fromkeys(tickers)}, []
-    keys = {t: f"bars:{t}:{start}:{end}" for t in dict.fromkeys(tickers)}
-    for t, k in keys.items():
-        s.refresher.get(k, lambda t=t: s.data.bars(t, start, end).value or [], max_age=600.0, retry_after=120.0)
-    deadline = time.monotonic() + wait
     out: dict[str, list[Any]] = {}
     pending: list[str] = []
-    for t, k in keys.items():
+    need: dict[str, str] = {}
+    for t in dict.fromkeys(tickers):
+        k = f"bars:{t}:{start}:{end}"
+        v = s.refresher.peek(k)
+        if v.ready:
+            out[t] = v.value
+            continue
+        stored = s.store.bars(t, start, end)
+        if stored and (end - stored[-1].day).days <= 5:
+            out[t] = stored  # the valuation day is stored: shown at once; an earlier gap fills in the background
+            s.refresher.get(k, lambda t=t: s.data.bars(t, start, end).value or [], max_age=600.0, retry_after=120.0)
+            continue
+        need[t] = k
+    for t, k in need.items():  # nothing current stored: this request starts the fetch and waits briefly for it
+        s.refresher.get(k, lambda t=t: s.data.bars(t, start, end).value or [], max_age=600.0, retry_after=120.0)
+    deadline = time.monotonic() + wait
+    for t, k in need.items():
         v = s.refresher.wait(k, max(0.0, deadline - time.monotonic()))
         if v.ready:
             out[t] = v.value

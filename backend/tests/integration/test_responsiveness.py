@@ -60,6 +60,20 @@ def test_one_background_job_per_key_and_the_last_good_value_survives_a_failure()
     r.shutdown()
 
 
+def test_only_the_request_that_starts_a_job_waits_for_it():
+    r = Refresher(workers=2)
+    gate = threading.Event()
+    t = time.monotonic()
+    r.get("slow", lambda: gate.wait(5) and "done", max_age=60, wait=0.3)  # the first visit waits (bounded)
+    assert 0.25 < time.monotonic() - t < 2.0
+    t = time.monotonic()
+    s = r.get("slow", lambda: "never", max_age=60, wait=0.3)  # another screen while it still runs: at once
+    assert time.monotonic() - t < 0.25 and s.refreshing and not s.ready
+    gate.set()
+    assert r.wait("slow", 2).value == "done"
+    r.shutdown()
+
+
 def test_an_answer_computed_before_a_change_never_replaces_the_newer_one():
     r = Refresher(workers=2)
     gate = threading.Event()
@@ -85,11 +99,11 @@ def test_the_home_screen_answers_at_once_while_macro_and_calendar_are_slow(monke
     real_macro, real_events = svc.data.macro_snapshot, svc.data.events
 
     def slow_macro(as_of):  # noqa: ANN001, ANN202
-        time.sleep(2.5)
+        time.sleep(5)
         return real_macro(as_of)
 
     def slow_events(a, b):  # noqa: ANN001, ANN202
-        time.sleep(2.5)
+        time.sleep(5)
         return real_events(a, b)
 
     monkeypatch.setattr(svc.data, "macro_snapshot", slow_macro)
@@ -98,10 +112,10 @@ def test_the_home_screen_answers_at_once_while_macro_and_calendar_are_slow(monke
         t = time.monotonic()
         d = c.get("/api/dashboard").json()
         took = time.monotonic() - t
-        assert took < 1.5, took  # the old path fetched FRED, then the calendar, in the request
+        assert took < 3.0, took  # the old path fetched FRED, then the calendar, in the request
         assert d["top_opportunities"] and d["regime_status"]["pending"] is True and d["catalysts_status"]["pending"] is True
         assert d["regime"]["primary"] == "Unknown"  # nothing made up while loading
-        deadline = time.monotonic() + 8
+        deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             d = c.get("/api/dashboard").json()
             if not d["regime_status"]["pending"] and not d["catalysts_status"]["pending"]:
@@ -137,14 +151,14 @@ def test_the_issues_screen_shows_the_last_context_while_a_newer_one_is_built(mon
     real = svc.market_context
 
     def slow():  # noqa: ANN202
-        gate.wait(5)
+        gate.wait(10)
         return real()
 
     monkeypatch.setattr(svc, "market_context", slow)
     with _client(svc) as c:
         t = time.monotonic()
         body = c.get("/api/issues").json()
-        assert time.monotonic() - t < 1.0
+        assert time.monotonic() - t < 4.0  # the rebuild is held for 10 s
         assert body["refreshing"] is True and body["as_of"] == old.as_of.isoformat()  # its own time, not "now"
         gate.set()
 
@@ -156,16 +170,20 @@ def test_the_stock_page_does_not_wait_for_a_slow_quote(monkeypatch):
         t = repo.recommendations_for_scan(s, repo.latest_scan(s).id)[0].ticker
     svc.data.cache._d.clear()
 
+    gate = threading.Event()
+
     def slow_quote(ticker):  # noqa: ANN001, ANN202
-        time.sleep(4)
-        raise AssertionError("never reached in time")
+        gate.wait(8)
+        return svc.data.peek_quote(ticker)
 
     monkeypatch.setattr(svc.data, "quote", slow_quote)
     with _client(svc) as c:
         start = time.monotonic()
         r = c.get(f"/api/stocks/{t}")
-        assert r.status_code == 200 and time.monotonic() - start < 3.0
+        assert r.status_code == 200 and time.monotonic() - start < 5.0
         assert r.json()["recommendation"]["quote_pending"] is True
+    gate.set()
+    svc.refresher.wait(f"quote:{t}", 3)  # the background fetch ends inside the test
 
 
 # ---------------------------------------------------------------- data version

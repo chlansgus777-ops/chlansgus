@@ -57,17 +57,18 @@ class Refresher:
 
     def get(self, key: str, fn: Callable[[], Any], max_age: float, wait: float = 0.0, retry_after: float = 60.0) -> Snapshot:
         """The value for ``key``; starts one background ``fn()`` when it is missing or older than ``max_age``.
-        ``wait`` > 0 waits that long for a running job only when there is no value yet (first visit)."""
+        ``wait`` > 0: the request that STARTS the job for a key without any value waits that long for it (a first
+        visit); every other request while it runs answers at once with "loading" — never a queue of waiting screens."""
+        started = None
         with self._lock:
             e = self._entries.setdefault(key, _Entry())
             now = self._clock()
             fresh = e.at is not None and now - e.at <= max_age
             backing_off = e.failed_at is not None and now - e.failed_at < retry_after and (e.at is None or e.failed_at > e.at)
-            fut = self._inflight.get(key)
-            if not fresh and fut is None and not backing_off and not self._closed:
-                fut = self._submit(key, fn)
-        if fut is not None and e.at is None and wait > 0:
-            self._await(fut, wait)
+            if not fresh and key not in self._inflight and not backing_off and not self._closed:
+                started = self._submit(key, fn)
+        if started is not None and e.at is None and wait > 0:
+            self._await(started, wait)
         return self.peek(key)
 
     def wait(self, key: str, timeout: float) -> Snapshot:
