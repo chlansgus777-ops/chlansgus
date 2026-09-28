@@ -323,6 +323,13 @@ function StockDetail({ ticker }: { ticker: string }) {
               <span className="k"><Term k="rr">손익비(R/R)</Term></span><span>{e ? <>{num(e.rr_at_current)} <span className="caption">현재가 기준 · 이상적 진입가 기준 {num(e.rr_at_ideal)}</span></> : NO_DATA}</span>
             </div>
             {!e && <div className="explain" style={{ marginTop: 10 }}>현재가·가격 이력이 부족하거나, 손절가 &lt; 현재가 &lt; 목표가 순서를 만족하는 계획을 만들 수 없어 가격 계획을 제시하지 않습니다.</div>}
+            {brief && (brief.valuation.plan.length > 0 || brief.valuation.assumptions.length > 0) && (
+              <div className="stack" style={{ gap: 8, marginTop: 14 }}>
+                <div className="t-kicker">이 수준을 정한 방법</div>
+                {brief.valuation.plan.map((it, i) => <div key={i} className="formula">{it.text}{it.why ? <div className="caption">{it.why}</div> : null}</div>)}
+                {brief.valuation.assumptions.map((t, i) => <div key={i} className="assume"><span className="kind k-ASSUME">가정</span><span>{t}</span></div>)}
+              </div>
+            )}
             <PositionPlanView p={d.data.position_plan} shown={quantityShown(rec.current_status, stored.actionable_now)} why={rec.current_status_reason} />
           </div>
           <div>
@@ -330,8 +337,6 @@ function StockDetail({ ticker }: { ticker: string }) {
             {brief ? (
               <div className="stack">
                 {brief.valuation.items.length ? <div className="reading">{brief.valuation.items.map((it, i) => <Stmt key={i} it={it} index={evIndex} />)}</div> : <div className="caption">밸류에이션 배수를 계산할 자료가 없습니다.</div>}
-                {brief.valuation.plan.length > 0 && <div className="stack" style={{ gap: 8 }}>{brief.valuation.plan.map((it, i) => <div key={i} className="formula">{it.text}{it.why ? <div className="caption">{it.why}</div> : null}</div>)}</div>}
-                {brief.valuation.assumptions.length > 0 && <div className="stack" style={{ gap: 6 }}>{brief.valuation.assumptions.map((t, i) => <div key={i} className="assume"><span className="kind k-ASSUME">가정</span><span>{t}</span></div>)}</div>}
                 {brief.valuation.limits.map((t, i) => <Notice key={i} tone="warn">{t}</Notice>)}
               </div>
             ) : <div className="caption">{e?.rationale.join(" · ") ?? "가격 계획 없음"}</div>}
