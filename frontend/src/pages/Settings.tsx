@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { QuoteFeedStatus } from "../components/LivePrice";
 import { Card, Err, Loading, Tabs } from "../components/ui";
-import { useQuoteStatus } from "../quotes";
+import { clientLatency, useQuoteStatus } from "../quotes";
 import Health from "./Health";
 import { useApi } from "../components/useApi";
 
@@ -188,6 +188,7 @@ function Quotes() {
           {s.over_limit.length > 0 && <><span className="k">한도 초과(스트림 제외)</span><span className="warn">{s.over_limit.join(", ")}</span></>}
           <span className="k">연결</span><span>{s.streaming ? (s.connected ? `연결됨${s.connected_since ? ` · ${new Date(s.connected_since).toLocaleTimeString("ko-KR")}부터` : ""}` : "끊김 · 재연결 중") : "스트림 없음(스냅샷만)"} · 앱 연결 {link === "open" ? "정상" : link === "retrying" ? "재연결 중" : "연결 중"}</span>
           <span className="k">수신</span><span>체결 {s.trades.toLocaleString("ko-KR")}건 · 메시지 {s.messages.toLocaleString("ko-KR")} · 순서 뒤바뀐 체결 {s.out_of_order} · 재연결 {Math.max(0, s.connects - 1)}회 · REST 스냅샷 {s.snapshot_calls}회</span>
+          <span className="k">화면 반영 지연</span><span>{(() => { const xs = [...clientLatency].sort((a, b) => a - b); return xs.length ? `백엔드 수신→이 화면 중앙값 ${Math.round(xs[Math.floor(xs.length / 2)]!)}ms · p95 ${Math.round(xs[Math.min(xs.length - 1, Math.floor(xs.length * 0.95))]!)}ms (${xs.length}건, 이 창에서 측정)` : "아직 측정값 없음"; })()}</span>
           <span className="k">제공자 지연</span><span>{s.provider_latency_ms.n ? `체결→수신 중앙값 ${s.provider_latency_ms.p50}ms · p95 ${s.provider_latency_ms.p95}ms · 최대 ${s.provider_latency_ms.max}ms (${s.provider_latency_ms.n}건)` : "측정값 없음"}</span>
           {s.last_error && <><span className="k">최근 오류</span><span className="muted">{s.last_error}</span></>}
         </div>
