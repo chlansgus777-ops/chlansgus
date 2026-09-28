@@ -565,8 +565,12 @@ class MarketStore:
             fund = {t for (t,) in s.execute(select(FundamentalVintageRow.ticker).distinct())}
             days = 0  # market-wide sessions only (grouped_days), counted below outside this session
             est_first = s.execute(select(func.min(EstimateSnapshotRow.observed_on)).where(EstimateSnapshotRow.provider == "finnhub")).scalar()
-            man = dict(s.execute(select(IngestionManifestRow.ticker, IngestionManifestRow.status)
-                                 .where(IngestionManifestRow.mode == self.mode, IngestionManifestRow.dataset == "fundamentals")).all())
+            man_rows = s.execute(select(IngestionManifestRow.ticker, IngestionManifestRow.status, IngestionManifestRow.error)
+                                 .where(IngestionManifestRow.mode == self.mode, IngestionManifestRow.dataset == "fundamentals")).all()
+            man = {t: st for t, st, _e in man_rows}
+            # the filings themselves show a foreign private issuer (annual 20-F/40-F us-gaap statements, no 10-Q): excluded
+            # like a profile-confirmed one, even before its profile is fetched
+            filed_foreign = {t for t, st, e in man_rows if st == "NOT_SUPPORTED" and e and "20-F/40-F" in e}
         days = sum(1 for d in self.grouped_days() if today - timedelta(days=400) <= d <= today)
         listed = [a for a in active if a[3] != "OTC"]
         big = [a for a in listed if a[1] is not None and a[1] >= min_market_cap]
@@ -581,9 +585,9 @@ class MarketStore:
             "large_with_fundamentals": sum(1 for a in big if a[0] in fund),
             # only CONFIRMED foreign issuers (SEC profile: 20-F/40-F filer) without quarterly us-gaap facts are left out
             # of the coverage denominator; a domestic filer the parser cannot read is missing coverage
-            "large_fund_not_supported": sum(1 for a in big if a[0] not in fund and man.get(a[0]) == "NOT_SUPPORTED" and (a[4] or (a[5] or "US") != "US")),
+            "large_fund_not_supported": sum(1 for a in big if a[0] not in fund and man.get(a[0]) == "NOT_SUPPORTED" and (a[4] or (a[5] or "US") != "US" or a[0] in filed_foreign)),
             "large_fund_failed": sum(1 for a in big if a[0] not in fund and man.get(a[0]) in ("FAILED", "RATE_LIMITED")),
-            "large_fund_parse_gap": sum(1 for a in big if a[0] not in fund and (man.get(a[0]) == "PARSE_GAP" or (man.get(a[0]) == "NOT_SUPPORTED" and not (a[4] or (a[5] or "US") != "US")))),
+            "large_fund_parse_gap": sum(1 for a in big if a[0] not in fund and (man.get(a[0]) == "PARSE_GAP" or (man.get(a[0]) == "NOT_SUPPORTED" and not (a[4] or (a[5] or "US") != "US" or a[0] in filed_foreign)))),
             "market_days": int(days),
             "estimate_history_days": (today - est_first).days if est_first else 0,
         }

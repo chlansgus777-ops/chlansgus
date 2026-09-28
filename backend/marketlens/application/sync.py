@@ -169,12 +169,13 @@ class MarketSync:
         if sec is not None:
             try:
                 by_cik = sec.shares_outstanding_all(today)
-                # EVERY listed ticker of the company gets its shares (owner report: market caps 57 % — only the first
-                # ticker of a CIK got them, so a common stock listed after its own warrant or unit had none)
-                tickers_of: dict[int, list[str]] = {}
+                # the company's shares go to its FIRST ticker in the SEC file (the primary equity): handing them to every
+                # ticker of the CIK gave a bank's ETNs, notes and preferreds the bank's market cap (diagnosis
+                # 2026-09-28: BMO's FNGU/BULZ, Huntington's HBANL…); other share classes are left without one
+                ticker_by_cik: dict[int, str] = {}
                 for t, c in getattr(sec, "_cik", {}).items():
-                    tickers_of.setdefault(c, []).append(t)
-                rep.shares_updated = self.store.set_shares({t: v for c, v in by_cik.items() for t in tickers_of.get(c, [])})
+                    ticker_by_cik.setdefault(c, t)
+                rep.shares_updated = self.store.set_shares({ticker_by_cik[c]: v for c, v in by_cik.items() if c in ticker_by_cik})
             except ProviderError as e:
                 rep.errors.append(f"shares: {e}")
         rep.market_caps = self.store.refresh_market_caps()

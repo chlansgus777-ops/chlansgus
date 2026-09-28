@@ -49,6 +49,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="diagnose.json")
     ap.add_argument("--max-large", type=int, default=3000)
+    ap.add_argument("--caps-only", action="store_true", help="measure only the market-cap sources (no per-company filings)")
     a = ap.parse_args()
     sec = SecEdgarProvider(os.environ.get("SEC_USER_AGENT"), rate_per_s=4.0)
     poly = PolygonProvider(os.environ.get("POLYGON_API_KEY"))
@@ -88,6 +89,41 @@ def main() -> None:
         for r in rows if r["cap_after_fix"] is None))
     out["dot_fix_examples"] = [r["ticker"] for r in rows if r["bars_dot"]][:40]
     out["shares_to_wrong_ticker_examples"] = [r["ticker"] for r in rows if r["frame_shares"] and not r["gets_shares_now"] and r["kind"] in ("common", "share_class")][:40]
+    # ---------------------------------------------------------------- market-cap sources (primary ticker = first of CIK)
+    def frames(concept: str, quarters: int) -> dict[int, float]:
+        got: dict[int, tuple[float, str]] = {}
+        y, q = day.year, (day.month - 1) // 3 + 1
+        for _ in range(quarters):
+            q -= 1
+            if q == 0:
+                y, q = y - 1, 4
+            try:
+                data = sec._data.get_json(f"/api/xbrl/frames/{concept}/shares/CY{y}Q{q}I.json")
+            except ProviderError:
+                continue
+            for r in data.get("data", []):
+                try:
+                    c, v, e = int(r["cik"]), float(r["val"]), str(r["end"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if c not in got or e > got[c][1]:
+                    got[c] = (v, e)
+        return {c: v for c, (v, _e) in got.items()}
+
+    variants = {"dei_4q": frames("dei/EntityCommonStockSharesOutstanding", 4), "dei_8q": frames("dei/EntityCommonStockSharesOutstanding", 8),
+                "usgaap_cso_4q": frames("us-gaap/CommonStockSharesOutstanding", 4)}
+    variants["dei_8q+usgaap_cso_4q"] = {**variants["usgaap_cso_4q"], **variants["dei_8q"]}
+    commons = [r for r in rows if r["kind"] in ("common", "share_class") and first_of_cik.get(r["cik"]) == r["ticker"] and (r["bars_exact"] or r["bars_dot"])]
+    out["primary_commons_with_bars"] = len(commons)
+    out["cap_coverage_primary_commons_with_bars"] = {k: round(sum(1 for r in commons if r["cik"] in v) / max(1, len(commons)), 4) for k, v in variants.items()}
+    all_cmn = [r for r in rows if r["kind"] in ("common", "share_class")]
+    out["commons_all"] = len(all_cmn)
+    out["bars_coverage_commons"] = round(sum(1 for r in all_cmn if r["bars_exact"] or r["bars_dot"]) / max(1, len(all_cmn)), 4)
+    out["cap_coverage_all_listed_by_variant"] = {k: round(sum(1 for r in rows if first_of_cik.get(r["cik"]) == r["ticker"] and (r["bars_exact"] or r["bars_dot"]) and r["cik"] in v) / n, 4)
+                                                 for k, v in variants.items()}
+    if a.caps_only:
+        print(json.dumps({k: v for k, v in out.items() if "coverage" in k or k in ("listed", "by_kind", "primary_commons_with_bars", "commons_all")}, indent=1))
+        return
     # ---------------------------------------------------------------- large caps: the SEC parser
     large = sorted((r for r in rows if (r["cap_after_fix"] or 0) >= 1e9), key=lambda r: -r["cap_after_fix"])[: a.max_large]
     fails = []

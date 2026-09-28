@@ -78,7 +78,7 @@ class SecEdgarProvider:
     mode = DataMode.LIVE
 
     # bump when the XBRL parser reads more: the sync then retries companies it could not read before at once
-    PARSER_VERSION = "sec-parser-2"
+    PARSER_VERSION = "sec-parser-2"  # 2: annual-only 20-F/40-F us-gaap filers are foreign, not a parse gap
 
     def __init__(self, user_agent: str | None, transport: Any = None, rate_per_s: float = 8.0) -> None:
         self.name = "sec-edgar"
@@ -369,7 +369,9 @@ def parse_submissions_profile(sub: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         sic = None
     sector, industry = classify_sic(sic)
-    forms = set(sub.get("filings", {}).get("recent", {}).get("form", [])[:200])
+    # every recent filing, not the newest 200: a bank files hundreds of note prospectuses (424B2) between two annual
+    # reports, which pushed RY's / BNS's 40-F out of the window (diagnosis 2026-09-28) — they read as domestic
+    forms = set(sub.get("filings", {}).get("recent", {}).get("form", []))
     biz = (sub.get("addresses") or {}).get("business") or {}
     country_desc = biz.get("stateOrCountryDescription") or ""
     foreign = bool(forms & FOREIGN_FORMS)
@@ -789,5 +791,9 @@ def parse_company_facts(facts: dict[str, Any], ticker: str) -> list[QuarterlyFin
         out.append(QuarterlyFinancials(period_end=end, filed_date=filed, fiscal_label=end.isoformat(), source="sec-edgar", field_filed=ff, revisions=rev,
                                        extras=dict(bank.get(end, {})), **fields))
     if not out:
+        annual_forms = {str(it.get("form")) for c in gaap.values() for units in (c.get("units") or {}).values() for it in units
+                        if str(it.get("form", "")).split("/")[0] in ("20-F", "40-F")}
+        if annual_forms:  # a foreign private issuer filing annual us-gaap statements: no quarterly report exists to read
+            raise NotSupported(f"{ticker}: 20-F/40-F 외국 발행사 — 연간 us-gaap만 있고 분기 10-Q/10-K 없음")
         raise NotSupported(f"{ticker}: 분기 10-Q/10-K 데이터 없음")
     return out[-16:]

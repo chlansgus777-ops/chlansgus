@@ -53,7 +53,7 @@ jobs:
         env:
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-        run: python scripts/diagnose_readiness.py --out diagnose.json
+        run: python scripts/diagnose_readiness.py --out diagnose.json ${{ inputs.run_args }}
       - uses: actions/upload-artifact@v4
         if: always() && inputs.task == 'diagnose'
         with:
