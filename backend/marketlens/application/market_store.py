@@ -630,6 +630,16 @@ class MarketStore:
                 row.next_attempt_at = now + wait
             s.commit()
 
+    def clear_backoff(self, dataset: str, statuses: tuple[str, ...]) -> int:
+        """Retry these failures now (the status and error stay until the next attempt replaces them)."""
+        from sqlalchemy import update
+
+        with self.sf() as s:
+            n = s.execute(update(IngestionManifestRow).where(IngestionManifestRow.mode == self.mode, IngestionManifestRow.dataset == dataset,
+                                                             IngestionManifestRow.status.in_(statuses)).values(next_attempt_at=None)).rowcount
+            s.commit()
+        return int(n or 0)
+
     def ingestion_stats(self, dataset: str) -> dict[str, int]:
         with self.sf() as s:
             return {st: n for st, n in s.execute(select(IngestionManifestRow.status, func.count()).where(IngestionManifestRow.mode == self.mode, IngestionManifestRow.dataset == dataset)

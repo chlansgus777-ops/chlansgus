@@ -169,10 +169,12 @@ class MarketSync:
         if sec is not None:
             try:
                 by_cik = sec.shares_outstanding_all(today)
-                ticker_by_cik: dict[int, str] = {}
+                # EVERY listed ticker of the company gets its shares (owner report: market caps 57 % — only the first
+                # ticker of a CIK got them, so a common stock listed after its own warrant or unit had none)
+                tickers_of: dict[int, list[str]] = {}
                 for t, c in getattr(sec, "_cik", {}).items():
-                    ticker_by_cik.setdefault(c, t)
-                rep.shares_updated = self.store.set_shares({ticker_by_cik[c]: v for c, v in by_cik.items() if c in ticker_by_cik})
+                    tickers_of.setdefault(c, []).append(t)
+                rep.shares_updated = self.store.set_shares({t: v for c, v in by_cik.items() for t in tickers_of.get(c, [])})
             except ProviderError as e:
                 rep.errors.append(f"shares: {e}")
         rep.market_caps = self.store.refresh_market_caps()
@@ -216,6 +218,12 @@ class MarketSync:
         from marketlens.providers.contracts import NotSupported, RateLimited
 
         bars = self.store.last_bars_all(today - timedelta(days=40), today)
+        # a new parser reads tags the old one could not: companies waiting out a PARSE_GAP / NOT_SUPPORTED back-off are
+        # asked again at once (owner report: "retry at 2026-10-04" although only an app update could help them)
+        version = getattr(fund, "PARSER_VERSION", None)
+        if version and self.store.get_setting("sec_parser_version") != version:
+            self.store.clear_backoff(FUNDAMENTALS, ("PARSE_GAP", "NOT_SUPPORTED"))
+            self.store.set_setting("sec_parser_version", version)
         manifest = self.store.ingestion_all(FUNDAMENTALS)
         never: list[tuple[float, str]] = []
         stale: list[tuple[Any, str]] = []

@@ -77,6 +77,9 @@ class SecEdgarProvider:
 
     mode = DataMode.LIVE
 
+    # bump when the XBRL parser reads more: the sync then retries companies it could not read before at once
+    PARSER_VERSION = "sec-parser-2"
+
     def __init__(self, user_agent: str | None, transport: Any = None, rate_per_s: float = 8.0) -> None:
         self.name = "sec-edgar"
         self.configured = bool(user_agent)

@@ -745,8 +745,10 @@ class MarketLensService:
         reasons = [r for r in list(rd["scanner_reasons"]) + list(rd["readiness_reasons"]) if r not in missing and not r.startswith(generic)]
         state["reasons"] = list(dict.fromkeys(reasons))[:8]
         now = self.now()
+        # only a failure that waiting can fix has a retry time; a tag the parser cannot read (PARSE_GAP) or a filer
+        # without quarterly us-gaap facts is not fixed by pressing again later (owner report: "retry at 10-04")
         waits = [m.next_attempt_at for m in self.store.ingestion_all(FUNDAMENTALS).values()
-                 if m.status != "OK" and m.next_attempt_at is not None and m.next_attempt_at > now] if self.store is not None else []
+                 if m.status in ("FAILED", "RATE_LIMITED") and m.next_attempt_at is not None and m.next_attempt_at > now] if self.store is not None else []
         if waits:
             state["retry_at"] = min(waits).isoformat()
         if missing and state["status"] in ("DONE", "PAUSED", "FAILED"):
