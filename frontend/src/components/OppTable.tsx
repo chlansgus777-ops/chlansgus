@@ -21,7 +21,7 @@ const COLS: [Key, string, string, boolean][] = [
 
 /** The latest quote when the app has one for this name; otherwise the analysis-time price, labelled as such — never
  * a bare dash above it. */
-function PriceCell({ r }: { r: OppRow }) {
+export function PriceCell({ r }: { r: OppRow }) {
   const { row } = useQuote(r.ticker);
   const basis = <span className="caption" style={{ whiteSpace: "nowrap" }} title={`분석 기준가 · 출처 ${r.price_source ?? "N/A"} · ${stamp(r.price_timestamp)}`}>{row?.price != null ? <>분석 {price(r.price)}</> : "분석 시점"}{r.price_quality !== "FRESH" ? <> <Quality q={r.price_quality} /></> : null}</span>;
   return (

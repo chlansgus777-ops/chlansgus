@@ -7,7 +7,7 @@ import { NotReady, ReadinessBanner, SyncControl, type ReadinessInfo } from "../c
 import { type ScanStatus, usePageTime, useStatus } from "../components/status";
 import { useApi } from "../components/useApi";
 import { LivePrice } from "../components/LivePrice";
-import { useViewQuotes } from "../quotes";
+import { useQuote, useViewQuotes } from "../quotes";
 import { ago, day, num, pct, price, stampEt } from "../format";
 import { ACTION_PLAIN, BULLISH, HEALTH_KO, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
 import type { OppRow, ScanInfo } from "../types";
@@ -61,9 +61,15 @@ export function riskLine(r: OppRow): string {
   return k.text ?? "자료 부족";
 }
 
+/** The latest quote once the app has one; until then the analysis price (labelled below as 분석 가격). */
+function CardPrice({ r }: { r: OppRow }) {
+  const { row } = useQuote(r.ticker);
+  return row?.price != null ? <LivePrice ticker={r.ticker} size="sm" showState={false} /> : <span style={{ whiteSpace: "nowrap" }}>{price(r.price)}</span>;
+}
+
 function CandidateCard({ r, lead }: { r: OppRow; lead?: boolean }) {
   const plain = ACTION_PLAIN[r.action] ?? "";
-  const zone = r.ideal_entry != null && r.max_buy != null ? `${price(r.ideal_entry)} ~ ${price(r.max_buy)}` : "자료 부족";
+  const zone = r.ideal_entry != null && r.max_buy != null ? `${price(r.ideal_entry)}–${num(r.max_buy, 2)}` : "자료 부족";  // one line in the tile
   const toMax = r.price != null && r.max_buy != null ? r.max_buy / r.price - 1 : null;
   return (
     <Link to={`/stocks/${r.ticker}`} className={`cand${lead ? " lead" : ""}`} style={{ ["--rail" as string]: `var(--${actionTone(r.action)})` }} data-testid="candidate-card" aria-label={`${r.ticker} 상세 보기`}>
@@ -74,8 +80,8 @@ function CandidateCard({ r, lead }: { r: OppRow; lead?: boolean }) {
       <div className="why">{plain}</div>
       {r.key_reason ? <div className="why"><b>핵심 이유 · </b>{r.key_reason}</div> : null}
       <div className="facts">
-        <div title="최신 시세(앱 공용 스트림) — 아래 ‘분석 가격’과 다를 수 있습니다"><div className="t">현재가</div><div className="v"><LivePrice ticker={r.ticker} size="sm" showState={false} /></div></div>
-        <div title="이상적 진입가 ~ 최대 매수가 (백엔드 가격 계획)"><div className="t">검토 가격대</div><div className="v" style={{ fontSize: 13 }}>{zone}</div></div>
+        <div title="최신 시세(앱 공용 스트림) — 아래 ‘분석 가격’과 다를 수 있습니다"><div className="t">현재가</div><div className="v"><CardPrice r={r} /></div></div>
+        <div title="이상적 진입가 ~ 최대 매수가 (백엔드 가격 계획)"><div className="t">검토 가격대</div><div className="v" style={{ fontSize: 13, whiteSpace: "nowrap" }}>{zone}</div></div>
         <div title="종가가 이 가격 아래로 마감하면 매수 근거가 깨졌다고 봅니다"><div className="t">손절 기준</div><div className="v">{r.stop == null ? "자료 부족" : price(r.stop)}</div></div>
       </div>
       <div className="when">분석 가격 {price(r.price)} · {stampEt(r.price_timestamp)}{r.session ? ` · ${ko(SESSION_KO, r.session)}` : ""} · 손절까지 {r.downside == null ? "자료 부족" : pct(r.downside)}{toMax != null ? ` · 최대 매수가까지 ${pct(toMax)}` : ""}</div>

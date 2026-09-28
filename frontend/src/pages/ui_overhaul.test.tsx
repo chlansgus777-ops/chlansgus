@@ -84,7 +84,8 @@ describe("first screen: candidates", () => {
     expect(cards[0]!.textContent).toContain("매출 성장률 30% (업종 기준 우수)");
     expect(cards[0]!.textContent).toContain("애널리스트 커버리지 적음");
     expect(cards[0]!.textContent).toContain("상승 확률이 아닙니다");
-    expect(cards[0]!.textContent).toContain("$98.00 ~ $101.00");
+    expect(cards[0]!.textContent).toContain("$98.00–101.00");  // one-line range format (quality pass 2026-09-28)
+    expect(cards[0]!.textContent).toContain("현재가$100.00");  // no live quote yet: the analysis price, never a dash
   });
 
   it("no bullish candidate: a no-candidates state, not the top scores dressed up as buys", async () => {

@@ -162,9 +162,7 @@ export function StatusBar() {
       ) : p?.analysedAt ? null : scanState ? (
         <Item icon="✓" testId="sb-scan"><span className="k">마지막 스캔</span><b>{ago(scanState.started_at, st.nowMs)}</b></Item>
       ) : st.scan.data ? <Item icon="○" testId="sb-scan"><span className="k">스캔 기록 없음</span></Item> : null}
-      {sys && (sys.mode === "MOCK" ? (
-        <Item icon="●" testId="sb-providers"><span className="k">공급자</span><b>모의</b></Item>
-      ) : down.length ? (
+      {sys && sys.mode !== "MOCK" && (down.length ? (
         <Item tone="danger" icon="⛔" to="/settings?tab=status" testId="sb-providers" title={down.map((d) => `${d.kind}: ${d.last_error ?? ""}`).join("\n")}><span className="k">공급자</span><b>{down.length}곳 중단</b><span className="k">({down.map((d) => d.kind).join(", ")})</span></Item>
       ) : shaky.length ? (
         <Item tone="warn" icon="!" to="/settings?tab=status" testId="sb-providers"><span className="k">공급자</span><b>{shaky.length}곳 불안정</b></Item>
@@ -173,7 +171,7 @@ export function StatusBar() {
       ) : <Item icon="○" to="/settings?tab=status" testId="sb-providers"><span className="k">공급자</span><b>호출 전</b></Item>)}
       <span className="grow" />
       <span className="tools">
-        <QuoteFeedStatus />
+        {sys?.mode !== "MOCK" && <QuoteFeedStatus />}  {/* in MOCK the banner already says every price is simulated */}
         {rr &&<Link to="/settings?tab=data" className={`readiness-link ${rr.tone}`} title={rr.help} data-testid="readiness-badge">추천 준비도 · {rr.label}</Link>}
       </span>
     </div>
