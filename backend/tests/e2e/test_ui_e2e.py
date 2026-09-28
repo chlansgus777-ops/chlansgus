@@ -338,3 +338,27 @@ def test_live_quote_reaches_every_screen_within_a_second(page, server):
     assert "$114.00" in page.get_by_test_id(f"live-{t}").first.inner_text() and "재연결" in page.get_by_test_id(f"live-{t}").first.inner_text()
     hub.streaming = False
     assert page.errors == []  # type: ignore[attr-defined]
+
+
+def test_record_a_trade_straight_from_the_stock_page(page, server):
+    """Usability: 거래 기록하기 on a stock opens the ledger with the ticker and today filled in and the quantity focused."""
+    t = _rows(page, server)[2]["ticker"]
+    _open_stock(page, server, t)
+    page.get_by_role("link", name="거래 기록하기").click()
+    page.get_by_role("heading", name="거래 기록").wait_for()
+    assert page.get_by_label("거래 종목 코드").input_value() == t
+    assert page.get_by_label("체결일").input_value() != ""
+    page.wait_for_function("document.activeElement && document.activeElement.getAttribute('aria-label') === '거래 수량'")
+
+
+def test_quick_search_opens_a_stock_from_any_screen(page, server):
+    page.goto(f"{server}/#/portfolio")
+    page.get_by_role("heading", name="내 포트폴리오").wait_for()
+    t = _rows(page, server)[0]["ticker"]
+    page.evaluate("document.activeElement && document.activeElement.blur()")  # "/" inside a text box types a slash, by design
+    page.keyboard.press("/")
+    page.keyboard.type(t.lower())
+    page.get_by_role("option", name=t).first.wait_for(timeout=5000)
+    page.keyboard.press("Enter")
+    page.get_by_role("heading", name="가격 계획", exact=True).wait_for()
+    assert t in page.locator("h1").first.inner_text()

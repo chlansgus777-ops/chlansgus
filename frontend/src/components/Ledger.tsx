@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { api } from "../api";
 import { day, price, shares } from "../format";
 import { Card, Empty, Err, Notice } from "./ui";
@@ -51,9 +51,13 @@ function describe(t: TradeRow): string {
   return `${KIND_KO[t.kind]} ${shares(t.quantity)}주 × ${price(t.price)}${t.fees ? ` (수수료 ${price(t.fees)})` : ""}`;
 }
 
-export function Ledger({ today, onChange }: { today: string; onChange: () => void }) {
+export function Ledger({ today, onChange, prefill }: { today: string; onChange: () => void; prefill?: string | null }) {
   const v = useApi<LedgerView>("/transactions");
-  const [f, setF] = useState<TradeForm>(EMPTY_FORM);
+  // opened from a stock page ("거래 기록하기"): the ticker and today are filled in, the form is in view
+  const [f, setF] = useState<TradeForm>(() => prefill ? { ...EMPTY_FORM, ticker: prefill.toUpperCase(), day: today } : EMPTY_FORM);
+  const formRef = useCallback((el: HTMLFormElement | null) => {
+    if (el && prefill) { el.scrollIntoView({ block: "center" }); el.querySelector<HTMLInputElement>('input[aria-label="거래 수량"]')?.focus(); }
+  }, [prefill]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const run = async (fn: () => Promise<unknown>) => {
@@ -63,7 +67,7 @@ export function Ledger({ today, onChange }: { today: string; onChange: () => voi
   const set = (k: keyof TradeForm) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   return (
     <Card title="거래 기록" explain="거래 기록이 있는 종목은 보유 수량·평단을 거래에서 계산합니다(위의 수동 입력 줄은 쓰지 않음). 주식분할은 저장된 분할 기록이 자동으로 반영되고, 분할 실행일의 체결은 분할 후 기준입니다.">
-      <form className="stack" onSubmit={(e) => {
+      <form className="stack" ref={formRef} onSubmit={(e) => {
         e.preventDefault();
         const r = tradeBody(f, today);
         if (r.error) { setErr(r.error); return; }

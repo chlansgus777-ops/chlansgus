@@ -126,6 +126,7 @@ function StockDetail({ ticker }: { ticker: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [replay, setReplay] = useState<string | null>(null);
   const evIndex = useMemo(() => new Map<string, Evidence>((d.data?.analysis.evidence ?? []).map((e) => [e.evidence_id, e])), [d.data]);
   const live = useLiveStatus(ticker, d.data?.recommendation.id);
   useViewQuotes([ticker]);  // the viewed stock joins the app-wide quote subscription while this page is open
@@ -225,12 +226,12 @@ function StockDetail({ ticker }: { ticker: string }) {
           {/* the latest quote (app-wide store) and the analysis basis are two different prices, shown apart */}
           <Metric title="현재가" testId="tile-price"
                   value={<LivePrice ticker={a.ticker} size="lg" showTime />}
-                  sub={<span className="lp-basis" data-testid="analysis-basis">
-                    분석 기준가 {priceNow !== null ? price(priceNow) : rawQuote !== null ? <>{price(rawQuote / split)} <span className="warn">(오래된 시세 — 판단에 미사용)</span></> : NO_DATA}
-                    {usdkrw && priceNow !== null ? <span title={`원/달러 ${num(usdkrw, 1)} 기준 참고 환산`}> ({krwAux(priceNow, usdkrw)})</span> : null}
-                    {" · "}{stampEt(a.price_timestamp)} · {ko(SESSION_KO, a.session, "세션 정보 없음")} · <Quality q={a.price_quality} />
+                  sub={<span className="lp-basis" data-testid="analysis-basis"
+                             title={`분석에 쓴 가격 · ${stamp(a.price_timestamp)} · ${ko(SESSION_KO, a.session, "세션 정보 없음")} · 데이터 ${a.price_quality}${split !== 1 ? ` · 분할 조정(분석 당시 ${price(a.price)})` : ""}${usdkrw && priceNow !== null ? ` · 원화 참고 ${krwAux(priceNow, usdkrw)}` : ""}`}>
+                    분석 기준가 {priceNow !== null ? price(priceNow) : rawQuote !== null ? <>{price(rawQuote / split)} <span className="warn">(오래된 시세 — 판단에 미사용)</span></> : NO_DATA} · {stampEt(a.price_timestamp)}
+                    {a.price_quality !== "FRESH" ? <> · <Quality q={a.price_quality} /></> : null}
                     {split !== 1 ? <> · 분할 조정(분석 당시 {price(a.price)})</> : null}
-                    {rec.revalidated_price != null && rec.revalidated_price !== priceNow ? <> · 재확인 가격 {price(rec.revalidated_price)}</> : null}
+                    {rec.revalidated_price != null && rec.revalidated_price !== priceNow ? <> · 재확인 {price(rec.revalidated_price)}</> : null}
                   </span>} />
           <Metric title={<Term k="max_buy">최대 매수가</Term>} value={e ? price(e.max_buy) : NO_DATA} testId="tile-maxbuy" tone={zoneTone}
                   sub={<>{zone.text}{distMax !== null && zone.tone !== "neutral" ? ` · 현재가 대비 ${pct(distMax)}` : ""}</>} />
@@ -239,9 +240,10 @@ function StockDetail({ ticker }: { ticker: string }) {
           <Metric title="가장 큰 위험" text value={cautions[0] ?? "분석이 표시한 부정 요인 없음"} tone={cautions.length ? "warn" : undefined} testId="tile-risk" />
         </div>
         <div className="foot">
-          <span style={{ display: "inline-grid", gridTemplateColumns: "auto 150px", gap: 10, alignItems: "center" }}>
+          <span style={{ display: "inline-grid", gridTemplateColumns: "auto 150px auto", gap: 10, alignItems: "center" }} title="막대의 눈금: 소량 매수 기준 72 · 매수 기준 80">
             <span><Term k="score">점수</Term> <b style={{ color: "var(--text)" }}>{num(rec.score, 1)}</b>/100</span>
-            <ScoreMeter score={rec.score} />
+            <ScoreMeter score={rec.score} labels={false} />
+            <span className="caption">매수 기준 80</span>
           </span>
           <span><Term k="confidence">분석 신뢰도</Term> <b style={{ color: "var(--text)" }}>{num(rec.confidence, 0)}</b>/100 · {confidenceLevel(rec.confidence)}</span>
           <span className="conf-note" data-testid="confidence-note">점수·신뢰도는 주가 상승 확률이 아니라 규칙 점수와 데이터 완성도·일치도입니다.</span>
@@ -255,10 +257,7 @@ function StockDetail({ ticker }: { ticker: string }) {
           {watched
             ? <button disabled={!!busy} aria-pressed onClick={() => run("watch", async () => { await api.del(`/watchlist/${a.ticker}`); wl.reload(); refreshQuoteSubscriptions(); setNote("관심 종목에서 뺐습니다."); })}><IStar />관심 종목에서 빼기</button>
             : <button disabled={!!busy} aria-pressed={false} onClick={() => run("watch", async () => { await api.post(`/watchlist/${a.ticker}`); wl.reload(); refreshQuoteSubscriptions(); setNote("관심 종목에 추가했습니다. 종목 → 관심 탭과 홈에서 볼 수 있습니다."); })}><IStar />관심 종목 추가</button>}
-          <button className="ghost" disabled={!!busy} onClick={() => run("replay", async () => {
-            const r = await api.get<{ matches: boolean; replay_score: number; replay_action: string }>(`/recommendations/${rec.id}/replay`);
-            setNote(r.matches ? `당시 분석을 저장된 데이터로 다시 계산해도 같은 결과입니다(점수 ${r.replay_score}, ${r.replay_action}).` : `재계산 결과가 다릅니다: 점수 ${r.replay_score}, ${r.replay_action}`);
-          })}>당시 분석 재현</button>
+          <Link className="btn ghost" to={`/portfolio?trade=${a.ticker}`} title="이 종목을 실제로 사거나 팔았다면 기록하세요 — 보유 수량·평단이 계산됩니다">거래 기록하기</Link>
         </div>
         {note && <div className="explain" role="status" style={{ marginTop: 10 }}>{note}</div>}
         <div style={{ marginTop: actionErr ? 10 : 0 }}><Err error={actionErr} /></div>
@@ -446,6 +445,13 @@ function StockDetail({ ticker }: { ticker: string }) {
       {/* ⑧ 상세 자료 — folded; open when needed */}
       <Section no={8} title="상세 자료" sub="재무·차트 지표·근거 원본 — 필요할 때 펼치세요" />
       <div>
+        <div className="row" style={{ marginBottom: 10 }}>
+          <button className="sm ghost" disabled={!!busy} onClick={() => run("replay", async () => {
+            const r = await api.get<{ matches: boolean; replay_score: number; replay_action: string }>(`/recommendations/${rec.id}/replay`);
+            setReplay(r.matches ? `당시 분석을 저장된 데이터로 다시 계산해도 같은 결과입니다(점수 ${r.replay_score}, ${r.replay_action}).` : `재계산 결과가 다릅니다: 점수 ${r.replay_score}, ${r.replay_action}`);
+          })}>당시 분석 재현(감사용)</button>
+          {replay && <span className="caption" role="status">{replay}</span>}
+        </div>
         <Disclosure title="데이터 종류별 신선도" hint="각 데이터가 언제 기준인지"><FreshnessTable checks={checks} /></Disclosure>
         <Disclosure title="점수 구성" hint={`${a.scorecard.model_version} · 업종 모델: ${a.sector_model_name}`}>
           <div className="explain" style={{ marginBottom: 8 }}>업종 모델 선택 이유: {a.sector_model_reason}</div>

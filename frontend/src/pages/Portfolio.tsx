@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { Card, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } from "../components/ui";
 import { Ledger } from "../components/Ledger";
@@ -44,6 +45,7 @@ export function nyToday(now: Date = new Date()): string {
 
 export default function Portfolio() {
   const p = useApi<Pf>("/portfolio");
+  const [params] = useSearchParams();
   const [row, setRow] = useState({ ticker: "", quantity: "", cost: "" });
   const [cash, setCash] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -119,7 +121,7 @@ export default function Portfolio() {
           </form>
         </Card>
       </div>
-      <Ledger today={nyToday()} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
+      <Ledger today={nyToday()} prefill={params.get("trade")} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
 
     </div>
   );

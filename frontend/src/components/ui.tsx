@@ -257,7 +257,7 @@ export function Bar({ value, max = 1, color }: { value: number; max?: number; co
 }
 
 /** The score on its 0–100 track with the two decision thresholds marked (the score is not a probability). */
-export function ScoreMeter({ score, buy = 80, small = 72 }: { score: number | null | undefined; buy?: number; small?: number }) {
+export function ScoreMeter({ score, buy = 80, small = 72, labels = true }: { score: number | null | undefined; buy?: number; small?: number; labels?: boolean }) {
   const v = typeof score === "number" ? Math.max(0, Math.min(100, score)) : null;
   return (
     <div className="meter" aria-label={v === null ? "점수 없음" : `점수 ${v.toFixed(1)} / 100 (매수 기준 ${buy}, 소량 매수 기준 ${small})`}>
@@ -266,7 +266,7 @@ export function ScoreMeter({ score, buy = 80, small = 72 }: { score: number | nu
         <span className="tick" style={{ left: `${small}%` }} title={`소량 매수 기준 ${small}`} />
         <span className="tick" style={{ left: `${buy}%`, background: "var(--buy)" }} title={`매수 기준 ${buy}`} />
       </div>
-      <div className="labels"><span style={{ left: `${small}%` }}>{small}</span><span style={{ left: `${buy}%` }}>{buy}</span></div>
+      {labels && <div className="labels"><span style={{ left: `${small}%` }}>{small}</span><span style={{ left: `${buy}%` }}>{buy}</span></div>}
     </div>
   );
 }
