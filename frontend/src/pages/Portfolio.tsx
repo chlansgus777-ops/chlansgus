@@ -11,6 +11,8 @@ interface Pf {
   valuation_day: string | null; cash: number; invested_value: number; nav: number; unrealized_pnl: number; holdings: HoldingV[];
   sector_weights: Record<string, number>; theme_weights: Record<string, number>; hhi: number; beta: number | null;
   correlations: [string, string, number][]; missing_prices: string[]; notes: string[]; currency: string; note: string;
+  /** EMPTY | COMPLETE | PARTIAL | UNAVAILABLE — an unvalued account is never shown as a cash-only total */
+  valuation_status?: string;
 }
 
 /** Plain-language reading of the portfolio (only from the numbers above). */
@@ -48,6 +50,7 @@ export default function Portfolio() {
   const save = async (body: unknown) => { setErr(null); try { await api.put("/portfolio", body); p.reload(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } };
   const x = p.data;
   const reading = interpret(x);
+  const unvalued = x.valuation_status === "UNAVAILABLE";  // holdings exist but none could be valued (review 2026-09-28 F10)
   const weights: [string, number][] = [...x.holdings.filter((h) => (h.market_value ?? 0) > 0).map((h) => [h.ticker, h.market_value ?? 0] as [string, number]), ["현금", x.cash]];
   const pnlPct = x.invested_value - x.unrealized_pnl > 0 ? x.unrealized_pnl / (x.invested_value - x.unrealized_pnl) : null;
   return (
@@ -62,10 +65,12 @@ export default function Portfolio() {
       {x.notes.filter((n) => !(x.missing_prices.length && n.startsWith("가격 데이터 없는 보유 종목"))).map((n, i) => <Notice key={i} tone="warn">{n}</Notice>)}
       <Err error={err} />
       <div className="g4">
-        <Card title="총 평가금액"><div className="t-key">{price(x.nav)}</div><div className="caption">{usdWithKo(x.nav)} · 기준일 {day(x.valuation_day)}</div></Card>
-        <Card title="평가손익"><div className={`t-key ${x.unrealized_pnl >= 0 ? "pos" : "neg"}`}>{x.unrealized_pnl >= 0 ? "▲" : "▼"} {price(x.unrealized_pnl)}</div><div className="caption">매입금액 대비 {pct(pnlPct)}{x.missing_prices.length ? " · 가격 없는 종목 제외" : ""}</div></Card>
-        <Card title="현금"><div className="t-key">{price(x.cash)}</div><div className="caption">전체의 {pct(x.nav > 0 ? x.cash / x.nav : null, 0, false)}</div></Card>
-        <Card title="분산 정도"><div className="t-key">{x.hhi < 0.15 ? "좋음" : x.hhi < 0.3 ? "보통" : "쏠림"}</div><div className="caption"><Term k="hhi">집중도(HHI)</Term> {num(x.hhi, 2)} · <Term k="beta">베타</Term> {num(x.beta, 2)}</div></Card>
+        {unvalued ? (
+          <Card title="총 평가금액" testId="nav-unavailable"><div className="t-key muted">평가 불가</div><div className="caption">보유 종목의 공통 거래일 종가가 없어 합계를 계산하지 않았습니다(현금 {price(x.cash)}만으로 표시하지 않음).</div></Card>
+        ) : <Card title="총 평가금액"><div className="t-key">{price(x.nav)}</div><div className="caption">{usdWithKo(x.nav)} · 기준일 {day(x.valuation_day)}{x.valuation_status === "PARTIAL" ? " · 일부 종목 제외" : ""}</div></Card>}
+        <Card title="평가손익">{unvalued ? <><div className="t-key muted">평가 불가</div><div className="caption">가격을 확인한 뒤 계산합니다</div></> : <><div className={`t-key ${x.unrealized_pnl >= 0 ? "pos" : "neg"}`}>{x.unrealized_pnl >= 0 ? "▲" : "▼"} {price(x.unrealized_pnl)}</div><div className="caption">매입금액 대비 {pct(pnlPct)}{x.missing_prices.length ? " · 가격 없는 종목 제외" : ""}</div></>}</Card>
+        <Card title="현금"><div className="t-key">{price(x.cash)}</div><div className="caption">{unvalued ? "전체 대비 비중 계산 불가" : `전체의 ${pct(x.nav > 0 ? x.cash / x.nav : null, 0, false)}`}</div></Card>
+        <Card title="분산 정도">{unvalued ? <><div className="t-key muted">판단 불가</div><div className="caption">평가금액이 없어 집중도를 계산할 수 없습니다</div></> : <><div className="t-key">{x.hhi < 0.15 ? "좋음" : x.hhi < 0.3 ? "보통" : "쏠림"}</div><div className="caption"><Term k="hhi">집중도(HHI)</Term> {num(x.hhi, 2)} · <Term k="beta">베타</Term> {num(x.beta, 2)}</div></>}</Card>
       </div>
       <div className="g2">
         <Card title="한 줄 해석" icon="✎">

@@ -25,6 +25,7 @@ from marketlens.domain.market_calendar import NY, UTC
 from marketlens.domain.corporate_actions import SplitEvent, split_factor
 from marketlens.domain.estimates import EstimateObservation
 from marketlens.domain.guidance import GuidanceItem
+from marketlens.infrastructure.logging import redact_text
 from marketlens.infrastructure.db.models import (AppSettingRow, CorporateActionRow, EstimateSnapshotRow, FundamentalVintageRow, GuidanceRow, IngestionManifestRow,
                                                PriceBarRow, SecurityRow, TickerHistoryRow)
 
@@ -683,7 +684,7 @@ class MarketStore:
                 row.attempts, row.last_success_at, row.next_attempt_at, row.error, row.rows = 0, now, None, None, rows
             else:
                 row.attempts = (row.attempts or 0) + 1
-                row.error = (error or status)[:300]
+                row.error = redact_text(error or status)[:300]
                 wait = (self.RETRY_NOT_SUPPORTED if status == "NOT_SUPPORTED" else self.RETRY_PARSE_GAP if status == "PARSE_GAP"
                         else min(self.RETRY_MAX, timedelta(hours=2 ** min(row.attempts - 1, 5))))
                 row.next_attempt_at = now + wait

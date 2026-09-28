@@ -25,6 +25,7 @@ from typing import Sequence
 from marketlens.domain.enums import ExitReason
 from marketlens.domain.market import Bar
 from marketlens.domain.market_calendar import NY, REGULAR_OPEN, to_ny, trading_days_between
+from marketlens.domain.sizing import SIZE_FRACTION_OF_FULL, effective_size
 
 SIZE_FRACTION = {"BUY": 1.0, "BUY SMALL": 0.5, "ADD": 0.5}
 
@@ -62,6 +63,7 @@ class PaperSignal:
     sector: str
     spread_bps: float | None = None
     max_buy: float | None = None
+    size_cap: str | None = None  # the recommendation's size limit (FULL/HALF/SMALL/WATCH): sizes the position with the action
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,8 +101,13 @@ def first_tradable_day(ts: datetime) -> date:
     return date.fromordinal(d.toordinal() + 1)
 
 
-def position_notional(action: str, cfg: PaperConfig) -> float:
-    return cfg.position_notional * SIZE_FRACTION.get(action, 0.5)
+def position_notional(action: str, cfg: PaperConfig, size_cap: str | None = None) -> float:
+    """The paper position's dollar size: the action's own size, lowered by the recommendation's size limit the same
+    way as the buy amount on the screen (independent review 2026-09-28 F01: paper sized by the action alone)."""
+    size = effective_size(action, size_cap)
+    if size is None:
+        return cfg.position_notional * SIZE_FRACTION.get(action, 0.5)
+    return cfg.position_notional * SIZE_FRACTION_OF_FULL[size]
 
 
 def simulate(
@@ -125,7 +132,7 @@ def simulate(
         return PaperTradeResult(signal, None, (), False, None, None, None, None, ("시가가 손절가 아래로 갭하락: 진입 취소",))
     if signal.max_buy is not None and entry_px > signal.max_buy:
         return PaperTradeResult(signal, None, (), False, None, None, None, None, ("시가가 최대 매수가 위로 갭상승: 진입 취소",))
-    qty = (notional if notional is not None else position_notional(signal.action, cfg)) / entry_px
+    qty = (notional if notional is not None else position_notional(signal.action, cfg, signal.size_cap)) / entry_px
     entry = Fill(first.day, round(entry_px, 4), qty)
 
     exit_days = sorted((first_tradable_day(ts), reason) for ts, reason in exit_events)

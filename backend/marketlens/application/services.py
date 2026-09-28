@@ -6,8 +6,9 @@ import json
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Mapping
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -23,7 +24,7 @@ from marketlens.application.market_store import MarketStore
 from marketlens.application.pipeline import AnalysisInputs, AnalysisResult
 from marketlens.application.registry import ProviderRegistry, build_registry
 from marketlens.application.replay import ReplayOutcome, config_snapshot, replay
-from marketlens.application.scanner import ScanContext, ScanResult, Scanner
+from marketlens.application.scanner import NEWS_LOOKBACK, ScanContext, ScanResult, Scanner
 from marketlens.application.theses import ThesisBook
 from marketlens.config import AGENT_PROMPT_VERSION, CONFIG_DIR, SCHEMA_VERSION, ModelConfig, Settings, code_version, load_model_config
 from marketlens.domain.enums import BULLISH_ACTIONS, Action, DataMode
@@ -33,16 +34,30 @@ from marketlens.domain.market_calendar import UTC, to_ny
 from marketlens.domain.paper import position_notional
 from marketlens.domain.ledger import LedgerError, LedgerNotFound, Trade, check_delete, check_new, positions
 from marketlens.domain.portfolio import Holding, Portfolio
+from marketlens.domain.sizing import effective_size, recommendation_size_cap, tightest
 from marketlens.domain.what_changed import AnalysisDigest
 from marketlens.infrastructure.db import repository as repo
 from marketlens.infrastructure.db.models import CommitteeRow, FactorSnapshotRow, PaperPositionRow, RecommendationRow, ScanRunRow
 from marketlens.infrastructure.health import HealthRegistry
-from marketlens.infrastructure.logging import Event, log_event
+from marketlens.infrastructure.logging import Event, log_event, redact_text
 from marketlens.providers.llm.base import LLMProvider, UnavailableLLM
 
 log = logging.getLogger("marketlens.service")
 DEFAULT_CASH = 100_000.0
 COMMITTEE_OK = ("COMPLETED", "PARTIAL", "REUSED")
+CONTEXT_MAX_AGE = timedelta(minutes=30)  # the issues screen rebuilds an older shared market context
+
+
+PLAN_PRICE_FIELDS = ("ideal_entry", "acceptable_low", "acceptable_high", "max_buy", "add_zone_low", "add_zone_high", "stop", "target1", "target2",
+                     "support_used", "resistance_used")
+
+
+def stored_size_class(r: AnalysisResult, committee: CommitteeResult | None) -> str | None:
+    """The one size limit stored with a recommendation (independent review 2026-09-28 F01/F05): the decision's own
+    limit (vetoes, unknown sector, portfolio review) and, when the committee's result is used, its portfolio manager's
+    — whichever is smaller. The buy amount and the paper position read it back through ``recommendation_size_cap``."""
+    ok = committee is not None and committee.status in COMMITTEE_OK
+    return tightest(r.decision.size_limit, r.portfolio_review.size_cap.value if r.portfolio_review else None, committee.size_class if ok and committee else None)
 
 
 def ledger_trade(r: Any) -> Trade:
@@ -160,7 +175,13 @@ class MarketLensService:
         self._ledger_lock = threading.Lock()  # one trade-record change at a time (check and write together)
         self._sync_progress: dict[str, Any] = {}  # live counts of the running preparation (MarketSync progress callback)
         self._sync_run = threading.Lock()  # one sync_market() at a time, whoever calls it (9th evaluation H5)
+        # scan and data preparation exclude each other BOTH ways, checked and taken in one step under this guard
+        # (independent review 2026-09-28 F07: a sync could start while a scan read the same prices and filings)
+        self._jobs_guard = threading.Lock()
         self.last_scan_context: ScanContext | None = None
+        self._ctx_build = threading.Lock()  # one market-context rebuild at a time (market_context)
+        self._ctx_swap = threading.Lock()
+        self._master: tuple[date, float, dict[str, Any]] | None = None  # (day, loaded at, ticker → Security)
         self._check_db_environment()
 
     def _check_db_environment(self) -> None:
@@ -209,7 +230,10 @@ class MarketLensService:
         ledgers = {g["security"]: g for g in self.ledger(s, today)}
 
         def profile(ticker: str) -> tuple[str, tuple[str, ...], float]:
-            sec = (self.last_scan_context.securities.get(ticker) if self.last_scan_context else None)
+            # the latest market context, else the stored security master: right after a restart there is no context yet,
+            # and a holding read as sector "Unknown" let the first scan ignore the sector limit (review 2026-09-28 F02)
+            ctx = self.last_scan_context
+            sec = ctx.securities.get(ticker) if ctx is not None and ticker in (ctx.securities or {}) else self.security_master(today).get(ticker)
             exp = self.seed.macro_exposure(sec) if sec else None
             return (sec.sector if sec else "Unknown", ("AI",) if exp and exp.ai >= 0.4 else (), exp.rates if exp else 0.0)
 
@@ -338,8 +362,48 @@ class MarketLensService:
         def adj(v: Any) -> float | None:
             return None if v is None else float(v) / f
 
-        return {"split_factor": f, "price": adj(row.price), "ideal_entry": adj(entry.get("ideal_entry")), "max_buy": adj(entry.get("max_buy")),
-                "stop": adj(entry.get("stop")), "target1": adj(entry.get("target1"))}
+        # every level of the plan, not only the headline ones (independent review 2026-09-28 F03: the stock page drew the
+        # buy zone, second target and chart from the analysis snapshot — pre-split prices beside post-split ones)
+        return {"split_factor": f, "price": adj(row.price)} | {k: adj(entry.get(k)) for k in PLAN_PRICE_FIELDS}
+
+    def security_master(self, day: date) -> dict[str, Any]:
+        """ticker → Security from the stored security master (LIVE) or the universe provider (MOCK), read at most every
+        ten minutes — what holdings are labelled with before any market context exists (review 2026-09-28 F02)."""
+        hit = self._master
+        if hit is not None and hit[0] == day and time.monotonic() - hit[1] < 600:
+            return hit[2]
+        secs = {x.ticker: x for x in (self.data.securities(day).value or [])}
+        self._master = (day, time.monotonic(), secs)
+        return secs
+
+    def _adopt_context(self, ctx: ScanContext) -> None:
+        """The shared market context — issues screen, new-issue checks on stored recommendations, holdings' sectors — is
+        the NEWEST one built, replaced whole after a scan or a single analysis finished (review 2026-09-28 F06). Company
+        news the older one gathered for other names is carried over when still inside the news window, so a single
+        analysis does not drop what the scan found; an older context never replaces a newer one."""
+        with self._ctx_swap:
+            old = self.last_scan_context
+            if old is not None and ctx.as_of < old.as_of:
+                return
+            carried = getattr(old, "company_issues", None)
+            if carried is not None and getattr(ctx, "issues", None) is not None:
+                recent = carried.since(ctx.as_of - NEWS_LOOKBACK)
+                ctx.issues = ctx.issues.merged(recent)
+                ctx.company_issues = recent if ctx.company_issues is None else ctx.company_issues.merged(recent)
+            self.last_scan_context = ctx
+
+    def market_context(self) -> ScanContext:
+        """The shared market context no older than ``CONTEXT_MAX_AGE`` (the issues screen): rebuilt once when older, one
+        rebuild at a time — a second caller waits and uses it."""
+        ctx = self.last_scan_context
+        if ctx is not None and self.now() - ctx.as_of <= CONTEXT_MAX_AGE:
+            return ctx
+        with self._ctx_build:
+            ctx = self.last_scan_context
+            if ctx is None or self.now() - ctx.as_of > CONTEXT_MAX_AGE:
+                with self.sf() as s:
+                    self._adopt_context(self.scanner(self.model_config(), s).build_context(self.now()))
+        return self.last_scan_context  # type: ignore[return-value]
 
     def recommendation_status(self, row: RecommendationRow, fetch_quote: bool = False) -> RecommendationFreshness:
         """Is this stored recommendation still current NOW (not just: was it fresh when it was made)?
@@ -371,7 +435,7 @@ class MarketLensService:
             scan_run_id=scan_id, ticker=r.ticker, as_of=r.as_of, rank=rank, mode=r.mode.value, session=r.session,
             price=r.price, price_source=r.price_source, price_timestamp=r.price_timestamp, price_quality=r.price_quality.value,
             score=r.scorecard.total, confidence=final_conf, deterministic_action=r.decision.action.value, final_action=final_action,
-            size_class=(committee.size_class if committee else (r.portfolio_review.size_cap.value if r.portfolio_review else None)),
+            size_class=stored_size_class(r, committee),
             sector=r.security.sector, sector_model=r.sector_model_id, regime=r.primary_regime, data_quality=r.data_quality.overall.value,
             committee_status=committee.status if committee else "NOT_RUN", result=encode(r), inputs=encode(inp),
             model_config_snapshot=config_snapshot(CONFIG_DIR, dict(cfg.scoring_model.weights), cfg.scoring_model.version),
@@ -411,11 +475,15 @@ class MarketLensService:
         if final_action == Action.ADD.value and not any(p.status == "OPEN" for p in open_same):
             log.info("paper: ADD for %s ignored (no open paper position)", r.ticker)
             return
+        cap = recommendation_size_cap(row)
+        if effective_size(final_action, cap) == "WATCH":  # the one size limit allows no new money (review 2026-09-28 F01/F05)
+            log.info("paper: %s for %s ignored (size limit WATCH)", final_action, r.ticker)
+            return
         s.add(PaperPositionRow(
             recommendation_id=row.id, ticker=r.ticker, recommended_at=r.as_of, status="PENDING", score=r.scorecard.total,
             confidence=final_conf, action=final_action, regime=r.primary_regime, sector=r.security.sector,
             stop=r.entry.stop, target1=r.entry.target1, target2=r.entry.target2, max_buy=r.entry.max_buy,
-            notional=position_notional(final_action, cfg.paper),
+            notional=position_notional(final_action, cfg.paper, cap),
             thesis="; ".join(c.description for c in r.thesis_conditions[:3]), model_version=cfg.scoring_model.version, updated_at=repo.now(),
         ))
 
@@ -464,10 +532,11 @@ class MarketLensService:
         """One scan at a time: a second request while one runs is refused, not queued behind it (it would repeat the
         whole scan and its AI calls); a scan while the data preparation runs is refused too (it would judge
         half-prepared data). Round 10 concurrency invariant."""
-        if self._sync_lock.locked():
-            raise ScanRefused("데이터를 준비하는 중에는 스캔할 수 없습니다 — 준비가 끝난 뒤 다시 시도하세요")
-        if not self._lock.acquire(blocking=False):
-            raise ScanRefused("이미 전체 시장 스캔이 진행 중입니다 — 끝나면 결과가 화면에 나옵니다")
+        with self._jobs_guard:
+            if self._sync_lock.locked() or self._sync_run.locked():
+                raise ScanRefused("데이터를 준비하는 중에는 스캔할 수 없습니다 — 준비가 끝난 뒤 다시 시도하세요")
+            if not self._lock.acquire(blocking=False):
+                raise ScanRefused("이미 전체 시장 스캔이 진행 중입니다 — 끝나면 결과가 화면에 나옵니다")
         try:
             return self._run_scan_locked(run_committee, only)
         finally:
@@ -480,7 +549,7 @@ class MarketLensService:
             pf = self.portfolio(s)
             sc = self.scanner(cfg, s)
             result: ScanResult = sc.run(as_of, pf, only=only)
-            self.last_scan_context = result.context
+            self._adopt_context(result.context)
             ctx = result.context
             scan = ScanRunRow(
                 as_of=as_of, mode=self.mode.value, stages=[st.__dict__ for st in result.stages], excluded_count=len(result.excluded),
@@ -560,8 +629,10 @@ class MarketLensService:
             cfg = self.model_config()
             sc = self.scanner(cfg, s)
             ctx = sc.build_context(self.now())
-            self.last_scan_context = self.last_scan_context or ctx
             r, inp = sc.analyze_single(ticker, ctx.as_of, self.portfolio(s), ctx)
+            # the newer market context replaces the shared one once the analysis succeeded (review 2026-09-28 F06: it was
+            # kept only when none existed, so the issues screen and new-issue checks stayed on a days-old context)
+            self._adopt_context(ctx)
             committee = self.run_committee(r, ctx, s) if run_committee else None
             rec_id = None
             if persist:
@@ -595,7 +666,7 @@ class MarketLensService:
             new = RecommendationRow(**cols, created_at=repo.now(), supersedes_id=cur.id, version=(cur.version or 1) + 1)
             new.committee_status = c.status
             if ok:
-                new.final_action, new.confidence, new.size_class = c.final_action, c.final_confidence, c.size_class
+                new.final_action, new.confidence, new.size_class = c.final_action, c.final_confidence, stored_size_class(r, c)
                 new.llm_model_ids = ",".join(models)[:200] or None
             s.add(new)
             s.flush()
@@ -623,9 +694,18 @@ class MarketLensService:
         limits.setdefault("min_dollar_volume", sc.min_avg_dollar_volume)
         limits.setdefault("min_price", sc.min_price)
         # another sync (the background job, POST /api/sync, the CLI, the scheduler) waits for the running one and then
-        # computes its own missing days from the store: no session is downloaded twice
-        with self._sync_run:
+        # computes its own missing days from the store: no session is downloaded twice. It never runs beside a scan:
+        # after taking the sync lock it checks, under the same guard the scan claims with, that no scan holds the data
+        self._sync_run.acquire()
+        try:
+            with self._jobs_guard:
+                scanning = self._lock.locked()
+            if scanning:
+                return {"status": "REFUSED", "reason": "전체 시장 스캔 중에는 데이터를 준비하지 않습니다 — 스캔이 끝난 뒤 다시 시도하세요"}
             rep = MarketSync(self.registry, self.store).run(self.now(), **limits)
+            rep.errors = [redact_text(e) for e in rep.errors]  # stored in settings and shown on screen
+        finally:
+            self._sync_run.release()
         self.data.cache = type(self.data.cache)()  # the store changed → drop cached provider reads
         # "sync finished" is not "data complete": a partial sync says how much is still missing
         out = {"status": "SYNC_COMPLETE" if rep.complete else "SYNC_PARTIAL", "bar_days_remaining": max(0, rep.bar_days_missing - rep.bar_days_loaded - rep.bar_days_empty), **rep.__dict__}
@@ -638,8 +718,11 @@ class MarketLensService:
         progress. Every round keeps each provider's own rate limit; nothing is fetched twice."""
         if self.store is None:
             return {"started": False, "reason": "MOCK 모드는 데이터 준비가 필요 없음"}
-        if not self._sync_lock.acquire(blocking=False):
-            return {"started": False, "reason": "이미 데이터를 준비하는 중", **self.sync_status()}
+        with self._jobs_guard:
+            if self._lock.locked():
+                return {"started": False, "reason": "전체 시장 스캔이 진행 중입니다 — 스캔이 끝난 뒤 데이터 준비를 시작하세요", **self.sync_status()}
+            if not self._sync_lock.acquire(blocking=False):
+                return {"started": False, "reason": "이미 데이터를 준비하는 중", **self.sync_status()}
         state: dict[str, Any] = {"status": "RUNNING", "round": 0, "started_at": self.now().isoformat()}
         self._sync_progress = {}
         try:
@@ -660,6 +743,9 @@ class MarketLensService:
         try:
             for i in range(max_rounds):
                 out = self.sync_market(progress=self._on_sync_progress)
+                if out.get("status") == "REFUSED":  # cannot happen while the job holds the preparation lock; never loop on it
+                    state.update(status="FAILED", errors=[out["reason"]], updated_at=self.now().isoformat())
+                    break
                 progressed = bool(out["bar_days_loaded"] or out["bar_days_empty"] or out["fundamentals_ingested"] or out["profiles_updated"]
                                   or out.get("shares_looked_up"))
                 state.update(round=i + 1, bar_days_remaining=out["bar_days_remaining"], fundamentals_pending=out["fundamentals_pending"],

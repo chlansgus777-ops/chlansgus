@@ -1,5 +1,40 @@
 /** Human action sentences ("숫자 → 의미 → 행동"). Built only from the deterministic analysis — no new facts. */
 import { price } from "./format";
+import type { Analysis, OppRow } from "./types";
+
+export type EntryPlan = NonNullable<Analysis["entry"]>;
+export type PlanNow = EntryPlan & { split_factor: number; analysis_price: number | null };
+type PlanLevels = Pick<OppRow, "price" | "ideal_entry" | "max_buy" | "stop" | "target"> & Partial<Pick<OppRow, "split_factor_since" | "target2" | "buy_zone_low" | "buy_zone_high" | "add_zone_low" | "add_zone_high">>;
+
+/** The price plan on TODAY's share basis (independent review 2026-09-28 F03). The analysis snapshot keeps the prices of
+ * the day it was made — after a 10-for-1 split its $1,020 max buy is $102 now. Every tile, zone, ladder, chart line and
+ * sentence on the stock page uses this one plan: the backend's current-basis levels, and for a level it did not send,
+ * the snapshot's divided by the same split factor. */
+export function planNow(entry: EntryPlan | null | undefined, rec: PlanLevels, analysisPrice: number | null): PlanNow | null {
+  if (!entry) return null;
+  const f = typeof rec.split_factor_since === "number" && rec.split_factor_since > 0 ? rec.split_factor_since : 1;
+  const pick = (v: number | null | undefined, snap: number) => (typeof v === "number" ? v : snap / f);
+  return {
+    ...entry, split_factor: f,
+    analysis_price: typeof rec.price === "number" ? rec.price : analysisPrice === null ? null : analysisPrice / f,
+    current_price: pick(rec.price, entry.current_price),
+    ideal_entry: pick(rec.ideal_entry, entry.ideal_entry),
+    acceptable_low: pick(rec.buy_zone_low, entry.acceptable_low),
+    acceptable_high: pick(rec.buy_zone_high, entry.acceptable_high),
+    max_buy: pick(rec.max_buy, entry.max_buy),
+    add_zone_low: pick(rec.add_zone_low, entry.add_zone_low),
+    add_zone_high: pick(rec.add_zone_high, entry.add_zone_high),
+    stop: pick(rec.stop, entry.stop),
+    target1: pick(rec.target, entry.target1),
+    target2: pick(rec.target2, entry.target2),
+  };
+}
+
+/** A buy quantity is an order ticket: only for a recommendation that holds NOW (independent review 2026-09-28 F04) —
+ * never for an expired, re-judged, superseded or unconfirmed one, including after the page's own re-check changed it. */
+export function quantityShown(status: string | null | undefined, actionableNow: boolean | null | undefined): boolean {
+  return status === "CURRENT" && actionableNow !== false;
+}
 
 export interface AdviceInput {
   action: string;
@@ -34,6 +69,7 @@ export function advise(a: AdviceInput): { headline: string; details: string[] } 
   }
   if (a.eventRisk === "HIGH" || a.eventRisk === "EXTREME") d.push("실적 발표 등 중요한 이벤트가 가까워 단기 변동이 클 수 있습니다.");
   if (a.sizeLimit === "SMALL" || a.sizeLimit === "WATCH") d.push("포트폴리오의 업종·테마 쏠림이나 현금 비중 때문에 비중이 제한됩니다.");
+  else if (a.sizeLimit === "HALF" && a.action === "BUY") d.push("포트폴리오의 업종·테마 쏠림이나 현금 비중 때문에 기본 비중의 절반까지만 삽니다.");
   if (a.sectorKnown === false) d.push("업종 분류가 불확실해 일반 모델로 평가했습니다. 신뢰도를 낮춰 보세요.");
   switch (a.action) {
     case "BUY":

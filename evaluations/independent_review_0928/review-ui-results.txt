@@ -1,0 +1,54 @@
+
+ RUN  v5.0.2 C:/Users/Joon/Documents/Codex/2026-09-28/referenced-chatgpt-conversation-this-is-an/work/source/chlansgus-claude-marketlens-investment-system-iyki44/frontend
+
+ ❯ review/counterexamples.test.tsx (2 tests | 2 failed) 130ms
+   × uses the backend split-adjusted levels on the main price tiles 85ms
+   × does not label an expired plan as a recommended purchase quantity 44ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  review/counterexamples.test.tsx > uses the backend split-adjusted levels on the main price tiles
+AssertionError: expected '최대 매수가ⓘ$1,020.00손절가 아래 — 매수 근거 훼손' to contain '$102.00'
+
+Expected: "$102.00"
+Received: "최대 매수가ⓘ$1,020.00손절가 아래 — 매수 근거 훼손"
+
+ ❯ review/counterexamples.test.tsx:23:28
+     21|   Object.assign(d.recommendation, {split_factor_since: 10, max_buy: 10…
+     22|   const tile = await show(d);
+     23|   expect(tile.textContent).toContain('$102.00');
+       |                            ^
+     24|   expect(tile.textContent).not.toContain('$1,020.00');
+     25| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  review/counterexamples.test.tsx > does not label an expired plan as a recommended purchase quantity
+AssertionError: expected <span class="k"></span> to be null
+
+- Expected:
+null
+
++ Received:
+<span
+  class="k"
+>
+  권장 매수
+</span>
+
+ ❯ review/counterexamples.test.tsx:34:39
+     32|     amount: 5000, shares: 50, price: 100, risk_amount: 250, risk_pct: …
+     33|   await show(d);
+     34|   expect(screen.queryByText('권장 매수')).toBeNull();
+       |                                       ^
+     35| });
+     36|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  16:16:37
+   Duration  1.13s (environment 48%, import 24%, transform 16%, tests 13%)
+

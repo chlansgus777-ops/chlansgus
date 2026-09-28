@@ -7,6 +7,8 @@ export interface OppRow {
   current_status: string | null; current_status_reason: string | null; sessions_since: number | null; actionable_now: boolean | null;
   action_ko: string; valuation_price_basis: string | null; sector_known: boolean;
   revalidated_price?: number | null; status_problems?: string[]; version?: number; supersedes_id?: number | null; issued_at?: string | null;
+  /** the plan on TODAY's share basis (a split after the analysis divides the levels; 1 = none since) */
+  split_factor_since?: number; target2?: number | null; buy_zone_low?: number | null; buy_zone_high?: number | null; add_zone_low?: number | null; add_zone_high?: number | null;
   /** dashboard only: one reason and one risk read from the stored analysis (never written by the screen) */
   key_reason?: string | null; key_risk?: { kind: "veto" | "event" | "negative"; code: string | null; text: string | null } | null;
 }

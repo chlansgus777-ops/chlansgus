@@ -10,6 +10,7 @@ from typing import Callable
 
 from marketlens.domain.enums import BreakerState, DataMode, ProviderStatus
 from marketlens.domain.market_calendar import UTC
+from marketlens.infrastructure.logging import redact_text
 
 
 def _now() -> datetime:
@@ -102,7 +103,7 @@ class HealthRegistry:
             else:
                 h.failures += 1
                 h.last_failure = _now()
-                h.last_error = (error or "")[:300]
+                h.last_error = redact_text(error or "")[:300]  # returned by /api/health: never a key (review 2026-09-28 F09)
             if rate_limited_for:
                 h.rate_limited_until = _now() + timedelta(seconds=rate_limited_for)
             if breaker is not None:

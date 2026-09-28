@@ -29,6 +29,7 @@ from marketlens.domain.market import Bar
 from marketlens.domain.market_calendar import is_trading_day, last_completed_session, next_trading_day, regular_close_time, to_ny
 from marketlens.domain.paper import AccountItem, PaperConfig, PaperSignal, PaperTradeResult, compute_metrics, position_notional, simulate_account
 from marketlens.domain.scoring import COMPONENTS
+from marketlens.domain.sizing import recommendation_size_cap
 from marketlens.infrastructure.db import repository as repo
 from marketlens.infrastructure.db.models import ModelVersionRow, OutcomeRow, PaperPositionRow
 from marketlens.infrastructure.logging import Event, log_event
@@ -114,7 +115,7 @@ class EvaluationService:
 
     # ------------------------------------------------------------------ paper trading (one account)
     def _signal(self, pos: PaperPositionRow, spread_bps: float | None, basis_date: date | None = None, key: str | None = None,
-                applied: frozenset[str] | None = None, group: str | None = None) -> PaperSignal:
+                applied: frozenset[str] | None = None, group: str | None = None, size_cap: str | None = None) -> PaperSignal:
         """The plan's price levels expressed on the share basis of the stored bars. Levels were set on the
         basis of the recommendation day; every split executed after it (and already applied to the bars,
         i.e. on/before ``basis_date``) divides them, so a 10:1 split does not turn a normal entry into a
@@ -126,7 +127,7 @@ class EvaluationService:
         # the signal is keyed by the SECURITY (MarketStore.security_id), not the ticker label: a reused ticker is another
         # security, a renamed one the same (a repeat BUY after a rename is a repeat); ``key`` is where its data is stored
         return PaperSignal(group or key or pos.ticker, pos.recommended_at, pos.action, pos.score, pos.confidence, pos.stop / f, pos.target1 / f, pos.target2 / f,
-                           pos.thesis, pos.model_version, pos.regime, pos.sector, spread_bps, pos.max_buy / f if pos.max_buy is not None else None)
+                           pos.thesis, pos.model_version, pos.regime, pos.sector, spread_bps, pos.max_buy / f if pos.max_buy is not None else None, size_cap)
 
     def update_paper(self, as_of: datetime | None = None) -> dict[str, Any]:
         """Re-simulate the whole paper account from every paper signal up to ``as_of`` (deterministic)."""
@@ -142,6 +143,7 @@ class EvaluationService:
             items: list[AccountItem] = []
             bars_by: dict[str, list[Bar]] = {}
             committee_skips: list[PaperPositionRow] = []
+            caps: dict[int, str | None] = {}
             for pos in positions:
                 rec = repo.get_recommendation(s, pos.recommendation_id)
                 if rec is not None and rec.mode != self.svc.mode.value:
@@ -160,7 +162,8 @@ class EvaluationService:
                 # later recommendations under the same ticker count only if they are about the same company
                 applied = encoded_split_keys((rec.inputs or {}).get("splits")) if rec is not None and isinstance(rec.inputs, dict) else None
                 g = group[pos.id]
-                items.append(AccountItem(str(pos.id), self._signal(pos, spread_bps, to_ny(as_of).date(), key, applied, g), tuple(exit_events_for(later, pos.recommended_at))))
+                caps[pos.id] = recommendation_size_cap(rec) if rec is not None else None  # the issued limit sizes the paper trade too
+                items.append(AccountItem(str(pos.id), self._signal(pos, spread_bps, to_ny(as_of).date(), key, applied, g, caps[pos.id]), tuple(exit_events_for(later, pos.recommended_at))))
                 if g not in bars_by:
                     first = min(to_ny(p.recommended_at).date() for p in positions if group[p.id] == g)
                     bars_by[g] = self._bars(latest_key[g], first - timedelta(days=5), today)  # the latest key's series covers its renames
@@ -170,7 +173,7 @@ class EvaluationService:
             for key, res in acct.trades:
                 pos = by_id[key]
                 was = pos.status
-                self._apply(pos, res, cfg)
+                self._apply(pos, res, cfg, caps.get(pos.id))
                 if was == "PENDING" and pos.status in ("OPEN", "CLOSED"):
                     counts["opened"] += 1
                     log_event(log, Event.PAPER_POSITION_OPENED, ticker=pos.ticker, entry=pos.entry_price)
@@ -204,12 +207,12 @@ class EvaluationService:
         return counts
 
     @staticmethod
-    def _apply(pos: PaperPositionRow, res: PaperTradeResult, cfg: PaperConfig) -> None:
+    def _apply(pos: PaperPositionRow, res: PaperTradeResult, cfg: PaperConfig, size_cap: str | None = None) -> None:
         pos.updated_at = repo.now()
         pos.skip_reason = None
         if res.entry is None:
             return
-        pos.notional = position_notional(pos.action, cfg)
+        pos.notional = position_notional(pos.action, cfg, size_cap)
         pos.entry_day, pos.entry_price, pos.quantity = res.entry.day, res.entry.price, res.entry.quantity
         pos.exits = [{"day": e.day.isoformat(), "price": e.price, "quantity": e.quantity, "reason": e.reason.value if e.reason else None} for e in res.exits]
         pos.return_pct, pos.mae_pct, pos.mfe_pct, pos.holding_days = res.return_pct, res.mae_pct, res.mfe_pct, res.holding_days

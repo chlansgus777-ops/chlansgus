@@ -16,7 +16,7 @@ from typing import Any, Callable, Generic, Sequence, TypeVar
 
 from marketlens.domain.enums import DataMode
 from marketlens.infrastructure.health import HealthRegistry
-from marketlens.infrastructure.logging import Event, log_event
+from marketlens.infrastructure.logging import Event, log_event, redact_text
 from marketlens.infrastructure.resilience import BreakerConfig, CircuitBreaker, RetryConfig, retry
 from marketlens.providers.contracts import NotSupported, ProviderError, ProviderUnavailable, RateLimited
 
@@ -106,7 +106,7 @@ class ProviderChain:
                 errors.append((p.name, f"not supported: {e}"))
                 continue
             except (ProviderError, TimeoutError, ConnectionError, OSError) as e:
-                errors.append((p.name, f"{type(e).__name__}: {e}"))
+                errors.append((p.name, redact_text(f"{type(e).__name__}: {e}")))
                 continue
             routed = Routed(value=value, provider=p.name, retrieved_at=datetime.now().astimezone())
             if cross_check is not None:

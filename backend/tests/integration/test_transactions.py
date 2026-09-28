@@ -129,7 +129,7 @@ def test_records_of_a_reused_ticker_stay_with_the_old_company(world):  # noqa: F
 
 def test_the_buy_amount_counts_the_holding_from_the_records():
     """Limits and the buy amount use the holding the records give (the one Service.portfolio)."""
-    from marketlens.api.routes import _position_plan
+    from marketlens.api.routes import _position_plan, _row_summary
     from marketlens.infrastructure.db import repository as repo
     from marketlens.infrastructure.db.models import RecommendationRow
 
@@ -139,7 +139,8 @@ def test_the_buy_amount_counts_the_holding_from_the_records():
         repo.set_setting(s, "portfolio_cash", "100000")
         s.commit()
         row = next(r for r in s.query(RecommendationRow).all() if r.final_action in ("BUY", "BUY SMALL") and r.price)
-        summary = {"price": row.price, "stop": ((row.result or {}).get("entry") or {}).get("stop")}
+        summary = _row_summary(row, svc)  # what the API passes: a quantity only for a recommendation current now (review 2026-09-28 F04)
+        assert summary["actionable_now"] is True and summary["price"] == row.price
         before = _position_plan(svc, s, row, summary)
     assert before["available"]
     held = int(0.08 * before["nav"] / row.price)  # 8% of the account already held, bought through the records

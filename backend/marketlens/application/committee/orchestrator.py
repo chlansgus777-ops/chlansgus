@@ -24,8 +24,9 @@ from marketlens.application.evidence import Evidence
 from marketlens.application.pipeline import AnalysisResult
 from marketlens.config import SCHEMA_VERSION
 from marketlens.domain.decision import apply_downgrade, bounded_confidence
-from marketlens.domain.enums import Action
+from marketlens.domain.enums import BULLISH_ACTIONS, Action
 from marketlens.domain.market_calendar import UTC
+from marketlens.domain.sizing import tightest
 from marketlens.infrastructure.logging import Event, log_event
 from marketlens.providers.llm.base import LLMError, LLMProvider, LLMUnavailable, estimate_cost, strict_schema
 
@@ -178,7 +179,7 @@ class Committee:
         res = CommitteeResult(
             ticker=r.ticker, status="COMPLETED", reason=None, deterministic_action=det.action.value, final_action=det.action.value,
             deterministic_confidence=det.confidence, final_confidence=det.confidence,
-            size_class=r.portfolio_review.size_cap.value if r.portfolio_review else None, action_changed_by=None, depth=depth,
+            size_class=tightest(r.portfolio_review.size_cap.value if r.portfolio_review else None, det.size_limit), action_changed_by=None, depth=depth,
         )
         self._depth = depth
         if det.action == Action.DATA_INSUFFICIENT:
@@ -281,13 +282,10 @@ class Committee:
             log_event(log, Event.RISK_VETO, ticker=r.ticker, from_action=det.action.value, to_action=final.value, by=changed_by)
         adj = (syn.confidence_adjustment if syn else 0.0) + DIVERGENCE_CONFIDENCE_PENALTY.get(div or "LOW", 0.0)
         res.final_confidence = bounded_confidence(det.confidence, adj, self.max_adj)
-        sizes = ["WATCH", "SMALL", "HALF", "FULL"]
-        cap = pr.size_cap.value if pr else "FULL"
-        advised = pm.suggested_size if pm else cap
-        res.size_class = sizes[min(sizes.index(cap), sizes.index(advised))]
+        # one limit: the deterministic ones (portfolio review, vetoes, unknown sector) and the portfolio manager's, whichever is smaller
+        res.size_class = tightest(pr.size_cap.value if pr else None, det.size_limit, pm.suggested_size if pm else None) or "FULL"
 
 
-SIZE_TO_ACTION = {"SMALL": Action.BUY_SMALL, "WATCH": Action.WATCH}
 LIGHT_ANALYSTS = ("fundamental", "valuation", "news")
 
 
@@ -299,8 +297,12 @@ def apply_committee(deterministic: Action, risk: RiskReview | None, pm: Portfoli
         new, ok = apply_downgrade(action, Action(risk.recommended_action))
         if ok:
             action, changed_by = new, "risk_manager"
-    if pm is not None and action == Action.BUY and pm.suggested_size in SIZE_TO_ACTION:
-        new, ok = apply_downgrade(action, SIZE_TO_ACTION[pm.suggested_size])
+    if pm is not None and action in BULLISH_ACTIONS:
+        # every buy, not only BUY (independent review 2026-09-28 F05): WATCH stops a new buy (BUY / BUY SMALL → WATCH)
+        # and an addition to a holding (ADD → HOLD); SMALL turns a full BUY into BUY SMALL — the size itself is
+        # limited through CommitteeResult.size_class for every action
+        proposed = {"WATCH": Action.HOLD if action == Action.ADD else Action.WATCH, "SMALL": Action.BUY_SMALL if action == Action.BUY else None}.get(pm.suggested_size)
+        new, ok = apply_downgrade(action, proposed)
         if ok:
             action, changed_by = new, (changed_by + "+portfolio_manager") if changed_by else "portfolio_manager"
     return action, changed_by

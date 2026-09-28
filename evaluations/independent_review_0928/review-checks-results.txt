@@ -1,0 +1,91 @@
+FFFFFFFFFF                                                               [100%]
+================================== FAILURES ===================================
+________________________ test_half_cap_reaches_amount _________________________
+work\review_checks.py:26: in test_half_cap_reaches_amount
+    assert p.amount <= 2500, (decision.action.value, decision.size_limit, p)
+E   AssertionError: ('BUY', None, PositionPlan(size_class='FULL', weight=0.05, amount=5000, shares=50, price=100, risk_amount=250, risk_pct=0.0025, notes=()))
+E   assert 5000 <= 2500
+E    +  where 5000 = PositionPlan(size_class='FULL', weight=0.05, amount=5000, shares=50, price=100, risk_amount=250, risk_pct=0.0025, notes=()).amount
+__________________ test_small_cap_reaches_already_small_buy ___________________
+work\review_checks.py:32: in test_small_cap_reaches_already_small_buy
+    assert p.amount <= 1250, (decision.action.value, decision.size_limit, p)
+E   AssertionError: ('BUY SMALL', None, PositionPlan(size_class='HALF', weight=0.025, amount=2500, shares=25, price=100, risk_amount=125, risk_pct=0.0013, notes=()))
+E   assert 2500 <= 1250
+E    +  where 2500 = PositionPlan(size_class='HALF', weight=0.025, amount=2500, shares=25, price=100, risk_amount=125, risk_pct=0.0013, notes=()).amount
+______________ test_committee_watch_blocks_every_buy[BUY SMALL] _______________
+work\review_checks.py:39: in test_committee_watch_blocks_every_buy
+    assert final not in (Action.BUY, Action.BUY_SMALL, Action.ADD), final
+E   AssertionError: BUY SMALL
+E   assert <Action.BUY_SMALL: 'BUY SMALL'> not in (<Action.BUY: 'BUY'>, <Action.BUY_SMALL: 'BUY SMALL'>, <Action.ADD: 'ADD'>)
+_________________ test_committee_watch_blocks_every_buy[ADD] __________________
+work\review_checks.py:39: in test_committee_watch_blocks_every_buy
+    assert final not in (Action.BUY, Action.BUY_SMALL, Action.ADD), final
+E   AssertionError: ADD
+E   assert <Action.ADD: 'ADD'> not in (<Action.BUY: 'BUY'>, <Action.BUY_SMALL: 'BUY SMALL'>, <Action.ADD: 'ADD'>)
+___________________ test_cold_start_preserves_sector_limit ____________________
+work\review_checks.py:56: in test_cold_start_preserves_sector_limit
+    assert cold.size_cap == warm.size_cap, (before.holdings[0].sector, after.holdings[0].sector, cold.size_cap, warm.size_cap)
+E   AssertionError: ('Unknown', 'Technology', <SizeClass.FULL: 'FULL'>, <SizeClass.WATCH: 'WATCH'>)
+E   assert <SizeClass.FULL: 'FULL'> == <SizeClass.WATCH: 'WATCH'>
+E     
+E     - WATCH
+E     + FULL
+------------------------------ Captured log call ------------------------------
+WARNING  marketlens.scanner:logging.py:150 PROMPT_INJECTION_DETECTED
+___________ test_expired_recommendation_has_no_current_buy_quantity ___________
+work\review_checks.py:68: in test_expired_recommendation_has_no_current_buy_quantity
+    assert not p['available'], p
+E   AssertionError: {'available': True, 'nav': 100000.0, 'size_class': 'FULL', 'weight': 0.05, ...}
+E   assert not True
+_______________ test_new_analysis_refreshes_shared_news_context _______________
+work\review_checks.py:79: in test_new_analysis_refreshes_shared_news_context
+    assert svc.last_scan_context is fresh
+E   assert namespace(as_of=datetime.datetime(2026, 9, 22, 15, 0, tzinfo=datetime.timezone.utc), securities={}) is namespace(as_of=datetime.datetime(2026, 9, 25, 15, 0, tzinfo=datetime.timezone.utc), securities={})
+E    +  where namespace(as_of=datetime.datetime(2026, 9, 22, 15, 0, tzinfo=datetime.timezone.utc), securities={}) = <marketlens.application.services.MarketLensService object at 0x000001AF62F4BA40>.last_scan_context
+___________________ test_sync_refused_while_scan_lock_held ____________________
+work\review_checks.py:97: in test_sync_refused_while_scan_lock_held
+    assert result.get('started') is False, result
+E   AssertionError: {'started': True}
+E   assert True is False
+E    +  where True = <built-in method get of dict object at 0x000001AF62F78640>('started')
+E    +    where <built-in method get of dict object at 0x000001AF62F78640> = {'started': True}.get
+______________ test_disjoint_price_days_report_missing_valuation ______________
+work\review_checks.py:103: in test_disjoint_price_days_report_missing_valuation
+    assert set(snap.missing_prices) == {'A','B'}, snap
+E   AssertionError: PortfolioSnapshot(valuation_day=None, cash=1000, invested_value=0.0, nav=1000.0, unrealized_pnl=0.0, holdings=(Holding...heme_weights={}, hhi=0.0, beta=None, correlations=(), missing_prices=(), notes=('보유 종목들의 공통 가격 거래일이 없음 → 평가금액 계산 불가',))
+E   assert set() == {'A', 'B'}
+E     
+E     Extra items in the right set:
+E     'A'
+E     'B'
+E     Use -v to get more diff
+___________ test_provider_error_does_not_echo_short_quoted_api_key ____________
+work\review_checks.py:124: in test_provider_error_does_not_echo_short_quoted_api_key
+    assert key not in json.dumps(payload), payload['providers'][-1]
+E   AssertionError: {'name': 'echo_fixture', 'kind': 'price', 'mode': 'MOCK', 'status': 'DOWN', ...}
+E   assert 'FAKEKEY1234567890' not in '{"providers...rrors": 0}}}'
+E     
+E     'FAKEKEY1234567890' is contained here:
+E       i_key\":\"FAKEKEY1234567890\",\"error\":\"invalid key\"}", "freshness": null, "rate_limit_state": "OK", "breaker_state": "CLOSED"}], "configured": [{"kind": "universe", "provider": "mock-universe", "mode": "MOCK", "configured": true, "reason": null}, {"kind": "price", "provider": "mock-price", "mode": "MOCK", "configured": true, "reason": null}, {"kind": "fundamental", "provider": "mock-fundamentals", "mode": "MOCK", "configured": true, "reason": null}, {"kind": "analyst", "provider": "mock-analyst", "mode": "MOCK", "configured": true, "re...
+E     
+E     ...Full output truncated (2 lines hidden), use '-vv' to show
+------------------------------ Captured log call ------------------------------
+WARNING  marketlens.providers:logging.py:150 PROVIDER_FAILED
+============================== warnings summary ===============================
+work\review-venv\Lib\site-packages\fastapi\testclient.py:1
+  C:\Users\Joon\Documents\Codex\2026-09-28\referenced-chatgpt-conversation-this-is-an\work\review-venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED work/review_checks.py::test_half_cap_reaches_amount - AssertionError: ...
+FAILED work/review_checks.py::test_small_cap_reaches_already_small_buy - Asse...
+FAILED work/review_checks.py::test_committee_watch_blocks_every_buy[BUY SMALL]
+FAILED work/review_checks.py::test_committee_watch_blocks_every_buy[ADD] - As...
+FAILED work/review_checks.py::test_cold_start_preserves_sector_limit - Assert...
+FAILED work/review_checks.py::test_expired_recommendation_has_no_current_buy_quantity
+FAILED work/review_checks.py::test_new_analysis_refreshes_shared_news_context
+FAILED work/review_checks.py::test_sync_refused_while_scan_lock_held - Assert...
+FAILED work/review_checks.py::test_disjoint_price_days_report_missing_valuation
+FAILED work/review_checks.py::test_provider_error_does_not_echo_short_quoted_api_key
+10 failed, 1 warning in 0.94s

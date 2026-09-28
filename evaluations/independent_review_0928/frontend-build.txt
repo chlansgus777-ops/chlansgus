@@ -1,0 +1,14 @@
+
+> marketlens-ui@0.1.0 build
+> tsc -b && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 72 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                    0.40 kB │ gzip:   0.27 kB
+dist/assets/PretendardVariable-CJuje-Rk.woff2  2,057.69 kB
+dist/assets/index-ChR5WMCQ.css                    24.19 kB │ gzip:   5.78 kB
+dist/assets/index-BbIzmyKL.js                    453.81 kB │ gzip: 143.17 kB
+✓ built in 1.48s

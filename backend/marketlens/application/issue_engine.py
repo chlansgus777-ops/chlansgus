@@ -220,6 +220,11 @@ class IssueBuildResult:
     relevance: dict[str, dict[str, float]] = field(default_factory=dict)  # news_id -> {ticker: score}
     syndicated_dropped: int = 0
 
+    def since(self, cut: datetime) -> "IssueBuildResult":
+        """Only the issues published at/after ``cut`` (carrying company news into a newer market context)."""
+        return IssueBuildResult([i for i in self.issues if i.publish_time >= cut], self.injection_flags, self.unclassified,
+                                self.articles, self.relevance, self.syndicated_dropped)
+
     def merged(self, other: "IssueBuildResult") -> "IssueBuildResult":
         by_id = {i.issue_id: i for i in self.issues}
         for i in other.issues:

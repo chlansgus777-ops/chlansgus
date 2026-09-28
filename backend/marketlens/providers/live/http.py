@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from marketlens.infrastructure.logging import redact_text
 from marketlens.infrastructure.resilience import TokenBucket
 from marketlens.providers.contracts import ProviderDataError, ProviderUnavailable, RateLimited
 
@@ -64,6 +65,7 @@ class HttpClient:
         text = re.sub(r"<[^>]+>", " ", text)
         text = re.sub(r"(?i)(api[_-]?key|apikey|token|secret|password|authorization)\s*[=:]\s*\S+", r"\1=<redacted>", text)
         text = re.sub(r"\b[A-Za-z0-9_\-]{32,}\b", "<redacted>", text)
+        text = redact_text(text)  # configured secrets and quoted JSON keys too (review 2026-09-28 F09)
         text = " ".join(text.split())
         return f": {text[:400]}" if text else ""
 

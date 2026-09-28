@@ -17,6 +17,7 @@ from marketlens.domain.enums import BULLISH_ACTIONS, Action, DataQuality, HardVe
 from marketlens.domain.entry import EntryPlan
 from marketlens.domain.facts import DataQualityReport
 from marketlens.domain.scoring import ScoreCard
+from marketlens.domain.sizing import ACTION_BASE_SIZE, effective_size, tightest
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +67,7 @@ class Decision:
     reasons: tuple[str, ...]
     raw_action: Action  # before hysteresis / material-change gate
     suppressed_change: bool = False
-    size_limit: str | None = None
+    size_limit: str | None = None  # the tightest size a bullish action may take (FULL/HALF/SMALL/WATCH): every limit, not only one that changed the action
     notes: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -228,11 +229,23 @@ def decide(card: ScoreCard, plan: EntryPlan | None, ctx: DecisionContext, th: De
     if why:
         notes.append(why)
         action = gated
-        size_limit = ctx.portfolio_size_cap
+        size_limit = tightest(size_limit, ctx.portfolio_size_cap)
 
-    if ctx.sector_unknown and action == Action.BUY:
-        notes.append("업종 분류 불명확 → 업종별 모델을 확정할 수 없어 소량 매수로 제한")
-        action, size_limit = Action.BUY_SMALL, "SMALL"
+    if ctx.sector_unknown and action in BULLISH_ACTIONS:
+        if action == Action.BUY:
+            notes.append("업종 분류 불명확 → 업종별 모델을 확정할 수 없어 소량 매수로 제한")
+            action = Action.BUY_SMALL
+        elif tightest(size_limit, "SMALL") != size_limit:
+            notes.append("업종 분류 불명확 → 매수 규모를 소량(SMALL)으로 제한")
+        size_limit = tightest(size_limit, "SMALL")
+    if action in BULLISH_ACTIONS:
+        # every limit reaches the amount, whether or not it changed the action (independent review 2026-09-28 F01:
+        # a HALF limit on a BUY, or SMALL on a BUY SMALL, left size_limit empty and the screen sized a full buy)
+        # size_limit stays "a limit that lowers this action's own size" (a FULL cap on anything, or HALF on BUY SMALL, is none)
+        capped = tightest(size_limit, ctx.portfolio_size_cap)
+        if capped != size_limit and effective_size(action.value, capped) != ACTION_BASE_SIZE[action.value]:
+            notes.append(f"포트폴리오 한도(현금·업종·테마·상관관계) → 매수 규모를 {capped}로 제한")
+            size_limit = capped
 
     conf = compute_confidence(card, action, th, ctx.data_quality)
     if ctx.sector_unknown:

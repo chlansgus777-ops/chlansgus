@@ -160,15 +160,22 @@ class DataAccess:
 
         sid = self.security_of(ticker, on, s)
         labels = (self.store.security_labels(sid, s) | {ticker}) if self.store is not None else {ticker}
-        q = select(R).where(R.ticker.in_(sorted(labels)), R.mode == mode)
+        # identity first on three light columns, then the full rows (inputs, results, config — hundreds of KB each) only
+        # for the ``limit`` that belong to this security (independent review 2026-09-28 F08: the latest ONE loaded every
+        # stored analysis). The identity filter stays before the limit: a reused ticker's newer rows are another company.
+        q = select(R.id, R.ticker, R.as_of).where(R.ticker.in_(sorted(labels)), R.mode == mode)
         if before is not None:
             q = q.where(R.as_of <= before if inclusive else R.as_of < before)
         if exclude_id is not None:
             q = q.where(R.id != exclude_id)
-        rows = list(s.scalars(q.order_by(desc(R.as_of), desc(R.id))))
-        ids = self.securities_of([(r.ticker, to_ny(r.as_of).date()) for r in rows], s)
+        light = s.execute(q.order_by(desc(R.as_of), desc(R.id))).all()
+        ids = self.securities_of(list({(t, to_ny(a).date()) for _i, t, a in light}), s)
         # a label that belonged to another security then (a reuse, another class) is not this one's history
-        return [r for r in rows if ids[(r.ticker, to_ny(r.as_of).date())] == sid][:limit]
+        keep = [i for i, t, a in light if ids[(t, to_ny(a).date())] == sid][:limit]
+        if not keep:
+            return []
+        full = {r.id: r for r in s.scalars(select(R).where(R.id.in_(keep)))}
+        return [full[i] for i in keep if i in full]
 
     def security_of(self, ticker: str, on: date, s: Any) -> str:
         return self.securities_of([(ticker, on)], s)[(ticker, on)]

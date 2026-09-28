@@ -96,6 +96,10 @@ def _row_summary(r: Any, s: MarketLensService | None = None, fetch_quote: bool =
         "action": r.final_action, "deterministic_action": r.deterministic_action, "committee_status": r.committee_status,
         "ideal_entry": lv["ideal_entry"] if lv else entry.get("ideal_entry"), "max_buy": lv["max_buy"] if lv else entry.get("max_buy"),
         "target": lv["target1"] if lv else entry.get("target1"), "stop": lv["stop"] if lv else entry.get("stop"), "downside": entry.get("downside_pct"), "rr": entry.get("rr_at_current"),
+        # the rest of the plan on the same (today's) share basis, so a screen never mixes it with the analysis snapshot (review 2026-09-28 F03)
+        "target2": lv["target2"] if lv else entry.get("target2"), "buy_zone_low": lv["acceptable_low"] if lv else entry.get("acceptable_low"),
+        "buy_zone_high": lv["acceptable_high"] if lv else entry.get("acceptable_high"), "add_zone_low": lv["add_zone_low"] if lv else entry.get("add_zone_low"),
+        "add_zone_high": lv["add_zone_high"] if lv else entry.get("add_zone_high"),
         "catalyst": nxt.get("title"), "catalyst_date": nxt.get("event_date"), "risk": er.get("level"),
         "data_quality": r.data_quality, "mode": r.mode, "vetoes": res["decision"]["vetoes"], "as_of": r.as_of.isoformat(),
         "version": getattr(r, "version", 1) or 1, "supersedes_id": getattr(r, "supersedes_id", None),
@@ -165,7 +169,8 @@ def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
             "recommendation": summary,
             "position_plan": _position_plan(s, ss, row, summary),
             "analysis": row.result,
-            "price_history": [{"day": b["day"], "close": b["close"]} for b in bars[-130:]],
+            # on today's share basis like the plan drawn over it: a split after the analysis divides the stored closes too
+            "price_history": [{"day": b["day"], "close": b["close"] / (summary.get("split_factor_since") or 1.0)} for b in bars[-130:]],
             "committee": com.payload if com else None,
             "committee_recommendation_id": com.recommendation_id if com else None,  # the UI shows it only for this version
             "history": history,
@@ -179,18 +184,30 @@ def _position_plan(s: MarketLensService, ss: Any, row: Any, summary: dict[str, A
     """Dollars and whole shares for a buy recommendation, from the user's portfolio value (cash + holdings at the
     last close). Without an entered portfolio the screen says so instead of guessing an account size."""
     from marketlens.domain.portfolio import position_plan
+    from marketlens.domain.sizing import recommendation_size_cap
 
+    if row.final_action not in {a.value for a in BULLISH_ACTIONS}:
+        return {"available": False, "reason": "매수 판정이 아니어서 매수 수량을 계산하지 않음"}
+    # an order-sized quantity only for a recommendation that holds NOW (independent review 2026-09-28 F04): an expired,
+    # re-judged or unchecked plan is a record of the analysis, not something to buy — the screen shows why instead
+    if summary.get("actionable_now") is not True:
+        why = summary.get("current_status_reason") or "현재 가격 기준으로 다시 확인되지 않음"
+        return {"available": False, "reason": f"지금 실행할 수 있는 매수 추천이 아니어서 수량을 계산하지 않음 — {why}", "status": summary.get("current_status")}
     pf = s.portfolio(ss)
     end = last_completed_session(s.now())
     closes = {h.ticker: {b.day: b.close for b in (s.data.bars(h.ticker, end - timedelta(days=10), end).value or []) if b.day <= end} for h in pf.holdings}
     entered = repo.get_setting(ss, "portfolio_cash", "") not in ("", None) or bool(pf.holdings)  # a default cash figure is not the user's account
-    nav = portfolio_snapshot(pf, closes).nav if entered else None
+    snap = portfolio_snapshot(pf, closes) if entered else None
+    if snap is not None and snap.valuation_status == "UNAVAILABLE":  # a cash-only total is not the account (review 2026-09-28 F10)
+        return {"available": False, "reason": "보유 종목을 같은 거래일 종가로 평가할 수 없어 포트폴리오 금액을 모릅니다 — 매수 금액을 계산하지 않음"}
+    nav = snap.nav if snap is not None else None
     price = summary.get("revalidated_price") or summary.get("price")  # the re-checked current price when there is one
     current = next((h.quantity * price for h in pf.holdings if h.ticker == row.ticker), 0.0) if price else 0.0
-    size_cap = ((row.result or {}).get("decision") or {}).get("size_limit")
+    size_cap = recommendation_size_cap(row)  # every limit: decision, portfolio review, AI portfolio manager (review 2026-09-28 F01/F05)
     p = position_plan(row.final_action, size_cap, nav, price, summary.get("stop"), current, s.model_config().portfolio)  # stop on today's share basis
     if p is None:
-        why = ("포트폴리오(현금·보유 종목)를 입력하면 매수 금액과 수량을 계산합니다" if not nav else "매수 판정이 아니거나 현재가가 없어 계산하지 않음")
+        why = ("포트폴리오(현금·보유 종목)를 입력하면 매수 금액과 수량을 계산합니다" if not nav
+               else "비중 한도(WATCH)로 새 매수 금액이 없음" if size_cap == "WATCH" else "현재가가 없어 계산하지 않음")
         return {"available": False, "reason": why}
     return {"available": True, "nav": round(nav or 0, 2)} | encode(p)
 
@@ -218,10 +235,7 @@ def macro(req: Request) -> dict[str, Any]:
 
 
 def _ctx(s: MarketLensService) -> Any:
-    if s.last_scan_context is None:
-        with s.sf() as ss:
-            s.last_scan_context = s.scanner(s.model_config(), ss).build_context(s.now())
-    return s.last_scan_context
+    return s.market_context()  # never older than CONTEXT_MAX_AGE (review 2026-09-28 F06)
 
 
 @router.get("/issues")

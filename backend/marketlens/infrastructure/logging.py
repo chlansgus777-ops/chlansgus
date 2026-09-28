@@ -42,6 +42,8 @@ _KEY_PATTERNS = [
     re.compile(r"((?<![A-Za-z0-9])(?:api_key|apikey|api-key|token|access_token|key|secret|client_secret|password)=)([^&\s\"']+)", re.IGNORECASE),
     re.compile(r"((?:authorization|x-api-key|x-marketlens-token|proxy-authorization)\s*[:=]\s*)((?:bearer|basic)\s+)?([^\s,;\"'}]+)", re.IGNORECASE),
     re.compile(r"(\bbearer\s+)([A-Za-z0-9._\-~+/=]{8,})", re.IGNORECASE),
+    # a quoted key name in JSON / a repr: {"api_key":"…"} (independent review 2026-09-28 F09 — the provider echoed it back)
+    re.compile(r"((?:\"|')(?:api[_-]?key|apikey|x-api-key|token|access_token|secret|client_secret|password|authorization)(?:\"|')\s*:\s*(?:\"|'))([^\"']+)", re.IGNORECASE),
 ]
 # exact sensitive key names (or *_api_key / *_secret / *_token); counters such as "input_tokens" are not secrets
 SENSITIVE_KEYS = re.compile(r"^(.*[_-])?(authorization|api[_-]?key|apikey|token|secret|password|passwd|credentials?|cookie)$", re.IGNORECASE)
@@ -115,11 +117,21 @@ class JsonFormatter(logging.Formatter):
 
 NOISY_LOGGERS = ("httpx", "httpcore", "anthropic", "urllib3")
 
+# one redactor for the process: the log handlers AND every place provider text is stored or returned (health, sync
+# and ingestion records, error details) — so a configured key never reaches a status API even when it is short
+_PROCESS_REDACTOR = SecretRedactor()
+
+
+def redact_text(text: str) -> str:
+    """Configured secrets and secret-shaped values removed (the same rules as the logs)."""
+    return _PROCESS_REDACTOR.redact(text) if text else text
+
 
 def configure_logging(level: str = "INFO", secrets: Iterable[str] = (), log_dir: Path | None = None) -> None:
     """JSON logs to stderr (and a rotating file when ``log_dir`` is given). The redactor sits on every
     handler, so records from third-party libraries (e.g. httpx request URLs with ?token=) are redacted too."""
-    redactor = SecretRedactor(secrets)
+    redactor = _PROCESS_REDACTOR
+    redactor.secrets = sorted({x for x in secrets if x and len(x) >= 6}, key=len, reverse=True)
     handlers: list[logging.Handler] = [logging.StreamHandler()]
     if log_dir is not None:
         from logging.handlers import RotatingFileHandler

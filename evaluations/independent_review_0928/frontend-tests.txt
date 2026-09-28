@@ -1,0 +1,16 @@
+
+> marketlens-ui@0.1.0 test
+> vitest run
+
+
+ RUN  v5.0.2 C:/Users/Joon/Documents/Codex/2026-09-28/referenced-chatgpt-conversation-this-is-an/work/source/chlansgus-claude-marketlens-investment-system-iyki44/frontend
+
+
+ Test Files  18 passed (18)
+      Tests  93 passed (93)
+   Start at  16:13:24
+   Duration  14.04s (environment 75%, import 20%, tests 3%, transform 2%)
+
+    Isolate  18 workers spawned · ~6.14s startup each (spawn + environment, per file)
+             at least ~1.23s faster with isolate: false — reuses workers across files instead of one per file
+

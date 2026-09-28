@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { advise, priceZone } from "../advice";
+import { advise, planNow, priceZone, quantityShown } from "../advice";
 import { api } from "../api";
 import { CommitteeSummary, CommitteeView } from "../components/CommitteeView";
 import { Action, Bar, Card, Disclosure, Empty, Err, EvidenceChips, FreshnessTable, Loading, Notice, PriceChart, PriceLadder, Quality, Ribbon, Section, StaleData, StatePanel, StatusBadge, Term, Tile, isExpired } from "../components/ui";
@@ -45,9 +45,11 @@ export function missingData(a: Analysis): string[] {
 /** One instance per ticker: every piece of local state (busy flags, notes, pending AI runs) starts fresh
  * when the ticker changes, so nothing from another stock can be shown on this page. */
 /** Dollars and whole shares instead of "소량" — from the entered portfolio value and the configured position sizes. */
-function PositionPlanView({ p }: { p?: PositionPlan }) {
+function PositionPlanView({ p, shown, why }: { p?: PositionPlan; shown: boolean; why?: string | null }) {
   if (!p) return null;
   if (!p.available) return <div className="caption" style={{ marginTop: 6 }}>매수 금액·수량: {p.reason}</div>;
+  // the page's own re-check may have expired the plan after the server sized it: never leave an order-sized quantity up
+  if (!shown) return <div className="caption" style={{ marginTop: 6 }} data-testid="position-plan-withheld">매수 금액·수량: 지금 실행할 수 있는 추천이 아니어서 표시하지 않습니다{why ? ` — ${why}` : ""}</div>;
   const sizeKo: Record<string, string> = { FULL: "기본 비중", HALF: "절반 비중", SMALL: "소량(4분의 1) 비중" };
   return (
     <div className="kv" style={{ marginTop: 8 }} aria-label="매수 금액과 수량">
@@ -136,10 +138,13 @@ function StockDetail({ ticker }: { ticker: string }) {
   const checks = a.data_quality.checks ?? [];
   const missing = checks.filter((c) => c.quality !== "FRESH" && c.quality !== "DELAYED");
   const unavailableComps = comps.filter((c) => !c.available);
-  const e = a.entry;
+  // one price basis for the whole page: today's shares (review 2026-09-28 F03); the snapshot's own prices are the record
+  const split = typeof stored.split_factor_since === "number" && stored.split_factor_since > 0 ? stored.split_factor_since : 1;
+  const priceNow = typeof stored.price === "number" ? stored.price : a.price === null ? null : a.price / split;
+  const e = planNow(a.entry, stored, a.price);
   const finalAction = com && !["UNAVAILABLE", "SKIPPED"].includes(com.status) ? com.final_action : rec.action;
-  const adv = advise({ action: finalAction, price: a.price, maxBuy: e?.max_buy, idealEntry: e?.ideal_entry, stop: e?.stop, rr: e?.rr_at_current, eventRisk: a.event_risk.level, vetoes: a.decision.vetoes, sizeLimit: a.decision.size_limit, status: rec.current_status, sectorKnown: a.sector_known });
-  const zone0 = priceZone({ action: finalAction, price: a.price, maxBuy: e?.max_buy, stop: e?.stop });
+  const adv = advise({ action: finalAction, price: priceNow, maxBuy: e?.max_buy, idealEntry: e?.ideal_entry, stop: e?.stop, rr: e?.rr_at_current, eventRisk: a.event_risk.level, vetoes: a.decision.vetoes, sizeLimit: a.decision.size_limit, status: rec.current_status, sectorKnown: a.sector_known });
+  const zone0 = priceZone({ action: finalAction, price: priceNow, maxBuy: e?.max_buy, stop: e?.stop });
   // the zone is computed from the analysis-time price: once the stored plan is no longer current, say so
   const zone = rec.current_status && rec.current_status !== "CURRENT" && zone0.tone !== "neutral"
     ? { text: `분석 당시 가격 기준 ${zone0.text} — 지금은 ${STATUS_INFO[rec.current_status]?.label ?? "재확인 필요"}`, tone: "warn" as const } : zone0;
@@ -183,8 +188,8 @@ function StockDetail({ ticker }: { ticker: string }) {
         <div className="plain">{adv.headline}</div>
         {adv.details.map((t, i) => <div key={i} className="explain">· {t}</div>)}
         <div className="tiles">
-          <Tile title="현재가" value={<>{price(a.price)}{usdkrw && a.price !== null ? <span className="caption" style={{ marginLeft: 6 }} title={`원/달러 ${num(usdkrw, 1)} 기준 참고 환산`}>{krwAux(a.price, usdkrw)}</span> : null}</>}
-                sub={<>{stampEt(a.price_timestamp)} · {ko(SESSION_KO, a.session, "세션 정보 없음")} · <Quality q={a.price_quality} />{rec.revalidated_price != null && rec.revalidated_price !== a.price ? <> · 재확인 가격 {price(rec.revalidated_price)}</> : null}</>} testId="tile-price" />
+          <Tile title="현재가" value={<>{price(priceNow)}{usdkrw && priceNow !== null ? <span className="caption" style={{ marginLeft: 6 }} title={`원/달러 ${num(usdkrw, 1)} 기준 참고 환산`}>{krwAux(priceNow, usdkrw)}</span> : null}</>}
+                sub={<>{stampEt(a.price_timestamp)} · {ko(SESSION_KO, a.session, "세션 정보 없음")} · <Quality q={a.price_quality} />{split !== 1 ? <> · 분할 조정(분석 당시 {price(a.price)})</> : null}{rec.revalidated_price != null && rec.revalidated_price !== priceNow ? <> · 재확인 가격 {price(rec.revalidated_price)}</> : null}</>} testId="tile-price" />
           <Tile title={<Term k="max_buy">최대 매수가</Term>} value={e ? price(e.max_buy) : NO_DATA} sub={zone.text} tone={zoneTone} testId="tile-maxbuy" />
           <Tile title={<Term k="stop">손절 기준(종가)</Term>} value={e ? price(e.stop) : NO_DATA} sub={e ? `현재가 대비 ${pct(e.downside_pct)} · 논리 철회 조건은 ⑤` : "가격 계획 없음"} testId="tile-stop" />
           <Tile title="⚠ 가장 큰 위험" text value={cautions[0] ?? "분석이 표시한 부정 요인 없음"} tone={cautions.length ? "warn" : undefined} testId="tile-risk" />
@@ -214,6 +219,12 @@ function StockDetail({ ticker }: { ticker: string }) {
         <StatePanel kind={rec.current_status === "PLAN_INVALIDATED" ? "out_of_range" : "stale"} title={`${STATUS_INFO[rec.current_status]?.label ?? rec.current_status} — 지금은 이 계획대로 실행하지 마세요`}
                     what={<>{rec.current_status_reason ?? ""} {STATUS_INFO[rec.current_status]?.help ?? ""}</>}
                     actions={<>{live?.newer !== undefined && <button onClick={d.reload}>최신 분석 보기</button>}<button className="primary" disabled={!!busy} onClick={() => setRefreshTick((t) => t + 1)}>분석 다시하기</button></>} />
+      )}
+      {split !== 1 && a.entry && (
+        <Ribbon tone="info" cap="분할 조정" testId="split-adjusted">
+          분석 이후 {split > 1 ? `주식분할(1주 → ${num(split, 2)}주)` : `주식병합(${num(1 / split, 2)}주 → 1주)`}이 있어 가격 계획 전체를 현재 주식 수 기준으로 환산해 보여줍니다.
+          분석 당시 기록: 최대 매수가 {price(a.entry.max_buy)} · 손절 {price(a.entry.stop)} · 1차 목표 {price(a.entry.target1)}
+        </Ribbon>
       )}
       {a.mode === "MOCK" && <Ribbon tone="danger" cap="모의 데이터">모의 데이터(MOCK)로 만든 분석입니다. 실제 투자 판단에 사용하지 마세요.</Ribbon>}
       {a.thesis_invalidated && <Ribbon tone="danger" cap="논리 훼손">투자 논리가 이미 깨졌습니다: {a.thesis_breaches.join("; ")}</Ribbon>}
@@ -257,7 +268,7 @@ function StockDetail({ ticker }: { ticker: string }) {
       <Section no={3} title="가격 계획" sub={zone.text} />
       <div className="two">
         <Card tone={zone.tone === "pos" ? "pos" : zone.tone === "neg" ? "neg" : zone.tone === "warn" ? "warn" : undefined} testId="price-plan">
-          {e && a.price !== null ? <PriceLadder now={a.price} stop={e.stop} ideal={e.ideal_entry} maxBuy={e.max_buy} t1={e.target1} t2={e.target2} /> : null}
+          {e && priceNow !== null ? <PriceLadder now={priceNow} stop={e.stop} ideal={e.ideal_entry} maxBuy={e.max_buy} t1={e.target1} t2={e.target2} /> : null}
           <div className="kv">
             <span className="k"><Term k="ideal_entry" /></span><span>{lv(e?.ideal_entry)}</span>
             <span className="k">허용 매수 구간</span><span>{e ? `${price(e.acceptable_low)} ~ ${price(e.acceptable_high)}` : NO_DATA}</span>
@@ -271,7 +282,7 @@ function StockDetail({ ticker }: { ticker: string }) {
           {!e && <div className="explain" style={{ marginTop: 8 }}>현재가·가격 이력이 부족하거나, 손절가 &lt; 현재가 &lt; 목표가 순서를 만족하는 계획을 만들 수 없어 가격 계획을 제시하지 않습니다.</div>}
           <div className="caption" style={{ marginTop: 10 }}><Term k="close_exit">종가 기준 이탈</Term>: 종가가 손절 기준가 아래로 마감하면 매도(보유 중)·매수 중단으로 판단합니다. 장중에만 내려간 경우는 신규 매수만 멈춥니다. <Term k="paper_stop">모의투자</Term>도 같은 규칙으로 계산합니다.</div>
           <div className="caption" style={{ marginTop: 4 }}>손익비는 계획상 위험 대비 목표 이익의 비율입니다. 목표에 도달할 확률이 아닙니다.</div>
-          <PositionPlanView p={d.data.position_plan} />
+          <PositionPlanView p={d.data.position_plan} shown={quantityShown(rec.current_status, stored.actionable_now)} why={rec.current_status_reason} />
         </Card>
         <Card title="가격 흐름과 계획선" icon="∿" sub explain={closes.length > 1 ? `최근 ${closes.length}거래일 종가 · 점선은 백엔드 가격 계획` : undefined}>
           {closes.length > 1 && e ? (
@@ -434,7 +445,7 @@ function StockDetail({ ticker }: { ticker: string }) {
         </tbody></table></div> : <Empty>이 종목에 영향을 주는 이슈가 없습니다.</Empty>}
         <h3 className="t-card" style={{ marginTop: 14 }}>시나리오 <span className="caption">(확률은 보정 데이터가 쌓이기 전까지 표시하지 않음)</span></h3>
         <div className="scroll"><table><thead><tr><th>시나리오</th><th>촉발 요인</th><th>가격 범위</th><th>무효화 조건</th></tr></thead>
-          <tbody>{a.scenarios.map((s) => <tr key={s.name}><td>{SCEN_KO[s.name] ?? s.name}</td><td style={{ whiteSpace: "normal" }}>{s.trigger}</td><td>{price(s.price_low)} – {price(s.price_high)}</td><td style={{ whiteSpace: "normal" }}>{s.invalidation}</td></tr>)}</tbody></table></div>
+          <tbody>{a.scenarios.map((s) => <tr key={s.name}><td>{SCEN_KO[s.name] ?? s.name}</td><td style={{ whiteSpace: "normal" }}>{s.trigger}</td><td>{price(s.price_low / split)} – {price(s.price_high / split)}</td><td style={{ whiteSpace: "normal" }}>{s.invalidation}</td></tr>)}</tbody></table></div>
       </More>
       <More title="근거 원본 · 버전 · 추천 이력" hint="감사·재현용">
         {(a.fundamental_adjustments ?? []).length > 0 && <div className="explain" style={{ marginBottom: 8 }}>재무 보정(공시 시점 기준 재작성 반영 · 주식분할 기준 통일): {(a.fundamental_adjustments ?? []).join(" · ")}</div>}

@@ -7,6 +7,7 @@ from datetime import date
 from typing import Mapping, Sequence
 
 from marketlens.domain.enums import SizeClass
+from marketlens.domain.sizing import effective_size
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +40,9 @@ class PortfolioLimits:
     full_position: float = 0.05
     half_position: float = 0.025
     small_position: float = 0.0125
+
+
+UNKNOWN_SECTORS = frozenset({"Unknown", "", "N/A"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +139,12 @@ def review_candidate(
     weights = [v / total for v in values.values()]
     hhi = sum(w * w for w in weights)
     add = limits.full_position
-    sector_after = sector_w.get(cand.sector, 0.0) + add
+    # a holding whose sector is unknown may be in the candidate's sector: counted there (worst case), never as "no
+    # exposure" (independent review 2026-09-28 F02)
+    unknown = [h.ticker for h in pf.holdings if h.sector in UNKNOWN_SECTORS and h.ticker in values]
+    unknown_w = sum(values[t] for t in unknown) / total if cand.sector not in UNKNOWN_SECTORS else 0.0
+    sector_now = sector_w.get(cand.sector, 0.0) + unknown_w
+    sector_after = sector_now + add
     theme_after = {t: theme_w.get(t, 0.0) + add for t in cand.themes}
 
     corrs: list[tuple[str, float]] = []
@@ -174,10 +183,13 @@ def review_candidate(
         return (SizeClass.FULL if room + eps >= limits.full_position else SizeClass.HALF if room + eps >= limits.half_position
                 else SizeClass.SMALL if room + eps >= limits.small_position else SizeClass.WATCH)
 
-    if sector_w.get(cand.sector, 0.0) >= limits.max_sector:
-        limit(SizeClass.WATCH, f"섹터 {cand.sector} 비중 이미 {sector_w[cand.sector]:.0%} (한도 {limits.max_sector:.0%})")
+    unk = f" — 업종 미확인 보유 {', '.join(unknown)}({unknown_w:.0%})를 같은 업종으로 가정" if unknown_w > 0 else ""
+    if sector_now >= limits.max_sector:
+        limit(SizeClass.WATCH, f"섹터 {cand.sector} 비중 이미 {sector_now:.0%} (한도 {limits.max_sector:.0%}){unk}")
     elif sector_after > limits.max_sector:
-        limit(fitting(limits.max_sector - sector_w.get(cand.sector, 0.0)), f"편입 시 섹터 {cand.sector} 비중 {sector_after:.0%} (한도 {limits.max_sector:.0%})")
+        limit(fitting(limits.max_sector - sector_now), f"편입 시 섹터 {cand.sector} 비중 {sector_after:.0%} (한도 {limits.max_sector:.0%}){unk}")
+    elif unknown_w > 0:
+        warnings.append(f"업종 미확인 보유 {', '.join(unknown)}: 같은 업종이라고 가정해도 한도 안")
     for t, w in theme_after.items():
         if w > limits.max_theme:
             limit(fitting(limits.max_theme - theme_w.get(t, 0.0)), f"편입 시 테마 {t} 노출 {w:.0%} (한도 {limits.max_theme:.0%})")
@@ -249,6 +261,9 @@ class PortfolioSnapshot:
     correlations: tuple[tuple[str, str, float], ...]  # pairwise, date-aligned
     missing_prices: tuple[str, ...]
     notes: tuple[str, ...]
+    # EMPTY (no holdings) | COMPLETE | PARTIAL (some holdings unpriced: totals and weights leave them out) | UNAVAILABLE
+    # (holdings exist but none could be valued on a common session: totals, P&L and concentration are not known — never 0)
+    valuation_status: str = "COMPLETE"
 
 
 def _daily_returns(closes: Mapping[date, float]) -> dict[date, float]:
@@ -263,10 +278,12 @@ def portfolio_snapshot(pf: Portfolio, closes: Mapping[str, Mapping[date, float]]
     notes: list[str] = list(pf.notes)
     tickers = [h.ticker for h in pf.holdings]
     have = [set(closes[t]) for t in tickers if closes.get(t)]
+    # the missing list is common_valuation's, kept as it is (independent review 2026-09-28 F10: it was recomputed as "no
+    # price at all" right after, so holdings with no COMMON session came back as "nothing missing" with a cash-only total)
     val_day, _prices, missing = common_valuation(closes, tickers)
-    missing = tuple(t for t in tickers if not closes.get(t))
-    if missing:
-        notes.append(f"가격 데이터 없는 보유 종목(평가금액에서 제외): {', '.join(missing)}")
+    no_price = [t for t in tickers if not closes.get(t)]
+    if no_price:
+        notes.append(f"가격 데이터 없는 보유 종목(평가금액에서 제외): {', '.join(no_price)}")
     if have and val_day is None:
         notes.append("보유 종목들의 공통 가격 거래일이 없음 → 평가금액 계산 불가")
     rows: list[HoldingValuation] = []
@@ -314,9 +331,10 @@ def portfolio_snapshot(pf: Portfolio, closes: Mapping[str, Mapping[date, float]]
             c = aligned_pearson({d: v for d, v in rets[a].items()}, {d: v for d, v in rets[b_t].items()})
             if c is not None:
                 corrs.append((a, b_t, round(c, 4)))
+    status = "EMPTY" if not tickers else "UNAVAILABLE" if len(missing) == len(tickers) else "PARTIAL" if missing else "COMPLETE"
     return PortfolioSnapshot(val_day, round(pf.cash, 2), round(invested, 2), round(nav, 2), round(unreal, 2), tuple(rows),
                              {k: round(v, 4) for k, v in sector_w.items()}, {k: round(v, 4) for k, v in theme_w.items()},
-                             round(hhi, 4), beta, tuple(corrs), missing, tuple(notes))
+                             round(hhi, 4), beta, tuple(corrs), missing, tuple(notes), status)
 
 
 def replace_weight(r: HoldingValuation, nav: float) -> HoldingValuation:
@@ -346,11 +364,8 @@ def position_plan(action: str, size_cap: str | None, nav: float | None, price: f
     limits = limits or PortfolioLimits()
     if action not in ("BUY", "BUY SMALL", "ADD") or not nav or nav <= 0 or not price or price <= 0:
         return None
-    size = "FULL" if action == "BUY" else "HALF"
-    order = ("FULL", "HALF", "SMALL")
-    if size_cap in order and order.index(size_cap) > order.index(size):
-        size = size_cap
-    if size_cap == "WATCH":
+    size = effective_size(action, size_cap)  # the action's own size, lowered by the tightest limit (review 2026-09-28 F01)
+    if size is None or size == "WATCH":
         return None
     weight = {"FULL": limits.full_position, "HALF": limits.half_position, "SMALL": limits.small_position}[size]
     notes: list[str] = []

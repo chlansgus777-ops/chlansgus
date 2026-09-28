@@ -76,6 +76,7 @@ class ScanContext:
     company_news_missing: dict[str, str] = field(default_factory=dict)
     estimate_fetch: dict[str, str] = field(default_factory=dict)  # Alpha Vantage prefetch outcome per ticker
     guidance_fetch: dict[str, str] = field(default_factory=dict)  # SEC 8-K guidance extraction outcome per ticker
+    company_issues: IssueBuildResult | None = None  # the per-company news part of ``issues`` (carried into a newer context)
 
 
 @dataclass
@@ -175,6 +176,7 @@ class Scanner:
             return
         company = build_issues(items, ctx.as_of, names, self.aliases)
         ctx.issues = company if ctx.issues is None else ctx.issues.merged(company)
+        ctx.company_issues = company if ctx.company_issues is None else ctx.company_issues.merged(company)
 
     # ------------------------------------------------------------------ inputs
     def gather_inputs(self, ctx: ScanContext, sec: Security, portfolio: Portfolio | None, peer_multiples: tuple[float, ...] = (), full: bool = True) -> AnalysisInputs:
