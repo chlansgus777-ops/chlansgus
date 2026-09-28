@@ -60,6 +60,15 @@ def test_one_background_job_per_key_and_the_last_good_value_survives_a_failure()
     r.shutdown()
 
 
+def test_max_age_zero_always_refreshes_even_when_the_clock_has_not_ticked():
+    r = Refresher(workers=1, clock=lambda: 100.0)  # Windows' monotonic clock moves in ~15 ms steps (CI run 36486391132)
+    r.get("k", lambda: "first", max_age=0)
+    assert r.wait("k", 2).value == "first"
+    r.get("k", lambda: "second", max_age=0)
+    assert r.wait("k", 2).value == "second"
+    r.shutdown()
+
+
 def test_only_the_request_that_starts_a_job_waits_for_it():
     r = Refresher(workers=2)
     gate = threading.Event()

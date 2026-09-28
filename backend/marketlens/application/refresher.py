@@ -63,7 +63,7 @@ class Refresher:
         with self._lock:
             e = self._entries.setdefault(key, _Entry())
             now = self._clock()
-            fresh = e.at is not None and now - e.at <= max_age
+            fresh = e.at is not None and now - e.at < max_age  # strict: max_age=0 always refreshes, even on a coarse clock
             backing_off = e.failed_at is not None and now - e.failed_at < retry_after and (e.at is None or e.failed_at > e.at)
             if not fresh and key not in self._inflight and not backing_off and not self._closed:
                 started = self._submit(key, fn)
