@@ -6,6 +6,8 @@ import { Action, Card, Change, Empty, Err, LineChart, Loading, Notice, Ribbon, S
 import { NotReady, ReadinessBanner, SyncControl, type ReadinessInfo } from "../components/Readiness";
 import { type ScanStatus, usePageTime, useStatus } from "../components/status";
 import { useApi } from "../components/useApi";
+import { LivePrice } from "../components/LivePrice";
+import { useViewQuotes } from "../quotes";
 import { ago, day, num, pct, price, stampEt } from "../format";
 import { ACTION_PLAIN, BULLISH, HEALTH_KO, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
 import type { OppRow, ScanInfo } from "../types";
@@ -72,11 +74,11 @@ function CandidateCard({ r, lead }: { r: OppRow; lead?: boolean }) {
       <div className="why">{plain}</div>
       {r.key_reason ? <div className="why"><b>핵심 이유 · </b>{r.key_reason}</div> : null}
       <div className="facts">
-        <div><div className="t">현재가</div><div className="v">{price(r.price)}</div></div>
+        <div title="최신 시세(앱 공용 스트림) — 아래 ‘분석 가격’과 다를 수 있습니다"><div className="t">현재가</div><div className="v"><LivePrice ticker={r.ticker} size="sm" showState={false} /></div></div>
         <div title="이상적 진입가 ~ 최대 매수가 (백엔드 가격 계획)"><div className="t">검토 가격대</div><div className="v" style={{ fontSize: 13 }}>{zone}</div></div>
         <div title="종가가 이 가격 아래로 마감하면 매수 근거가 깨졌다고 봅니다"><div className="t">손절 기준</div><div className="v">{r.stop == null ? "자료 부족" : price(r.stop)}</div></div>
       </div>
-      <div className="when">가격 기준 {stampEt(r.price_timestamp)}{r.session ? ` · ${ko(SESSION_KO, r.session)}` : ""} · 손절까지 {r.downside == null ? "자료 부족" : pct(r.downside)}{toMax != null ? ` · 최대 매수가까지 ${pct(toMax)}` : ""}</div>
+      <div className="when">분석 가격 {price(r.price)} · {stampEt(r.price_timestamp)}{r.session ? ` · ${ko(SESSION_KO, r.session)}` : ""} · 손절까지 {r.downside == null ? "자료 부족" : pct(r.downside)}{toMax != null ? ` · 최대 매수가까지 ${pct(toMax)}` : ""}</div>
       <div className="risk"><span aria-hidden>⚠</span><span><b>가장 큰 위험 · </b>{riskLine(r)}</span></div>
       <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 10, alignItems: "center" }}>
         <span className="when" style={{ whiteSpace: "nowrap" }}>점수 <b style={{ color: "var(--text)" }}>{num(r.score, 1)}</b></span>
@@ -135,6 +137,7 @@ export default function Dashboard() {
   const { valid, notValid } = splitCandidates(x?.top_opportunities ?? []);
   const shown = valid.slice(0, MAX_CARDS);
   const newestPrice = shown.map((r) => r.price_timestamp).filter((t): t is string => !!t).sort().pop() ?? null;
+  useViewQuotes(shown.map((r) => r.ticker));  // the few names on the home screen join the app-wide quote stream
   usePageTime(x && x.scan ? { label: "후보", priceTs: newestPrice, priceSession: shown[0]?.session ?? null, analysedAt: x.scan.as_of } : null);
   const scan = async () => {
     if (busy) return;  // a second click never starts a second scan (and its AI calls)
@@ -243,7 +246,7 @@ export default function Dashboard() {
           <div className="rail-card">
             <div className="head"><h2><IStar />관심 종목</h2><Link to="/stocks?tab=watch">관리 →</Link></div>
             {x.watchlist_alerts.length ? x.watchlist_alerts.map((a) => (
-              <div className="rail-item" key={a.ticker}><span className="t"><Link to={`/stocks/${a.ticker}`}><b>{a.ticker}</b></Link> <span className={a.level === "warning" ? "warn" : a.level === "positive" ? "ok" : "muted"}>{a.text}</span></span></div>
+              <div className="rail-item" key={a.ticker}><span className="t"><Link to={`/stocks/${a.ticker}`}><b>{a.ticker}</b></Link> <LivePrice ticker={a.ticker} size="sm" showState={false} /> <span className={a.level === "warning" ? "warn" : a.level === "positive" ? "ok" : "muted"}>{a.text}</span></span></div>
             )) : <div className="caption">관심 종목이 없습니다. 종목 화면에서 ‘관심 종목 추가’를 누르세요.</div>}
           </div>
           <div className="rail-card">

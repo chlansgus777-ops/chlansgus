@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
-import { Card, Donut, Empty, Err, Loading, More, Notice, Ribbon, StaleData, Term } from "../components/ui";
+import { Card, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } from "../components/ui";
 import { Ledger } from "../components/Ledger";
 import { LivePrice } from "../components/LivePrice";
 import { refreshQuoteSubscriptions } from "../quotes";
@@ -52,7 +52,8 @@ export default function Portfolio() {
   const save = async (body: unknown) => { setErr(null); try { await api.put("/portfolio", body); p.reload(); refreshQuoteSubscriptions(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } };
   const x = p.data;
   const reading = interpret(x);
-  const unvalued = x.valuation_status === "UNAVAILABLE";  // holdings exist but none could be valued (review 2026-09-28 F10)
+  const unvalued = x.valuation_status === "UNAVAILABLE";
+  const empty = !x.holdings.length;  // no holdings: nothing to diversify and no P&L — never "좋음" or a green ▲ $0  // holdings exist but none could be valued (review 2026-09-28 F10)
   const weights: [string, number][] = [...x.holdings.filter((h) => (h.market_value ?? 0) > 0).map((h) => [h.ticker, h.market_value ?? 0] as [string, number]), ["현금", x.cash]];
   const pnlPct = x.invested_value - x.unrealized_pnl > 0 ? x.unrealized_pnl / (x.invested_value - x.unrealized_pnl) : null;
   return (
@@ -69,11 +70,22 @@ export default function Portfolio() {
       <div className="g4">
         {unvalued ? (
           <Card title="총 평가금액" testId="nav-unavailable"><div className="t-key muted">평가 불가</div><div className="caption">보유 종목의 공통 거래일 종가가 없어 합계를 계산하지 않았습니다(현금 {price(x.cash)}만으로 표시하지 않음).</div></Card>
-        ) : <Card title="총 평가금액"><div className="t-key">{price(x.nav)}</div><div className="caption">{usdWithKo(x.nav)} · 기준일 {day(x.valuation_day)}{x.valuation_status === "PARTIAL" ? " · 일부 종목 제외" : ""}</div></Card>}
-        <Card title="평가손익">{unvalued ? <><div className="t-key muted">평가 불가</div><div className="caption">가격을 확인한 뒤 계산합니다</div></> : <><div className={`t-key ${x.unrealized_pnl >= 0 ? "pos" : "neg"}`}>{x.unrealized_pnl >= 0 ? "▲" : "▼"} {price(x.unrealized_pnl)}</div><div className="caption">매입금액 대비 {pct(pnlPct)}{x.missing_prices.length ? " · 가격 없는 종목 제외" : ""}</div></>}</Card>
-        <Card title="현금"><div className="t-key">{price(x.cash)}</div><div className="caption">{unvalued ? "전체 대비 비중 계산 불가" : `전체의 ${pct(x.nav > 0 ? x.cash / x.nav : null, 0, false)}`}</div></Card>
-        <Card title="분산 정도">{unvalued ? <><div className="t-key muted">판단 불가</div><div className="caption">평가금액이 없어 집중도를 계산할 수 없습니다</div></> : <><div className="t-key">{x.hhi < 0.15 ? "좋음" : x.hhi < 0.3 ? "보통" : "쏠림"}</div><div className="caption"><Term k="hhi">집중도(HHI)</Term> {num(x.hhi, 2)} · <Term k="beta">베타</Term> {num(x.beta, 2)}</div></>}</Card>
+        ) : <Card title="총 평가금액"><div className="t-key">{price(x.nav)}</div><div className="caption">{usdWithKo(x.nav)}{empty ? " · 현금만" : ` · 기준일 ${day(x.valuation_day)}`}{x.valuation_status === "PARTIAL" ? " · 일부 종목 제외" : ""}</div></Card>}
+        <Card title="평가손익">{unvalued ? <><div className="t-key muted">평가 불가</div><div className="caption">가격을 확인한 뒤 계산합니다</div></> : empty ? <><div className="t-key muted">—</div><div className="caption">보유 종목이 없어 손익이 없습니다</div></>
+          : <><div className={`t-key ${x.unrealized_pnl > 0 ? "pos" : x.unrealized_pnl < 0 ? "neg" : ""}`}>{x.unrealized_pnl > 0 ? "▲ " : x.unrealized_pnl < 0 ? "▼ " : ""}{price(x.unrealized_pnl)}</div><div className="caption">매입금액 대비 {pct(pnlPct)}{x.missing_prices.length ? " · 가격 없는 종목 제외" : ""}</div></>}</Card>
+        <Card title="현금"><div className="t-key">{price(x.cash)}</div><div className="caption">{unvalued ? "전체 대비 비중 계산 불가" : empty ? "전부 현금" : `전체의 ${pct(x.nav > 0 ? x.cash / x.nav : null, 0, false)}`}</div></Card>
+        <Card title="분산 정도">{unvalued ? <><div className="t-key muted">판단 불가</div><div className="caption">평가금액이 없어 집중도를 계산할 수 없습니다</div></> : empty ? <><div className="t-key muted">해당 없음</div><div className="caption">보유 종목이 생기면 집중도·베타를 계산합니다</div></>
+          : <><div className="t-key">{x.hhi < 0.15 ? "좋음" : x.hhi < 0.3 ? "보통" : "쏠림"}</div><div className="caption"><Term k="hhi">집중도(HHI)</Term> {num(x.hhi, 2)} · <Term k="beta">베타</Term> {num(x.beta, 2)}</div></>}</Card>
       </div>
+      {!empty && (
+        <Card title="보유 종목" explain="평가액·손익·비중은 모든 종목을 같은 거래일 종가로 계산합니다. ‘최신 시세’는 표시용입니다." testId="holdings">
+<div className="scroll"><table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th title="표시용 최신 시세 — 평가액·손익은 모든 종목 같은 거래일 종가 기준">최신 시세</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th></tr></thead>
+            <tbody>{x.holdings.map((h) => <tr key={h.ticker}><td>{h.ticker}</td><td>{h.source === "ledger" ? shares(h.quantity) : num(h.quantity, 0)}{h.source === "ledger" ? <span className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}> 거래 기록 기준</span> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)} <span className="caption">{day(h.price_day)}</span></>}</td>
+              <td><LivePrice ticker={h.ticker} size="sm" /></td>
+              <td>{h.market_value === null ? "—" : price(h.market_value)}</td><td className={h.unrealized_pnl === null ? "" : h.unrealized_pnl >= 0 ? "pos" : "neg"}>{h.unrealized_pnl === null ? "계산 안 함" : <>{h.unrealized_pnl >= 0 ? "▲" : "▼"} {price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</>}</td><td>{h.weight === null ? "—" : pct(h.weight, 1, false)}</td><td>{h.sector}</td></tr>)}</tbody></table></div>
+          {x.correlations.length > 0 && <div className="caption" style={{ marginTop: 8 }}><Term k="correlation">상관계수</Term>: {x.correlations.map(([a, b, c]) => `${a}↔${b} ${num(c, 2)}`).join(" · ")}</div>}
+        </Card>
+      )}
       <div className="g2">
         <Card title="한 줄 해석" icon="✎">
           {reading.length ? <ul className="list">{reading.map((r, i) => <li key={i}><span className={`dot ${r.tone === "warn" ? "warn" : "info"}`}>{r.tone === "warn" ? "!" : "i"}</span><span>{r.text}</span></li>)}</ul> : <Empty hint="아래에서 종목 코드·수량·매입 단가를 입력하세요.">아직 보유 종목이 없습니다.</Empty>}
@@ -96,27 +108,19 @@ export default function Portfolio() {
             void save({ holdings: [{ ticker: row.ticker.trim().toUpperCase(), quantity: q, cost_basis: c }] });
           }}>
             <div className="row">
-              <input placeholder="종목 코드 (예: NVDA)" value={row.ticker} onChange={(e) => setRow({ ...row, ticker: e.target.value })} />
-              <input placeholder="수량" value={row.quantity} onChange={(e) => setRow({ ...row, quantity: e.target.value })} />
-              <input placeholder="매입 단가(USD)" value={row.cost} onChange={(e) => setRow({ ...row, cost: e.target.value })} />
+              <input aria-label="보유 종목 코드" placeholder="종목 코드 (예: NVDA)" value={row.ticker} onChange={(e) => setRow({ ...row, ticker: e.target.value })} />
+              <input aria-label="보유 수량" inputMode="decimal" placeholder="수량" value={row.quantity} onChange={(e) => setRow({ ...row, quantity: e.target.value })} />
+              <input aria-label="매입 단가(USD)" inputMode="decimal" placeholder="매입 단가(USD)" value={row.cost} onChange={(e) => setRow({ ...row, cost: e.target.value })} />
               <button className="primary">저장</button>
             </div>
           </form>
           <form className="row" style={{ marginTop: 10 }} onSubmit={(e) => { e.preventDefault(); const v = Number(cash); if (Number.isFinite(v) && v >= 0) void save({ cash: v }); else setErr("현금은 0 이상의 숫자여야 합니다."); }}>
-            <input value={cash} onChange={(e) => setCash(e.target.value)} placeholder="현금(USD)" /><button>현금 저장</button>
+            <input aria-label="현금(USD)" inputMode="decimal" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="현금(USD)" /><button>현금 저장</button>
           </form>
         </Card>
       </div>
       <Ledger today={nyToday()} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
-      <More title="보유 종목 상세" hint="모든 종목을 같은 거래일 종가로 평가">
-        {x.holdings.length ? (
-          <div className="scroll"><table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th title="표시용 최신 시세 — 평가액·손익은 모든 종목 같은 거래일 종가 기준">최신 시세</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th></tr></thead>
-            <tbody>{x.holdings.map((h) => <tr key={h.ticker}><td>{h.ticker}</td><td>{h.source === "ledger" ? shares(h.quantity) : num(h.quantity, 0)}{h.source === "ledger" ? <span className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}> 거래 기록 기준</span> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)} <span className="caption">{day(h.price_day)}</span></>}</td>
-              <td><LivePrice ticker={h.ticker} size="sm" /></td>
-              <td>{h.market_value === null ? "—" : price(h.market_value)}</td><td className={h.unrealized_pnl === null ? "" : h.unrealized_pnl >= 0 ? "pos" : "neg"}>{h.unrealized_pnl === null ? "계산 안 함" : <>{h.unrealized_pnl >= 0 ? "▲" : "▼"} {price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</>}</td><td>{h.weight === null ? "—" : pct(h.weight, 1, false)}</td><td>{h.sector}</td></tr>)}</tbody></table></div>
-        ) : <Empty>보유 종목이 없습니다.</Empty>}
-        {x.correlations.length > 0 && <div className="caption" style={{ marginTop: 8 }}><Term k="correlation">상관계수</Term>: {x.correlations.map(([a, b, c]) => `${a}↔${b} ${num(c, 2)}`).join(" · ")}</div>}
-      </More>
+
     </div>
   );
 }
