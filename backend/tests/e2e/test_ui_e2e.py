@@ -16,6 +16,9 @@ DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 pytestmark = pytest.mark.skipif(not (DIST / "index.html").exists(), reason="frontend not built (npm run build)")
 
 
+SVC: dict = {}
+
+
 @pytest.fixture(scope="module")
 def server():
     import uvicorn
@@ -26,6 +29,7 @@ def server():
 
     svc = make_service(universe=80)
     svc.run_scan(run_committee=True)
+    SVC["svc"] = svc
     app = create_app(svc.settings, service=svc, run_migrations=False, dist_dir=DIST)
     port = choose_port("127.0.0.1", 0)
     srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
@@ -284,3 +288,53 @@ def test_provider_error_is_explained_with_a_retry(page, server):
         page.unroute("**/api/dashboard")
     page.get_by_role("button", name="다시 시도").click()
     page.get_by_role("heading", name="지금 검토할 후보", exact=True).wait_for()
+
+
+# ---------------------------------------------------------------- real-time quotes in the browser (MOCK trades)
+
+
+def test_live_quote_reaches_every_screen_within_a_second(page, server):
+    """Trades pushed into the app-wide hub (MOCK input — the live Finnhub path is measured by quote_soak.py) reach the
+    stock page within 1 s through the real SSE stream and the real browser store; a same-price newer trade moves the
+    trade time; the candidate table shows the same price; a dropped stream keeps the price and says 재연결 중."""
+    import statistics
+    import time as _t
+    from datetime import timedelta
+
+    svc = SVC["svc"]
+    hub = svc.quotes
+    t = _rows(page, server)[0]["ticker"]
+    _open_stock(page, server, t)
+    live = page.get_by_test_id(f"live-{t}").first
+    live.wait_for()
+    hub.streaming = True
+    hub.set_connected(True)
+    base = svc.now()
+    lat = []
+    for i in range(15):
+        px = 100.0 + i
+        t0 = _t.perf_counter()
+        hub.ingest_trade(t, px, int((base + timedelta(seconds=i)).timestamp() * 1000), 10)
+        page.wait_for_function(f"document.querySelector('[data-testid=\"live-{t}\"]').textContent.includes('${px:,.2f}')", timeout=3000)
+        lat.append((_t.perf_counter() - t0) * 1000)
+    assert statistics.median(lat) < 1000 and max(lat) < 1000, lat
+    print(f"browser display latency (MOCK trades) median {statistics.median(lat):.0f} ms, max {max(lat):.0f} ms")
+    assert live.get_attribute("data-state") == "LIVE"
+    before = live.inner_text()
+    hub.ingest_trade(t, 114.0, int((base + timedelta(seconds=30)).timestamp() * 1000), 10)  # same price, newer trade
+    page.wait_for_function(f"document.querySelector('[data-testid=\"live-{t}\"]').textContent !== {before!r}", timeout=3000)
+    assert "$114.00" in live.inner_text()
+    # the analysis basis stays the analysis price — never replaced by the tick
+    assert "분석 기준가" in page.get_by_test_id("analysis-basis").inner_text() and "$114.00" not in page.get_by_test_id("analysis-basis").inner_text()
+    # another screen, same store: the candidate table shows the same latest price
+    page.goto(f"{server}/#/stocks")
+    cell = page.get_by_test_id(f"live-{t}").first
+    cell.wait_for()
+    page.wait_for_function(f"document.querySelector('[data-testid=\"live-{t}\"]').textContent.includes('$114.00')", timeout=3000)
+    # the stream drops: the price stays, the word changes
+    _open_stock(page, server, t)
+    hub.set_connected(False)
+    page.wait_for_function(f"document.querySelector('[data-testid=\"live-{t}\"]').dataset.state === 'RECONNECTING'", timeout=3000)
+    assert "$114.00" in page.get_by_test_id(f"live-{t}").first.inner_text() and "재연결" in page.get_by_test_id(f"live-{t}").first.inner_text()
+    hub.streaming = False
+    assert page.errors == []  # type: ignore[attr-defined]
