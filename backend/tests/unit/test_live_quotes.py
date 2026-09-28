@@ -52,9 +52,11 @@ def test_identical_print_counts_as_duplicate_but_refreshes_receipt():
     h = hub(REG)
     ts = ms(REG - timedelta(seconds=3))
     h.ingest_trade("AAPL", 100.0, ts, 5, received=REG - timedelta(seconds=2))
+    v = h.version
     assert not h.ingest_trade("AAPL", 100.0, ts, 5, received=REG)
     st = h._states["AAPL"]
     assert st.duplicates == 1 and st.stream is not None and st.stream.received_ts == REG
+    assert h.version > v  # the new receipt time is pushed at once, never surfaced later with an old-looking delay
 
 
 def test_invalid_trades_are_ignored():
@@ -272,3 +274,22 @@ def test_out_of_order_print_records_how_late_it_was():
     h.ingest_trade("AAPL", 100.0, ms(REG - timedelta(seconds=4)), 1)
     s = h.status()["out_of_order_late_by_ms"]
     assert s["n"] == 1 and 2990 <= s["max"] <= 3010
+
+
+def test_closed_market_does_not_refetch_a_final_close():
+    """Weekend: the Friday close is final — no REST refresh every few minutes."""
+    from marketlens.domain.market_calendar import last_completed_session, session_close_utc
+
+    now = [CLOSED]
+    h = QuoteHub(source="finnhub", max_symbols=5, coverage_ko="", now=lambda: now[0], snapshot_every=timedelta(minutes=5))
+    h.set_pinned("holdings", ["AAPL", "MSFT"])
+
+    class Q:
+        def __init__(self, ts):
+            self.price, self.timestamp, self.source, self.volume, self.previous_close = 10.0, ts, "finnhub", None, None
+
+    close = session_close_utc(last_completed_session(CLOSED))
+    h.ingest_snapshot("AAPL", Q(close))                       # the final close
+    h.ingest_snapshot("MSFT", Q(close - timedelta(hours=3)))  # an intraday value — not final
+    now[0] = CLOSED + timedelta(hours=1)
+    assert h._due_snapshots() == ["MSFT"]

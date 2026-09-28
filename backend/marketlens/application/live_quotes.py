@@ -244,8 +244,9 @@ class QuoteHub:
                 return False
             if cur is not None and ts == cur.trade_ts and price == cur.price and volume == cur.volume:
                 st.duplicates += 1
-                self.stats.duplicates += 1  # identical print (same time, price, size) — keep the first, but it WAS received
-                cur.received_ts = rec
+                self.stats.duplicates += 1  # identical print (same time, price, size) — keep the first, but it WAS received:
+                cur.received_ts = rec       # the receipt time moves and clients are told now (a silent change surfaced
+                self._bump(st)              # seconds later with a stale-looking delay — soak run 36433393436, max 9.9 s)
                 return False
             st.stream = Trade(price, ts, rec, volume, self.source, "stream")
             st.trades += 1
@@ -388,7 +389,10 @@ class QuoteHub:
         connected, only those without a stream trade in the current session (the stream is the source then)."""
         planned, _ = self.plan()
         now = self._now()
-        seg = _session_start(now, classify_session(now))
+        session = classify_session(now)
+        seg = _session_start(now, session)
+        # market closed: a snapshot taken at/after the last close is final until the next session — no refresh
+        closed_final = session_close_utc(last_completed_session(now)) - timedelta(minutes=1) if session == TradingSession.CLOSED else None
         out = []
         with self._lock:
             for t in planned:
@@ -398,6 +402,8 @@ class QuoteHub:
                         out.append(t)
                     continue
                 if self.streaming and self.connected and st.stream is not None and st.stream.trade_ts >= seg:
+                    continue
+                if closed_final is not None and st.snapshot.trade_ts >= closed_final:
                     continue
                 if now - st.snapshot.received_ts >= self.snapshot_every:
                     out.append(t)

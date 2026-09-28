@@ -1,4 +1,5 @@
 import { Fragment, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { Card, Disclosure, Empty, Err, LineChart, Loading, Ribbon, StaleData, Tabs } from "../components/ui";
 import { useStatus } from "../components/status";
@@ -54,7 +55,10 @@ const SAMPLE_GOAL = 30;
 type Period = "30d" | "90d" | "1y" | "all";
 
 export default function Performance() {
-  const [period, setPeriod] = useState<Period>("all");
+  const [params, setParams] = useSearchParams();  // the period lives in the URL: back/refresh keep it
+  const q = params.get("period");
+  const period: Period = q === "30d" || q === "90d" || q === "1y" ? q : "all";
+  const setPeriod = (v: Period) => setParams(v === "all" ? {} : { period: v }, { replace: true });
   const p = useApi<Perf>(`/performance?period=${period}`, [period]);
   const st = useStatus();
   const mode = st?.system.data?.mode;
