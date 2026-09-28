@@ -56,7 +56,8 @@ export function SetupCard({ configured, mode, onSaved }: { configured: Record<st
 }
 
 interface S { mode: string; keys_configured: Record<string, boolean>; weights: Record<string, number>; decision: Record<string, number>; entry: Record<string, number>; scanner: Record<string, unknown>; calibration: Record<string, number>; sector_models: { id: string; name: string; rationale: string; primary_multiple: string; fundamental: { metric: string; label: string; weight: number; bad: number; good: number }[] }[]; note: string;
-  llm?: { provider: string; available: boolean; base_url: string | null; fast_model: string; deep_model: string }; scheduler?: { enabled: boolean; interval_minutes: number } }
+  llm?: { provider: string; available: boolean; base_url: string | null; fast_model: string; deep_model: string; openai_key?: boolean; budget_usd?: number | null; spent_usd?: number | null; reason?: string | null; price_in?: number | null; price_out?: number | null };
+  scheduler?: { enabled: boolean; interval_minutes: number; ai_committee?: boolean } }
 
 type Tab = "data" | "quotes" | "auto" | "ai" | "status" | "model";
 
@@ -96,25 +97,79 @@ function AutoRefresh({ d, onSaved }: { d: S; onSaved: () => void }) {
 
 function AiReview({ d, onSaved }: { d: S; onSaved: () => void }) {
   const f = useSave(onSaved);
-  const [url, setUrl] = useState(d.llm?.base_url ?? "http://127.0.0.1:11434/v1");
-  const [fast, setFast] = useState("");
-  const [deep, setDeep] = useState("");
   const llm = d.llm;
+  const [kind, setKind] = useState<"openai" | "local">(llm?.provider === "openai_compatible" ? "local" : "openai");
+  const [url, setUrl] = useState(llm?.base_url ?? "http://127.0.0.1:11434/v1");
+  const [key, setKey] = useState("");
+  const [fast, setFast] = useState(kind === "openai" ? "gpt-4o-mini" : "");
+  const [deep, setDeep] = useState(kind === "openai" ? "gpt-4.1-mini" : "");
+  const [budget, setBudget] = useState(llm?.budget_usd ? String(llm.budget_usd) : "8");
+  const [pin, setPin] = useState(llm?.price_in ? String(llm.price_in) : "");
+  const [pout, setPout] = useState(llm?.price_out ? String(llm.price_out) : "");
+  const onSchedule = !!d.scheduler?.ai_committee;
+  const pick = (k: "openai" | "local") => { setKind(k); setFast(k === "openai" ? "gpt-4o-mini" : ""); setDeep(k === "openai" ? "gpt-4.1-mini" : ""); };
+  const saveOpenAI = () => {
+    const v: Record<string, string> = { LLM_PROVIDER: "openai", FAST_MODEL: fast, DEEP_MODEL: deep, LLM_BUDGET_USD: budget };
+    if (pin) v.LLM_PRICE_INPUT_PER_M = pin;
+    if (pout) v.LLM_PRICE_OUTPUT_PER_M = pout;
+    if (key) v.OPENAI_API_KEY = key;
+    void f.save(v).then(() => setKey(""));
+  };
   return (
     <Card title="AI 검토 (선택)">
-      <div className="muted">AI 검토는 규칙 기반 판단을 바꾸지 않고, 근거를 다시 읽어 위험을 지적하거나 비중을 낮추기만 합니다. 유료 API 없이 쓰려면 이 컴퓨터에 설치한 로컬 모델(예: Ollama)의 OpenAI 호환 주소를 넣으세요.</div>
-      <div style={{ marginTop: 8 }}>현재: <b>{llm ? (llm.available ? `사용 가능 · ${llm.provider}` : `사용 안 함 (${llm.provider})`) : "정보 없음"}</b>{llm ? <span className="caption"> · 모델 {llm.fast_model} / {llm.deep_model}</span> : null}</div>
-      <label htmlFor="ai-url">로컬 모델 서버 주소 (이 컴퓨터만 허용)</label>
-      <input id="ai-url" value={url} onChange={(e) => setUrl(e.target.value)} autoComplete="off" />
-      <label htmlFor="ai-fast">빠른 모델 이름</label>
-      <input id="ai-fast" value={fast} onChange={(e) => setFast(e.target.value)} placeholder="예: qwen2.5:7b" autoComplete="off" />
-      <label htmlFor="ai-deep">깊은 검토 모델 이름</label>
-      <input id="ai-deep" value={deep} onChange={(e) => setDeep(e.target.value)} placeholder="예: qwen2.5:14b" autoComplete="off" />
-      <div className="row" style={{ marginTop: 10 }}>
-        <button disabled={f.busy} onClick={() => void f.save({ LLM_PROVIDER: "openai_compatible", OPENAI_BASE_URL: url, FAST_MODEL: fast, DEEP_MODEL: deep })}>로컬 모델 사용</button>
-        <button className="ghost" disabled={f.busy} onClick={() => void f.save({ LLM_PROVIDER: "none" })}>AI 검토 끄기</button>
+      <div className="muted">AI 검토는 규칙 기반 판단을 바꾸지 않고, 근거를 다시 읽어 위험을 지적하거나 비중을 낮추기만 합니다. 꺼 두어도 분석·추천은 그대로 동작합니다.</div>
+      <div style={{ marginTop: 8 }}>현재: <b>{llm ? (llm.available ? `사용 가능 · ${llm.provider}` : `사용 안 함 (${llm.provider})`) : "정보 없음"}</b>
+        {llm ? <span className="caption"> · 모델 {llm.fast_model} / {llm.deep_model}</span> : null}
+        {llm?.budget_usd ? <span className="caption"> · 예산 추정 사용 ${(llm.spent_usd ?? 0).toFixed(2)} / ${llm.budget_usd.toFixed(2)}</span> : null}
+        {llm && !llm.available && llm.reason ? <div className="caption warn">{llm.reason}</div> : null}
       </div>
-      <div className="caption" style={{ marginTop: 6 }}>유료 AI(Anthropic·OpenAI) 키는 ‘데이터 연결’ 탭이 아니라 설정 파일에서만 넣을 수 있습니다. 앱을 다시 시작하면 적용됩니다.</div>
+      <div className="row" style={{ marginTop: 12 }}>
+        <Tabs<"openai" | "local"> label="AI 공급원" value={kind} onChange={pick} items={[["openai", "OpenAI API (내 크레딧)"], ["local", "로컬 모델 (무료)"]]} />
+      </div>
+      {kind === "openai" ? (
+        <>
+          <label htmlFor="ai-key">OpenAI API 키 <span className="muted">({llm?.openai_key ? "설정됨" : "없음"})</span></label>
+          <input id="ai-key" type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={llm?.openai_key ? "바꾸려면 새 키를 입력" : "sk-..."} />
+          <label htmlFor="ai-fast">빠른 모델 (분석가 역할)</label>
+          <input id="ai-fast" value={fast} onChange={(e) => setFast(e.target.value)} autoComplete="off" />
+          <label htmlFor="ai-deep">깊은 검토 모델 (토론·종합·리스크)</label>
+          <input id="ai-deep" value={deep} onChange={(e) => setDeep(e.target.value)} autoComplete="off" />
+          <label htmlFor="ai-budget">예산 한도 (USD, 추정 사용액이 닿으면 호출 중단)</label>
+          <input id="ai-budget" inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)} autoComplete="off" style={{ width: 120 }} />
+          <div className="row" style={{ marginTop: 8, gap: 12 }}>
+            <div><label htmlFor="ai-pin">입력 단가 ($/100만 토큰)</label><input id="ai-pin" inputMode="decimal" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="예: 0.10" autoComplete="off" style={{ width: 120 }} /></div>
+            <div><label htmlFor="ai-pout">출력 단가 ($/100만 토큰)</label><input id="ai-pout" inputMode="decimal" value={pout} onChange={(e) => setPout(e.target.value)} placeholder="예: 0.50" autoComplete="off" style={{ width: 120 }} /></div>
+          </div>
+          <div className="caption">앱이 단가를 모르는 새 모델(예: GPT-6 계열)은 OpenAI 가격표의 단가를 여기에 넣어야 예산 한도 안에서 호출합니다. 넣으면 두 모델 모두 이 단가로 계산합니다.</div>
+          <div className="caption" style={{ marginTop: 6 }}>
+            대략의 비용(공개 단가 기준 추정): gpt-4o-mini/gpt-4.1-mini 조합이면 종목 1개 전체 검토 약 $0.02~0.05, 상위 20종목 스캔 1회 약 $0.15~0.4.
+            단가를 모르는 모델은 예산을 지킬 수 없어 호출하지 않습니다. 실제 청구액은 OpenAI 대시보드가 기준이며, 그곳의 사용 한도도 함께 걸어 두는 것을 권합니다.
+          </div>
+          <div className="row" style={{ marginTop: 10 }}>
+            <button disabled={f.busy} onClick={saveOpenAI}>OpenAI로 AI 검토 사용</button>
+            <button className="ghost" disabled={f.busy} onClick={() => void f.save({ LLM_PROVIDER: "none" })}>AI 검토 끄기</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="caption" style={{ marginTop: 8 }}>이 컴퓨터에 설치한 모델(예: Ollama)의 OpenAI 호환 주소만 넣을 수 있습니다. 무료지만 유료 모델보다 검토 품질이 낮고, 그래픽카드가 없으면 느립니다.</div>
+          <label htmlFor="ai-url">로컬 모델 서버 주소 (이 컴퓨터만 허용)</label>
+          <input id="ai-url" value={url} onChange={(e) => setUrl(e.target.value)} autoComplete="off" />
+          <label htmlFor="ai-fast">빠른 모델 이름</label>
+          <input id="ai-fast" value={fast} onChange={(e) => setFast(e.target.value)} placeholder="예: qwen2.5:7b" autoComplete="off" />
+          <label htmlFor="ai-deep">깊은 검토 모델 이름</label>
+          <input id="ai-deep" value={deep} onChange={(e) => setDeep(e.target.value)} placeholder="예: qwen2.5:14b" autoComplete="off" />
+          <div className="row" style={{ marginTop: 10 }}>
+            <button disabled={f.busy} onClick={() => void f.save({ LLM_PROVIDER: "openai_compatible", OPENAI_BASE_URL: url, FAST_MODEL: fast, DEEP_MODEL: deep })}>로컬 모델 사용</button>
+            <button className="ghost" disabled={f.busy} onClick={() => void f.save({ LLM_PROVIDER: "none" })}>AI 검토 끄기</button>
+          </div>
+        </>
+      )}
+      <div className="row" style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+        <span>자동 스캔 때 AI 검토: <b>{onSchedule ? "함께 실행" : "실행 안 함"}</b></span>
+        <button className="sm" disabled={f.busy} onClick={() => void f.save({ AI_COMMITTEE_ON_SCHEDULE: onSchedule ? "0" : "1" })}>{onSchedule ? "자동 스캔에서 끄기" : "자동 스캔에서도 실행"}</button>
+      </div>
+      <div className="caption" style={{ marginTop: 6 }}>기본은 ‘실행 안 함’입니다. 종목 화면의 ‘AI 검토 실행’으로 필요할 때만 쓰면 비용이 가장 적습니다. 저장한 키는 다시 표시하지 않으며, 앱을 다시 시작하면 적용됩니다.</div>
       <Feedback msg={f.msg} err={f.err} />
     </Card>
   );

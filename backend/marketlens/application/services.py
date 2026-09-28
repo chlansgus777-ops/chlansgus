@@ -65,6 +65,27 @@ def ledger_trade(r: Any) -> Trade:
     return Trade(int(r.id), r.day, r.kind, float(r.quantity), float(r.price), float(r.fees), float(r.amount), float(r.split_from), float(r.split_to))
 
 
+OPENAI_URL = "https://api.openai.com/v1"
+
+
+def _spent_usd(settings: Settings, provider: str) -> float:
+    """This provider's recorded estimated spend (all time), so the budget survives restarts."""
+    try:
+        from sqlalchemy import func, select
+
+        from marketlens.infrastructure.db.models import LLMCallRow
+        from marketlens.infrastructure.db.session import make_engine
+
+        eng = make_engine(settings.database_url)
+        with eng.connect() as c:
+            v = c.execute(select(func.sum(LLMCallRow.estimated_cost_usd)).where(LLMCallRow.provider == provider)).scalar()
+        eng.dispose()
+        return float(v or 0.0)
+    except Exception as e:  # noqa: BLE001 - no table yet (first start): nothing spent
+        log.info("llm spend lookup skipped: %s", type(e).__name__)
+        return 0.0
+
+
 def build_llm(settings: Settings) -> LLMProvider:
     p = settings.llm_provider
     if settings.mode == DataMode.MOCK and p in ("mock", "none", ""):
@@ -76,7 +97,21 @@ def build_llm(settings: Settings) -> LLMProvider:
 
         prov = AnthropicProvider(settings.anthropic_api_key, settings.fast_model, settings.deep_model)
         return prov if prov.available else UnavailableLLM("ANTHROPIC_API_KEY 미설정")
-    if p in ("openai", "openai_compatible"):
+    if p == "openai":
+        # the paid OpenAI API: always its official address (a saved local-model URL is never used for it), a key and a
+        # spending cap are both required
+        from marketlens.providers.llm.base import BudgetedLLM
+        from marketlens.providers.llm.openai_compat import OpenAICompatibleProvider
+
+        if not settings.openai_api_key:
+            return UnavailableLLM("OPENAI_API_KEY 미설정")
+        budget = getattr(settings, "llm_budget_usd", 0.0)
+        if budget <= 0:
+            return UnavailableLLM("유료 AI 예산 한도(LLM_BUDGET_USD) 미설정 — 한도 없이 유료 API를 쓰지 않음")
+        inner = OpenAICompatibleProvider(OPENAI_URL, settings.openai_api_key, settings.fast_model, settings.deep_model, name="openai")
+        pin, pout = getattr(settings, "llm_price_in", 0.0), getattr(settings, "llm_price_out", 0.0)
+        return BudgetedLLM(inner, budget, _spent_usd(settings, "openai"), price=(pin, pout) if pin > 0 and pout > 0 else None)
+    if p == "openai_compatible":
         from marketlens.providers.llm.openai_compat import OpenAICompatibleProvider
 
         return OpenAICompatibleProvider(settings.openai_base_url, settings.openai_api_key, settings.fast_model, settings.deep_model, name=p)

@@ -94,8 +94,8 @@ def _load_dotenv() -> None:
 
 # what the setup screen may write (nothing else: no path or code setting is reachable from the UI; the only URL is a
 # LOCAL model server — loopback only, so the screen can never point the app at another host)
-SETUP_KEYS = SECRET_ENV_KEYS + ("SEC_USER_AGENT", "MARKETLENS_MODE", "LLM_PROVIDER", "MARKETLENS_SCHEDULER", "OPENAI_BASE_URL", "FAST_MODEL", "DEEP_MODEL")
-_SETUP_VALUE = {"MARKETLENS_MODE": ("MOCK", "LIVE"), "LLM_PROVIDER": ("none", "anthropic", "openai", "openai_compatible"), "MARKETLENS_SCHEDULER": ("0", "1")}
+SETUP_KEYS = SECRET_ENV_KEYS + ("SEC_USER_AGENT", "MARKETLENS_MODE", "LLM_PROVIDER", "MARKETLENS_SCHEDULER", "OPENAI_BASE_URL", "FAST_MODEL", "DEEP_MODEL", "LLM_BUDGET_USD", "AI_COMMITTEE_ON_SCHEDULE", "LLM_PRICE_INPUT_PER_M", "LLM_PRICE_OUTPUT_PER_M")
+_SETUP_VALUE = {"MARKETLENS_MODE": ("MOCK", "LIVE"), "LLM_PROVIDER": ("none", "anthropic", "openai", "openai_compatible"), "MARKETLENS_SCHEDULER": ("0", "1"), "AI_COMMITTEE_ON_SCHEDULE": ("0", "1")}
 _LOCAL_URL = r"http://(?:127\.0\.0\.1|localhost)(?::\d{1,5})?(?:/[A-Za-z0-9._/-]*)?"
 _MODEL_NAME = r"[A-Za-z0-9._:/-]{1,100}"
 
@@ -119,6 +119,12 @@ def validate_setup(values: dict[str, str]) -> dict[str, str]:
         elif k == "OPENAI_BASE_URL":
             if not _re.fullmatch(_LOCAL_URL, v):
                 raise ValueError("OPENAI_BASE_URL: 이 컴퓨터의 로컬 모델 서버 주소만 가능합니다 (예: http://127.0.0.1:11434/v1)")
+        elif k == "LLM_BUDGET_USD":
+            if not _re.fullmatch(r"\d{1,4}(?:\.\d{1,2})?", v) or not 0 < float(v) <= 1000:
+                raise ValueError("LLM_BUDGET_USD: 0보다 크고 1000 이하인 달러 금액이어야 합니다 (예: 8)")
+        elif k in ("LLM_PRICE_INPUT_PER_M", "LLM_PRICE_OUTPUT_PER_M"):
+            if not _re.fullmatch(r"\d{1,3}(?:\.\d{1,4})?", v) or not 0 < float(v) <= 500:
+                raise ValueError(f"{k}: 100만 토큰당 달러 단가여야 합니다 (예: 0.10)")
         elif k in ("FAST_MODEL", "DEEP_MODEL"):
             if not _re.fullmatch(_MODEL_NAME, v):
                 raise ValueError(f"{k}: 영문·숫자·._:/- 로 된 모델 이름이어야 합니다 (예: qwen2.5:7b)")
@@ -218,6 +224,10 @@ class Settings:
     scheduler: bool = False
     scan_interval_minutes: int = 60
     data_dir: Path = field(default_factory=default_data_dir)
+    llm_budget_usd: float = 0.0  # paid LLM spending cap (estimated, USD); 0 = no paid provider is used without one
+    llm_price_in: float = 0.0  # USD per 1M input tokens, entered by the user for a model the app has no price for
+    llm_price_out: float = 0.0
+    ai_committee_on_schedule: bool = False  # the automatic hourly scan runs WITHOUT the AI committee unless this is on
     live_quotes: bool = True  # the app-wide quote stream (application/live_quotes.py)
     quote_stream_max_symbols: int = 50  # the stream's concurrent symbol limit (Finnhub free: 50 — verify on the account)
 
@@ -229,6 +239,13 @@ def _bool(v: str | None, default: bool) -> bool:
     if v is None:
         return default
     return v.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _float(v: str | None, default: float) -> float:
+    try:
+        return float(v) if v not in (None, "") else default
+    except ValueError:
+        return default
 
 
 def load_settings() -> Settings:
@@ -260,6 +277,10 @@ def load_settings() -> Settings:
         scheduler=_bool(os.environ.get("MARKETLENS_SCHEDULER"), False),
         scan_interval_minutes=int(os.environ.get("SCAN_INTERVAL_MINUTES", "60")),
         data_dir=data_dir,
+        llm_budget_usd=_float(os.environ.get("LLM_BUDGET_USD"), 0.0),
+        llm_price_in=_float(os.environ.get("LLM_PRICE_INPUT_PER_M"), 0.0),
+        llm_price_out=_float(os.environ.get("LLM_PRICE_OUTPUT_PER_M"), 0.0),
+        ai_committee_on_schedule=_bool(os.environ.get("AI_COMMITTEE_ON_SCHEDULE"), False),
         live_quotes=_bool(os.environ.get("MARKETLENS_LIVE_QUOTES"), True),
         quote_stream_max_symbols=max(1, int(os.environ.get("QUOTE_STREAM_MAX_SYMBOLS", "50"))),
     )

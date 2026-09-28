@@ -40,7 +40,8 @@ class BackgroundScheduler:
         interval = self.svc.settings.scan_interval_minutes * 60
         if session in (TradingSession.PREMARKET, TradingSession.REGULAR, TradingSession.AFTER_HOURS):
             if self._last_scan is None or (now - self._last_scan).total_seconds() >= interval:
-                self.svc.run_scan(run_committee=True)
+                # the AI committee costs money on a paid provider: automatic scans skip it unless the user opted in
+                self.svc.run_scan(run_committee=bool(getattr(self.svc.settings, "ai_committee_on_schedule", False)))
                 self._last_scan = now
         day = to_ny(now).date()
         if session == TradingSession.AFTER_HOURS and self._last_eval_day != day:

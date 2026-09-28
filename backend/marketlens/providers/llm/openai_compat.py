@@ -32,7 +32,9 @@ class OpenAICompatibleProvider:
         model = self.model_for(tier)
         body = {
             "model": model,
-            "max_tokens": max_tokens,
+            # the official OpenAI API takes max_completion_tokens (newer models reject max_tokens); local servers
+            # (Ollama, LM Studio) take max_tokens
+            ("max_completion_tokens" if self.name == "openai" else "max_tokens"): max_tokens,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "response_format": {"type": "json_schema", "json_schema": {"name": "output", "strict": True, "schema": schema}},
         }
