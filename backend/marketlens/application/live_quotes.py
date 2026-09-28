@@ -50,7 +50,8 @@ UNAVAILABLE = "UNAVAILABLE"        # 스트림 미설정(키 없음·MOCK)
 
 LIVE_WINDOW = timedelta(seconds=60)
 VIEW_LEASE = timedelta(seconds=90)
-PINNED_REFRESH = 30.0  # seconds: re-read the watchlist/holdings even without a change notice
+PINNED_REFRESH = 30.0
+IDLE_WAIT = 30.0  # seconds: the snapshot worker's longest sleep when nothing is due (real changes wake it at once)  # seconds: re-read the watchlist/holdings even without a change notice
 
 
 class Connection(Protocol):
@@ -80,7 +81,7 @@ class TickerState:
     out_of_order: int = 0
     duplicates: int = 0
     snapshot_error: str | None = None
-    snapshot_retry_at: datetime | None = None
+    snapshot_checked_at: datetime | None = None  # last REST attempt (answered, unchanged or failed) — drives the next due time
 
 
 class Histogram:
@@ -130,6 +131,7 @@ class StreamStats:
     subscribe_msgs: int = 0
     unsubscribe_msgs: int = 0
     snapshot_calls: int = 0
+    snapshot_loops: int = 0  # worker wake-ups (a runaway loop shows here)
     last_error: str | None = None
     connected_since: datetime | None = None
     last_message_at: datetime | None = None
@@ -377,46 +379,66 @@ class QuoteHub:
         self._last_pinned = time.monotonic()
 
     # ------------------------------------------------------------------ snapshots (REST, never per second)
-    def request_snapshots(self, tickers: Iterable[str]) -> None:
+    def request_snapshots(self, tickers: Iterable[str]) -> int:
+        """Queue names for a REST snapshot. Wakes the worker only when something new was queued: an empty or
+        already-queued request never sets the event (the worker calls this itself — a self-wake here made the
+        loop spin ~450k times in 2 s and starved every API request, perf review 2026-09-29)."""
+        added = 0
         with self._lock:
             for t in tickers:
                 if t not in self._snap_queue:
                     self._snap_queue.append(t)
-        self._snap_event.set()
+                    added += 1
+        if added:
+            self._snap_event.set()
+        return added
 
-    def _due_snapshots(self) -> list[str]:
-        """Planned names whose REST snapshot is missing or older than ``snapshot_every`` — and, while the stream is
-        connected, only those without a stream trade in the current session (the stream is the source then)."""
+    def _due_snapshots(self, now: datetime | None = None) -> tuple[list[str], float]:
+        """(names due now, seconds until the next one is due). Due = planned, and the last REST attempt (answered,
+        unchanged or failed) is older than ``snapshot_every``; while the stream is connected, only names without a
+        stream trade in the current session; with the market closed, never a name already holding the final close."""
         planned, _ = self.plan()
-        now = self._now()
+        now = now or self._now()
         session = classify_session(now)
         seg = _session_start(now, session)
-        # market closed: a snapshot taken at/after the last close is final until the next session — no refresh
         closed_final = session_close_utc(last_completed_session(now)) - timedelta(minutes=1) if session == TradingSession.CLOSED else None
-        out = []
+        out: list[str] = []
+        next_in = IDLE_WAIT
         with self._lock:
             for t in planned:
                 st = self._states.get(t)
-                if st is None or st.snapshot is None:
-                    if st is None or st.snapshot_retry_at is None or st.snapshot_retry_at <= now:
-                        out.append(t)
-                    continue
-                if self.streaming and self.connected and st.stream is not None and st.stream.trade_ts >= seg:
-                    continue
-                if closed_final is not None and st.snapshot.trade_ts >= closed_final:
-                    continue
-                if now - st.snapshot.received_ts >= self.snapshot_every:
+                if st is not None and st.snapshot is not None:
+                    if self.streaming and self.connected and st.stream is not None and st.stream.trade_ts >= seg:
+                        continue
+                    if closed_final is not None and st.snapshot.trade_ts >= closed_final:
+                        continue
+                last = None if st is None else st.snapshot_checked_at
+                due_at = now if last is None else last + self.snapshot_every
+                wait = (due_at - now).total_seconds()
+                if wait <= 0:
                     out.append(t)
-        return out
+                else:
+                    next_in = min(next_in, wait)
+        return out, next_in
 
     def snapshot_loop(self, stop: threading.Event) -> None:
+        """Sleeps until the next name is due (at most ``IDLE_WAIT``) or until woken by a real change (a new view,
+        a watchlist/holdings change, stop). Never wakes itself."""
+        next_in = 0.0
         while not stop.is_set():
-            self._snap_event.wait(5)
+            self._snap_event.wait(max(0.05, next_in))
             self._snap_event.clear()
+            if stop.is_set():
+                break
             if time.monotonic() - self._last_pinned >= PINNED_REFRESH:
                 self.refresh_pinned()
+                self._snap_event.clear()  # a changed pin set is handled right here, not by another lap
             self._expire_views()
-            self.request_snapshots(self._due_snapshots())
+            due, next_in = self._due_snapshots()
+            with self._lock:
+                for t in due:
+                    if t not in self._snap_queue:
+                        self._snap_queue.append(t)
             while not stop.is_set():
                 with self._lock:
                     t = self._snap_queue.pop(0) if self._snap_queue else None
@@ -427,11 +449,12 @@ class QuoteHub:
                     self.ingest_snapshot(t, self._snapshot(t))
                 except Exception as e:  # noqa: BLE001 - one name failing never stops the others
                     self.snapshot_failed(t, f"{type(e).__name__}: {e}")
-                with self._lock:  # a failed name waits for its next due time, not the next loop
-                    st = self._states.setdefault(t, TickerState(t))
-                    if st.snapshot is None:
-                        st.snapshot_retry_at = self._now() + self.snapshot_every
+                with self._lock:
+                    self._states.setdefault(t, TickerState(t)).snapshot_checked_at = self._now()
                 stop.wait(self.snapshot_gap)
+            self.stats.snapshot_loops += 1
+            if self._snap_queue:
+                next_in = 0.0
 
     def start(self) -> None:
         """Start the snapshot thread (and nothing else — the stream, when there is one, starts its own)."""

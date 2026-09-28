@@ -292,4 +292,57 @@ def test_closed_market_does_not_refetch_a_final_close():
     h.ingest_snapshot("AAPL", Q(close))                       # the final close
     h.ingest_snapshot("MSFT", Q(close - timedelta(hours=3)))  # an intraday value — not final
     now[0] = CLOSED + timedelta(hours=1)
-    assert h._due_snapshots() == ["MSFT"]
+    assert h._due_snapshots()[0] == ["MSFT"]
+
+
+def test_idle_snapshot_worker_sleeps_instead_of_spinning():
+    """Perf review 2026-09-29: with nothing to fetch the worker woke itself ~450k times in 2 s (one CPU core) and
+    made a 0.13 s portfolio request take 38 s. It must sleep — and still react at once to a real change."""
+    import resource
+
+    calls: list[str] = []
+
+    class Q:
+        def __init__(self, t):
+            self.price, self.timestamp, self.source, self.volume, self.previous_close = 10.0, REG, "finnhub", None, None
+
+    h = QuoteHub(source="finnhub", max_symbols=5, coverage_ko="", now=lambda: REG, snapshot=lambda t: (calls.append(t), Q(t))[1],
+                 snapshot_gap=0.0)
+    cpu0 = resource.getrusage(resource.RUSAGE_SELF).ru_utime
+    h.start()
+    try:
+        import time as _t
+        _t.sleep(2.0)
+        assert h.stats.snapshot_loops <= 3, h.stats.snapshot_loops  # empty: essentially asleep
+        assert resource.getrusage(resource.RUSAGE_SELF).ru_utime - cpu0 < 0.5
+        h.view(["AAPL"])  # a real change wakes it at once
+        deadline = _t.monotonic() + 2
+        while not calls and _t.monotonic() < deadline:
+            _t.sleep(0.01)
+        assert calls == ["AAPL"]
+        loops = h.stats.snapshot_loops
+        _t.sleep(1.5)  # AAPL just fetched and not due again for 5 minutes: back to sleep, no repeat fetch
+        assert calls == ["AAPL"] and h.stats.snapshot_loops - loops <= 1
+    finally:
+        h.stop()
+
+
+def test_unchanged_snapshot_is_not_refetched_every_lap():
+    """A REST answer with the same timestamp (quiet name, closed market) counts as checked: next try after
+    snapshot_every, not on every loop."""
+    h = hub(REG)
+    h.set_pinned("holdings", ["AAPL"])
+    due, _ = h._due_snapshots()
+    assert due == ["AAPL"]
+    h._states["AAPL"].snapshot_checked_at = REG
+    due, next_in = h._due_snapshots()
+    assert due == [] and 0 < next_in <= h.snapshot_every.total_seconds()
+
+
+def test_request_snapshots_only_wakes_for_new_work():
+    h = hub(REG)
+    h._snap_event.clear()
+    assert h.request_snapshots([]) == 0 and not h._snap_event.is_set()
+    assert h.request_snapshots(["AAPL"]) == 1 and h._snap_event.is_set()
+    h._snap_event.clear()
+    assert h.request_snapshots(["AAPL"]) == 0 and not h._snap_event.is_set()  # already queued
