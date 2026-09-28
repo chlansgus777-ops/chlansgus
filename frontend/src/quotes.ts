@@ -50,7 +50,9 @@ export interface QuoteStatus {
   last_error: string | null;
   connected_since: string | null;
   last_message_at: string | null;
-  provider_latency_ms: { n: number; p50: number | null; p95: number | null; max: number | null };
+  provider_latency_ms: { n: number; p50: number | null; p95: number | null; p99?: number | null; max: number | null; mean?: number | null };
+  out_of_order_late_by_ms?: { n: number; p50: number | null; p95: number | null; max: number | null };
+  duplicates?: number;
 }
 
 export type Link = "idle" | "connecting" | "open" | "retrying";

@@ -83,6 +83,39 @@ class TickerState:
     snapshot_retry_at: datetime | None = None
 
 
+class Histogram:
+    """Whole-run distribution in 10 ms buckets up to 120 s (a bounded array, never a growing list)."""
+
+    WIDTH, BUCKETS = 10.0, 12000
+
+    def __init__(self) -> None:
+        self.counts = [0] * (self.BUCKETS + 1)
+        self.n = 0
+        self.max = 0.0
+        self.total = 0.0
+
+    def add(self, ms: float) -> None:
+        ms = max(0.0, ms)
+        self.counts[min(self.BUCKETS, int(ms // self.WIDTH))] += 1
+        self.n += 1
+        self.total += ms
+        self.max = max(self.max, ms)
+
+    def pct(self, q: float) -> float | None:
+        if not self.n:
+            return None
+        target, seen = q * self.n, 0
+        for i, c in enumerate(self.counts):
+            seen += c
+            if seen >= target and c:
+                return round((i + 0.5) * self.WIDTH, 1)
+        return round(self.max, 1)
+
+    def summary(self) -> dict[str, float | int | None]:
+        return {"n": self.n, "p50": self.pct(0.5), "p95": self.pct(0.95), "p99": self.pct(0.99),
+                "max": round(self.max, 1) if self.n else None, "mean": round(self.total / self.n, 1) if self.n else None}
+
+
 @dataclass
 class StreamStats:
     connects: int = 0
@@ -90,25 +123,18 @@ class StreamStats:
     messages: int = 0
     trades: int = 0
     out_of_order: int = 0
+    duplicates: int = 0
     subscribe_msgs: int = 0
     unsubscribe_msgs: int = 0
     snapshot_calls: int = 0
     last_error: str | None = None
     connected_since: datetime | None = None
     last_message_at: datetime | None = None
-    latencies_ms: list[float] = field(default_factory=list)  # provider trade time → backend receipt (last 2000)
+    latency: Histogram = field(default_factory=Histogram)          # provider trade time → backend receipt (ms)
+    late_by: Histogram = field(default_factory=Histogram)          # how much older a dropped out-of-order print was (ms)
 
     def note_latency(self, ms: float) -> None:
-        self.latencies_ms.append(ms)
-        if len(self.latencies_ms) > 2000:
-            del self.latencies_ms[:1000]
-
-
-def _pct(xs: list[float], q: float) -> float | None:
-    if not xs:
-        return None
-    s = sorted(xs)
-    return round(s[min(len(s) - 1, int(round(q * (len(s) - 1))))], 1)
+        self.latency.add(ms)
 
 
 class QuoteHub:
@@ -211,9 +237,11 @@ class QuoteHub:
             if cur is not None and ts < cur.trade_ts:
                 st.out_of_order += 1
                 self.stats.out_of_order += 1
+                self.stats.late_by.add((cur.trade_ts - ts).total_seconds() * 1000)
                 return False
             if cur is not None and ts == cur.trade_ts and price == cur.price and volume == cur.volume:
-                st.duplicates += 1  # identical print (same time, price, size) — keep the first, but it WAS received
+                st.duplicates += 1
+                self.stats.duplicates += 1  # identical print (same time, price, size) — keep the first, but it WAS received
                 cur.received_ts = rec
                 return False
             st.stream = Trade(price, ts, rec, volume, self.source, "stream")
@@ -320,15 +348,14 @@ class QuoteHub:
     def status(self) -> dict[str, Any]:
         subscribed, over = self.plan()
         s = self.stats
-        lat = list(s.latencies_ms)
         return {
             "source": self.source, "streaming": self.streaming, "connected": self.connected, "coverage": self.coverage_ko,
             "max_symbols": self.max_symbols, "subscribed": subscribed, "over_limit": over, "session": classify_session(self._now()).value,
-            "connects": s.connects, "disconnects": s.disconnects, "messages": s.messages, "trades": s.trades, "out_of_order": s.out_of_order,
+            "connects": s.connects, "disconnects": s.disconnects, "messages": s.messages, "trades": s.trades, "out_of_order": s.out_of_order, "duplicates": s.duplicates,
             "subscribe_msgs": s.subscribe_msgs, "unsubscribe_msgs": s.unsubscribe_msgs, "snapshot_calls": s.snapshot_calls,
             "last_error": s.last_error, "connected_since": s.connected_since.isoformat() if s.connected_since else None,
             "last_message_at": s.last_message_at.isoformat() if s.last_message_at else None,
-            "provider_latency_ms": {"n": len(lat), "p50": _pct(lat, 0.5), "p95": _pct(lat, 0.95), "max": round(max(lat), 1) if lat else None},
+            "provider_latency_ms": s.latency.summary(), "out_of_order_late_by_ms": s.late_by.summary(),
         }
 
     # ------------------------------------------------------------------ pinned sets (watchlist, holdings)

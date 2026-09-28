@@ -47,7 +47,7 @@ def pct(xs: list[float], q: float) -> float | None:
 
 
 def summary(xs: list[float]) -> dict[str, Any]:
-    return {"n": len(xs), "p50": pct(xs, 0.5), "p95": pct(xs, 0.95), "max": round(max(xs), 1) if xs else None,
+    return {"n": len(xs), "p50": pct(xs, 0.5), "p95": pct(xs, 0.95), "p99": pct(xs, 0.99), "max": round(max(xs), 1) if xs else None,
             "mean": round(statistics.fmean(xs), 1) if xs else None}
 
 
@@ -144,14 +144,18 @@ def main() -> int:
                             for row in json.loads("\n".join(data)).get("rows", []):
                                 if row.get("feed") != "stream" or not row.get("received_time"):
                                     continue
-                                rec = datetime.fromisoformat(row["received_time"]).timestamp()
-                                display_lat.append((now - rec) * 1000)
                                 t = row["ticker"]
-                                per_ticker[t] = per_ticker.get(t, 0) + 1
                                 prev = last_seen.get(t)
+                                key = (row["price"], row["trade_time"], row["received_time"])
+                                if prev == key:
+                                    continue  # a state-word change only (e.g. 실시간 → 최근 체결 없음): not a new trade
+                                if ev == "quotes":  # the hello snapshot is history, not a delivery
+                                    rec = datetime.fromisoformat(row["received_time"]).timestamp()
+                                    display_lat.append((now - rec) * 1000)
+                                per_ticker[t] = per_ticker.get(t, 0) + 1
                                 if prev and prev[0] == row["price"] and prev[1] != row["trade_time"]:
                                     same_price_newer += 1
-                                last_seen[t] = (row["price"], row["trade_time"])
+                                last_seen[t] = key
             except Exception:  # noqa: BLE001 - the soak keeps its client alive and counts reconnects
                 sse_reconnects += 1
                 time.sleep(1)
@@ -193,9 +197,10 @@ def main() -> int:
         "started": t_start.isoformat(), "ended": datetime.now(tz=timezone.utc).isoformat(), "minutes": a.minutes,
         "sessions_seen": sorted({r["session"] for r in hub.rows()}),
         "tickers": tickers,
-        "provider_latency_ms": summary(list(hub.stats.latencies_ms)),
+        "provider_latency_ms": hub.stats.latency.summary(),
+        "out_of_order_late_by_ms": hub.stats.late_by.summary(),
         "display_path_latency_ms": summary(display_lat),
-        "stream": {k: st[k] for k in ("connects", "disconnects", "messages", "trades", "out_of_order", "subscribe_msgs", "unsubscribe_msgs", "snapshot_calls", "last_error")},
+        "stream": {k: st[k] for k in ("connects", "disconnects", "messages", "trades", "out_of_order", "duplicates", "subscribe_msgs", "unsubscribe_msgs", "snapshot_calls", "last_error")},
         "sse_events": events, "sse_client_reconnects": sse_reconnects,
         "stream_rows_per_ticker": per_ticker,
         "same_price_newer_trade_updates": same_price_newer,
@@ -204,7 +209,7 @@ def main() -> int:
         "final_rows": [{k: r[k] for k in ("ticker", "state", "price", "trade_time", "feed", "session")} for r in hub.rows()],
     }
     Path(a.out).write_text(json.dumps(report, indent=2, ensure_ascii=False))
-    print(json.dumps({k: report[k] for k in ("provider_latency_ms", "display_path_latency_ms", "stream", "network_drop")}, indent=2, ensure_ascii=False))
+    print("QUOTE_SOAK_REPORT " + json.dumps(report, ensure_ascii=False))  # the whole report in the log (artifacts may be unreachable)
     return 0
 
 

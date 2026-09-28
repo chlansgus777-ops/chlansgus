@@ -253,3 +253,22 @@ def test_hub_uses_the_service_clock():
 
     svc = make_service(universe=20)
     assert svc.quotes._now() == svc.now()
+
+
+def test_latency_histogram_covers_the_whole_run_in_bounded_memory():
+    from marketlens.application.live_quotes import Histogram
+
+    h = Histogram()
+    for i in range(100_000):
+        h.add(float(i % 1000))  # 0..999 ms, uniform
+    s = h.summary()
+    assert s["n"] == 100_000 and 480 <= s["p50"] <= 520 and 940 <= s["p95"] <= 960 and s["max"] == 999.0
+    assert len(h.counts) == Histogram.BUCKETS + 1  # never grows
+
+
+def test_out_of_order_print_records_how_late_it_was():
+    h = hub(REG)
+    h.ingest_trade("AAPL", 101.0, ms(REG - timedelta(seconds=1)), 1)
+    h.ingest_trade("AAPL", 100.0, ms(REG - timedelta(seconds=4)), 1)
+    s = h.status()["out_of_order_late_by_ms"]
+    assert s["n"] == 1 and 2990 <= s["max"] <= 3010
