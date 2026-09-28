@@ -6,6 +6,12 @@ import { num, stamp } from "../format";
 import { HORIZON_KO } from "../i18n";
 import type { CompanyIssueImpact } from "../types";
 
+const CAT_KO: Record<string, string> = {
+  Earnings: "실적", Guidance: "가이던스", AI: "AI", Regulation: "규제", "Export Control": "수출 통제", Tariff: "관세", Geopolitics: "지정학",
+  "M&A": "인수합병", Product: "제품", Competition: "경쟁", "Supply Chain": "공급망", Rates: "금리", Inflation: "물가", Oil: "유가", Legal: "소송·법률",
+  Antitrust: "반독점", Financing: "자금 조달", Dilution: "지분 희석", Buyback: "자사주 매입", Management: "경영진", Cybersecurity: "사이버 보안",
+};
+
 interface IssueJ { issue_id: string; title: string; category: string; summary: string; publish_time: string; sources: string[]; confirmed_status: string; importance: number; confidence: number; market_awareness: number; primary_effects: { node_id: string; direction: number; mechanism: string[] }[] }
 interface Resp { available: boolean; reason?: string; issues: { issue: IssueJ; affected_stocks: { ticker: string; hops: number; swing: number }[]; affected_sectors: string[] }[]; injection_flags: Record<string, string[]> }
 interface Detail { issue: IssueJ; impacts: CompanyIssueImpact[]; direct: string[]; indirect: string[] }
@@ -30,8 +36,8 @@ export default function Issues() {
             <tr><th>이슈</th><th>분류</th><th>확인 상태</th><th className="num" style={{ borderLeft: "1px solid var(--line)" }}>중요도</th><th className="num">신뢰도</th><th className="num">시장 인지도</th><th>섹터</th><th>종목(2~6주 영향 점수)</th></tr></thead>
             <tbody>{r.data.issues.map(({ issue: i, affected_stocks, affected_sectors }) => (
               <tr key={i.issue_id} onClick={() => setSel(i.issue_id)} onKeyDown={(e) => { if (e.key === "Enter") setSel(i.issue_id); }} tabIndex={0} style={{ cursor: "pointer" }} aria-selected={sel === i.issue_id}>
-                <td style={{ whiteSpace: "normal", minWidth: 280 }}><b>{i.title}</b><div className="caption">{stamp(i.publish_time)} · {i.sources.join(", ")}</div></td><td>{i.category}</td><td>{STATUS_KO[i.confirmed_status] ?? i.confirmed_status}</td><td className="num" style={{ borderLeft: "1px solid var(--line)" }}>{num(i.importance)}</td><td className="num">{num(i.confidence)}</td><td className="num">{num(i.market_awareness)}</td>
-                <td style={{ whiteSpace: "normal" }}>{affected_sectors.join(", ")}</td>
+                <td style={{ whiteSpace: "normal", minWidth: 280 }}><b>{i.title}</b><div className="caption">{stamp(i.publish_time)} · {i.sources.join(", ")}</div></td><td style={{ whiteSpace: "nowrap" }} title={i.category}>{CAT_KO[i.category] ?? i.category}</td><td style={{ whiteSpace: "nowrap" }}>{STATUS_KO[i.confirmed_status] ?? i.confirmed_status}</td><td className="num" style={{ borderLeft: "1px solid var(--line)" }}>{num(i.importance)}</td><td className="num">{num(i.confidence)}</td><td className="num">{num(i.market_awareness)}</td>
+                <td style={{ whiteSpace: "normal", minWidth: 120 }} title={affected_sectors.join(", ")}>{affected_sectors.slice(0, 2).join(", ")}{affected_sectors.length > 2 ? <span className="caption"> 외 {affected_sectors.length - 2}</span> : null}</td>
                 <td style={{ whiteSpace: "normal" }}><div className="row tight">{affected_stocks.slice(0, 8).map((s) => <span key={s.ticker} className={`pill ${s.swing > 3 ? "tone-ok" : s.swing < -3 ? "tone-danger" : ""}`}>{s.ticker}{s.hops ? `(${s.hops}단계)` : ""} {s.swing > 0 ? "▲" : s.swing < 0 ? "▼" : "■"}{num(s.swing, 0)}</span>)}</div></td>
               </tr>))}</tbody></table></div>
         ) : <div style={{ padding: 16 }}><Empty>현재 구조화된 이슈가 없습니다(뉴스 수집은 정상).</Empty></div>}
