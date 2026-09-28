@@ -93,9 +93,11 @@ class Histogram:
         self.n = 0
         self.max = 0.0
         self.total = 0.0
+        self.over_1s = 0
 
     def add(self, ms: float) -> None:
         ms = max(0.0, ms)
+        self.over_1s += ms > 1000
         self.counts[min(self.BUCKETS, int(ms // self.WIDTH))] += 1
         self.n += 1
         self.total += ms
@@ -113,7 +115,8 @@ class Histogram:
 
     def summary(self) -> dict[str, float | int | None]:
         return {"n": self.n, "p50": self.pct(0.5), "p95": self.pct(0.95), "p99": self.pct(0.99),
-                "max": round(self.max, 1) if self.n else None, "mean": round(self.total / self.n, 1) if self.n else None}
+                "max": round(self.max, 1) if self.n else None, "mean": round(self.total / self.n, 1) if self.n else None,
+                "over_1s": self.over_1s}
 
 
 @dataclass

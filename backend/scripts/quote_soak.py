@@ -46,9 +46,10 @@ def pct(xs: list[float], q: float) -> float | None:
     return round(s[min(len(s) - 1, int(round(q * (len(s) - 1))))], 1)
 
 
-def summary(xs: list[float]) -> dict[str, Any]:
+def summary(xs: list[float], at: list[float] | None = None) -> dict[str, Any]:
     return {"n": len(xs), "p50": pct(xs, 0.5), "p95": pct(xs, 0.95), "p99": pct(xs, 0.99), "max": round(max(xs), 1) if xs else None,
-            "mean": round(statistics.fmean(xs), 1) if xs else None}
+            "mean": round(statistics.fmean(xs), 1) if xs else None, "over_1s": sum(1 for x in xs if x > 1000),
+            "over_1s_at_s": sorted({round(t) for t, x in zip(at or [], xs) if x > 1000})[:20]}
 
 
 def main() -> int:
@@ -109,6 +110,7 @@ def main() -> int:
     started = time.monotonic()
     t_start = datetime.now(tz=timezone.utc)
     display_lat: list[float] = []
+    display_at: list[float] = []  # seconds since start of each display-path sample (to place outliers in time)
     per_ticker: dict[str, int] = {}
     same_price_newer = 0
     last_seen: dict[str, tuple[float, str]] = {}
@@ -152,6 +154,7 @@ def main() -> int:
                                 if ev == "quotes":  # the hello snapshot is history, not a delivery
                                     rec = datetime.fromisoformat(row["received_time"]).timestamp()
                                     display_lat.append((now - rec) * 1000)
+                                    display_at.append(time.monotonic() - started)
                                 per_ticker[t] = per_ticker.get(t, 0) + 1
                                 if prev and prev[0] == row["price"] and prev[1] != row["trade_time"]:
                                     same_price_newer += 1
@@ -199,7 +202,7 @@ def main() -> int:
         "tickers": tickers,
         "provider_latency_ms": hub.stats.latency.summary(),
         "out_of_order_late_by_ms": hub.stats.late_by.summary(),
-        "display_path_latency_ms": summary(display_lat),
+        "display_path_latency_ms": summary(display_lat, display_at),
         "stream": {k: st[k] for k in ("connects", "disconnects", "messages", "trades", "out_of_order", "duplicates", "subscribe_msgs", "unsubscribe_msgs", "snapshot_calls", "last_error")},
         "sse_events": events, "sse_client_reconnects": sse_reconnects,
         "stream_rows_per_ticker": per_ticker,
