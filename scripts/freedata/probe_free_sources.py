@@ -43,6 +43,90 @@ CASES = [
 ]
 
 
+def _av_csv(c: httpx.Client, state: str) -> list[dict[str, str]]:
+    key = os.environ.get("ALPHAVANTAGE_API_KEY") or ""
+    r = c.get(AV, params={"function": "LISTING_STATUS", "state": state, "apikey": key}, timeout=60)
+    if r.status_code != 200 or r.text.lstrip().startswith("{"):
+        raise RuntimeError(f"Alpha Vantage LISTING_STATUS {state}: HTTP {r.status_code} {r.text[:120].replace(key, '<key>')}")
+    return list(csv.DictReader(io.StringIO(r.text)))
+
+
+def _bars_one(c: httpx.Client, sym: str, start: str, end: str, asof: str | None) -> list[dict[str, Any]]:
+    headers = {"APCA-API-KEY-ID": os.environ["APCA_API_KEY_ID"], "APCA-API-SECRET-KEY": os.environ["APCA_API_SECRET_KEY"]}
+    params: dict[str, Any] = {"symbols": sym, "timeframe": "1Day", "start": start, "end": end, "feed": "sip", "adjustment": "raw", "limit": 10000}
+    if asof:
+        params["asof"] = asof
+    out: list[dict[str, Any]] = []
+    token = None
+    for _ in range(20):
+        if token:
+            params["page_token"] = token
+        time.sleep(0.35)  # ≤ 200 requests/minute
+        r = c.get(ALPACA, params=params, headers=headers, timeout=60)
+        if r.status_code != 200:
+            raise RuntimeError(f"alpaca {sym}: HTTP {r.status_code} {r.text[:120]}")
+        body = r.json()
+        out += (body.get("bars") or {}).get(sym, [])
+        token = body.get("next_page_token")
+        if not token:
+            break
+    return out
+
+
+def _gaps(bars: list[dict[str, Any]], days: int = 40) -> list[tuple[str, str]]:
+    ds = [datetime.fromisoformat(b["t"].replace("Z", "+00:00")).date() for b in bars]
+    return [(a.isoformat(), b.isoformat()) for a, b in zip(ds, ds[1:]) if (b - a).days > days]
+
+
+def alpaca_delisted_and_reused(c: httpx.Client, sample: int = 150, seed: int = 20260928) -> dict[str, Any]:
+    """Delisted stocks (Alpha Vantage delisted list, delisted 2016-02 or later): does Alpaca return their history up to
+    the delisting (asof = the day before)? Reused tickers (delisted AND listed again today): does the default request
+    splice two companies into one series (a gap of more than 40 days inside one symbol's bars)?"""
+    import random
+
+    delisted = [r for r in _av_csv(c, "delisted") if r.get("assetType") == "Stock" and (r.get("delistingDate") or "") >= "2016-02-01"]
+    active = {r["symbol"] for r in _av_csv(c, "active")}
+    reused = sorted({r["symbol"] for r in delisted if r["symbol"] in active})
+    rng = random.Random(seed)
+    pool = [r for r in delisted if r["symbol"] not in active]
+    picks = rng.sample(pool, min(sample, len(pool)))
+    rows, ok, near_end = [], 0, 0
+    for r in picks:
+        d = r["delistingDate"]
+        asof = (datetime.fromisoformat(d) - timedelta(days=1)).date().isoformat()
+        start = max("2016-01-01", r.get("ipoDate") or "2016-01-01")
+        try:
+            bars = _bars_one(c, r["symbol"], start, d, asof)
+        except RuntimeError as e:
+            rows.append({"symbol": r["symbol"], "delisted": d, "error": str(e)[:120]})
+            continue
+        last = bars[-1]["t"][:10] if bars else None
+        got = bool(bars)
+        ok += got
+        near = got and (datetime.fromisoformat(d) - datetime.fromisoformat(last)).days <= 7
+        near_end += near
+        rows.append({"symbol": r["symbol"], "exchange": r.get("exchange"), "delisted": d, "bars": len(bars), "first": bars[0]["t"][:10] if bars else None,
+                     "last": last, "last_within_7d_of_delisting": near})
+    reuse_rows = []
+    for sym in reused[:60]:
+        old = next(r for r in delisted if r["symbol"] == sym)
+        try:
+            spliced = _bars_one(c, sym, "2016-01-01", (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat(), None)
+            before = _bars_one(c, sym, max("2016-01-01", old.get("ipoDate") or "2016-01-01"), old["delistingDate"],
+                               (datetime.fromisoformat(old["delistingDate"]) - timedelta(days=1)).date().isoformat())
+        except RuntimeError as e:
+            reuse_rows.append({"symbol": sym, "error": str(e)[:120]})
+            continue
+        g = _gaps(spliced)
+        reuse_rows.append({"symbol": sym, "old_name": old.get("name"), "old_delisted": old["delistingDate"], "default_bars": len(spliced),
+                           "default_first": spliced[0]["t"][:10] if spliced else None, "default_last": spliced[-1]["t"][:10] if spliced else None,
+                           "gaps_over_40d": g[:3], "spliced_two_lives": bool(g) and bool(before) and any(a <= old["delistingDate"] <= b for a, b in g),
+                           "asof_before_delisting_bars": len(before)})
+    return {"delisted_since_2016_stocks": len(delisted), "reused_tickers": len(reused), "sample": len(picks),
+            "sample_with_bars": ok, "sample_last_bar_within_7d": near_end, "sample_rows": rows,
+            "reused_checked": len(reuse_rows), "reused_spliced": sum(1 for x in reuse_rows if x.get("spliced_two_lives")), "reused_rows": reuse_rows}
+
+
 def secret_state() -> dict[str, str]:
     names = ["APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "ALPHAVANTAGE_API_KEY", "FINRA_API_KEY", "FINRA_API_SECRET", "POLYGON_API_KEY", "SEC_USER_AGENT", "FRED_API_KEY"]
     return {n: ("set" if os.environ.get(n) else "not set") for n in names}
@@ -145,6 +229,8 @@ def main() -> None:
             res["alphavantage_listing_2016_delisted"] = alphavantage_listing(c, "2016-01-04", "delisted")
         if "av_delisted_all" in only:  # the whole delisted list (no date): delisting dates as lifespans (instruction §3.C)
             res["alphavantage_listing_delisted_all"] = alphavantage_listing(c, None, "delisted")
+        if "alpaca_delisted" in only:
+            res["alpaca_delisted_and_reused"] = alpaca_delisted_and_reused(c)
         if "nasdaq" in only:
             res["nasdaq_symbol_directory"] = nasdaq_directory(c)
         if "finra" in only:
