@@ -79,6 +79,10 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
             sched = BackgroundScheduler(app.state.service)
             sched.start()
         app.state.ready = True
+        if getattr(app.state.service, "store", None) is not None:  # LIVE: compute the readiness counts once in the background
+            import threading  # so the first dashboard / candidates screen does not wait for them
+
+            threading.Thread(target=_warm, args=(app.state.service,), daemon=True, name="readiness-warmup").start()
         yield
         app.state.ready = False
         if sched:
@@ -161,3 +165,10 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
             return JSONResponse({"detail": "찾을 수 없음"}, status_code=404)
 
     return app
+
+
+def _warm(svc: Any) -> None:
+    try:
+        svc.readiness()
+    except Exception:  # noqa: BLE001 - a warm-up only; the first request computes it again
+        logging.getLogger("marketlens.api").warning("readiness warm-up failed", exc_info=True)

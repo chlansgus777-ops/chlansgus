@@ -280,3 +280,28 @@ def test_the_sync_window_holds_a_full_year_of_sessions():
     for end in (date(2026, 9, 25), date(2026, 1, 2), date(2025, 7, 7)):
         n = sum(1 for k in range(BACKFILL_DAYS + 1) if is_trading_day(end - timedelta(days=k)))
         assert n >= 250, (end, n)
+
+
+def test_readiness_counts_are_reused_until_the_stored_data_changes(monkeypatch):
+    """Owner report 2026-09-28: every dashboard / candidates screen took ~5 s — the coverage counts were recomputed
+    over the whole market on each request. They are now computed again only when the stored data changed."""
+
+    from marketlens.domain.enums import DataMode
+    from marketlens.domain.market import Bar
+    from tests.integration.test_service_api import make_service
+
+    svc = make_service(mode=DataMode.LIVE)
+    calls = {"n": 0}
+    real = svc.store.coverage_stats
+
+    def counted(*a, **k):
+        calls["n"] += 1
+        return real(*a, **k)
+
+    monkeypatch.setattr(svc.store, "coverage_stats", counted)
+    first = svc.readiness()
+    assert svc.readiness() == first and calls["n"] == 1  # unchanged data: reused
+    d = svc.now().date()
+    svc.store.save_grouped(d, {"NEWT": Bar(d, 10, 10, 10, 10, 1e6)}, "polygon")
+    svc.readiness()
+    assert calls["n"] == 2  # a new bar: counted again

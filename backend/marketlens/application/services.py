@@ -781,7 +781,16 @@ class MarketLensService:
         from marketlens.domain.market_calendar import last_completed_session
 
         sc = self.base_cfg.scanner
-        stats = self.store.coverage_stats(last_completed_session(self.now()), sc.min_market_cap, sc.min_avg_dollar_volume, sc.min_price) if self.store is not None else None
+        today = last_completed_session(self.now())
         sync_state = self.store.get_setting("last_sync") if self.store is not None else None
-        verified = json.loads(self.store.get_setting("live_verified") or "{}") if self.store is not None else {}
-        return evaluate(self.mode.value, self.registry, stats, sync_state, verified).as_dict()
+        verified_s = self.store.get_setting("live_verified") if self.store is not None else None
+        # the coverage counts read the whole market (seconds on a full store): computed again only when the stored data
+        # changed (owner report 2026-09-28: every dashboard / candidates screen waited about 5 s for them)
+        key = (today, sync_state, verified_s, self.store.data_fingerprint() if self.store is not None else None)
+        cached = getattr(self, "_readiness_cache", None)
+        if cached is not None and cached[0] == key:
+            stats = cached[1]
+        else:
+            stats = self.store.coverage_stats(today, sc.min_market_cap, sc.min_avg_dollar_volume, sc.min_price) if self.store is not None else None
+            self._readiness_cache = (key, stats)
+        return evaluate(self.mode.value, self.registry, stats, sync_state, json.loads(verified_s or "{}")).as_dict()

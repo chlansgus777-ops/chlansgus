@@ -543,8 +543,10 @@ class MarketStore:
         """All stored bars in a window, grouped by ticker (one query for the whole market)."""
         out: dict[str, dict[date, Bar]] = {}
         with self.sf() as s:
-            for r in s.scalars(select(PriceBarRow).where(PriceBarRow.day >= start, PriceBarRow.day <= end)):
-                out.setdefault(r.ticker, {}).setdefault(r.day, Bar(r.day, r.open, r.high, r.low, r.close, r.volume))
+            # plain rows, not ORM objects: the whole market's window (owner report: 5 s per screen from building 200k objects)
+            q = select(PriceBarRow.ticker, PriceBarRow.day, PriceBarRow.open, PriceBarRow.high, PriceBarRow.low, PriceBarRow.close, PriceBarRow.volume)
+            for t, d, o, h, lo, c, v in s.execute(q.where(PriceBarRow.day >= start, PriceBarRow.day <= end)):
+                out.setdefault(t, {}).setdefault(d, Bar(d, o, h, lo, c, v))
             renamed = [t for (t,) in s.execute(select(SecurityRow.ticker).where(SecurityRow.mode == self.mode, SecurityRow.predecessor.is_not(None)))]
         for t in renamed:  # a renamed company keeps its price history (security master)
             merged = dict(out.get(t, {}))
@@ -555,6 +557,20 @@ class MarketStore:
             if merged:
                 out[t] = merged
         return {t: [d[k] for k in sorted(d)] for t, d in out.items()}
+
+    def data_fingerprint(self) -> tuple[Any, ...]:
+        """Cheap marker of everything coverage_stats reads (newest rows and update times): equal markers → equal counts."""
+        if self.get_setting(GROUPED_DAYS_KEY) is None:
+            self.grouped_days()  # the one-time record coverage_stats would write: taken first so the marker stays equal
+        with self.sf() as s:
+            return (
+                s.execute(select(func.max(PriceBarRow.retrieved_at), func.count())).one()[:],
+                s.execute(select(func.max(SecurityRow.updated_at), func.count()).where(SecurityRow.mode == self.mode)).one()[:],
+                s.execute(select(func.max(FundamentalVintageRow.retrieved_at), func.count())).one()[:],
+                s.execute(select(func.max(IngestionManifestRow.last_attempt_at), func.count()).where(IngestionManifestRow.mode == self.mode)).one()[:],
+                s.execute(select(func.min(EstimateSnapshotRow.observed_on))).scalar(),
+                self.get_setting(GROUPED_DAYS_KEY), self.get_setting("instrument_kinds"), self.get_setting("instrument_kinds_day"),
+            )
 
     # ------------------------------------------------------------------ coverage (readiness)
     def coverage_stats(self, today: date, min_market_cap: float, min_dollar_volume: float | None = None, min_price: float | None = None) -> dict[str, Any]:
