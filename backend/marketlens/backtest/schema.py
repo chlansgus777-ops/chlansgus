@@ -77,6 +77,16 @@ bt_series = Table(
     Column("value", Float, nullable=False),
 )
 
+# listing intervals the collector could not resolve safely (docs/freedata: collector defence rules): their bars stay in
+# price_bars for the audit, and the backtest leaves them out
+bt_unresolved = Table(
+    "bt_unresolved", BT_META,
+    Column("ticker", String(16), primary_key=True),
+    Column("valid_from", Date, primary_key=True),  # the interval of bt_ticker_map
+    Column("reason", String(32), primary_key=True),
+    Column("detail", Text, nullable=True),
+)
+
 bt_meta = Table(
     "bt_meta", BT_META,
     Column("key", String(64), primary_key=True),

@@ -28,7 +28,7 @@ from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
 
 from marketlens.backtest.identity import TickerInterval
-from marketlens.backtest.schema import bt_dividends, bt_profiles, bt_ticker_map
+from marketlens.backtest.schema import bt_dividends, bt_profiles, bt_ticker_map, bt_unresolved
 from marketlens.domain.corporate_actions import ShareBasis, SplitEvent, share_multiplier, split_factor
 from marketlens.domain.enums import Exchange
 from marketlens.domain.fundamentals import QuarterlyFinancials, known_on
@@ -56,6 +56,11 @@ class Lineage:
     dividends: list[tuple[date, float]] = field(default_factory=list)
 
 
+def _stream_bars(eng: Engine) -> Iterable[Any]:
+    with eng.connect() as c:
+        yield from c.execute(text("SELECT ticker, day, open, high, low, close, volume FROM price_bars ORDER BY day, ticker"))
+
+
 def filing_visibility(ts: datetime) -> date:
     from marketlens.application.pipeline import filing_visibility_day
 
@@ -73,18 +78,23 @@ class BacktestData:
         with eng.connect() as c:
             ivs = [TickerInterval(r.ticker, r.valid_from, r.valid_to, r.cik, r.type, r.name, r.exchange) for r in c.execute(select(bt_ticker_map))]
             self.profiles = {r.cik: (r.sector or "Unknown", r.industry or "Unknown", json.loads(r.payload or "{}")) for r in c.execute(select(bt_profiles))}
-            bar_rows = c.execute(text("SELECT ticker, day, open, high, low, close, volume FROM price_bars ORDER BY day, ticker")).all()
             split_rows = c.execute(text("SELECT ticker, execution_date, split_from, split_to, source FROM corporate_actions")).all()
             div_rows = [(r.ticker, r.ex_date, r.cash_amount, r.currency) for r in c.execute(select(bt_dividends))]
+            # listing intervals the collector could not resolve (alpaca.py defence rules): left out of the backtest
+            self.unresolved = {(r.ticker, r.valid_from) for r in c.execute(select(bt_unresolved.c.ticker, bt_unresolved.c.valid_from))}
+        self.unresolved_rows_skipped = 0
         self.intervals: dict[str, list[TickerInterval]] = {}
         for iv in ivs:
             self.intervals.setdefault(iv.ticker, []).append(iv)
         for lst in self.intervals.values():
             lst.sort(key=lambda i: i.valid_from)
         listings: dict[tuple[str, date | None], Lineage] = {}
-        for tk, d, o, h, lo, cl, v in bar_rows:
+        for tk, d, o, h, lo, cl, v in _stream_bars(eng):  # streamed: ten years of bars are never held twice in memory
             d = d if isinstance(d, date) else date.fromisoformat(str(d))
             iv = self.interval(tk, d)
+            if iv is not None and (tk, iv.valid_from) in self.unresolved:
+                self.unresolved_rows_skipped += 1
+                continue
             lk = (tk, iv.valid_from if iv else None)
             ln = listings.get(lk)
             if ln is None:

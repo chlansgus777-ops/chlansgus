@@ -1,16 +1,18 @@
 name: backtest-data
 # Backtest data (docs/backtest): stage 0 probes how far back each free source answers; "collect" gathers the
 # point-in-time data into a SEPARATE database uploaded as an artifact (never committed; its SHA-256 is).
-# Keys come from repository secrets and are never printed. Rate limits: Polygon 5/min, SEC 10/s, FRED 2/s.
+# "alpaca" extends a finished collection back to 2016 with Alpaca's free SIP daily bars (marketlens/backtest/alpaca.py).
+# Keys come from repository secrets and are never printed. Rate limits: Polygon 5/min, SEC 10/s, FRED 2/s, Alpaca 200/min,
+# Alpha Vantage 25/day (one call).
 on:
   workflow_dispatch:
     inputs:
       task:
-        description: "probe | collect | run | diagnose | freeprobe"
+        description: "probe | collect | alpaca | run | diagnose | freeprobe"
         required: true
         default: "probe"
       resume_run_id:
-        description: "collect: continue the database of this earlier run (its backtest-db artifact); empty = start fresh"
+        description: "collect: continue the database of this earlier run (its backtest-db artifact); empty = start fresh. alpaca: the finished collect (or earlier alpaca) run to extend back to 2016"
         required: false
         default: ""
       data_run_id:
@@ -77,7 +79,7 @@ jobs:
           name: free-probe
           path: free_probe.json
       - name: Previous database (resume)
-        if: inputs.task == 'collect' && inputs.resume_run_id != ''
+        if: (inputs.task == 'collect' || inputs.task == 'alpaca') && inputs.resume_run_id != ''
         uses: actions/download-artifact@v4
         with:
           name: backtest-db
@@ -94,8 +96,23 @@ jobs:
           python -m marketlens.backtest.collect --db backtest.db --out coverage.json --max-minutes 320
           sha256sum backtest.db | tee backtest.db.sha256
           gzip -f -k backtest.db
+      - name: Extend back to 2016 (Alpaca SIP bars, earlier splits and dividends, SEC and FRED for the earlier years)
+        if: inputs.task == 'alpaca'
+        env:
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: |
+          test -f backtest.db.gz || { echo "task=alpaca needs resume_run_id: the finished collect run whose backtest-db to extend"; exit 1; }
+          gunzip -f backtest.db.gz
+          python -m marketlens.backtest.alpaca --db backtest.db --out coverage.json --max-minutes 320
+          sha256sum backtest.db | tee backtest.db.sha256
+          gzip -f -k backtest.db
       - uses: actions/upload-artifact@v4
-        if: always() && inputs.task == 'collect'
+        if: always() && (inputs.task == 'collect' || inputs.task == 'alpaca')
         with:
           name: backtest-db
           path: |
