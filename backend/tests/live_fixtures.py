@@ -379,6 +379,20 @@ def live_transport(seen: list[str] | None = None) -> httpx.MockTransport:
             if isinstance(out, tuple):
                 return httpx.Response(out[0], json=out[1])
             return httpx.Response(200, json=out)
+        if u.netloc == "www.nasdaqtrader.com" and path.startswith("/dynamic/SymDir/"):
+            return httpx.Response(200, text=symbol_directory(path.rsplit("/", 1)[-1]))
         return httpx.Response(404)
 
     return httpx.MockTransport(handler)
+
+
+def symbol_directory(name: str) -> str:
+    """Nasdaq Trader symbol directory files in their published layout (the fixture companies are common stocks)."""
+    if name == "nasdaqlisted.txt":
+        head = "Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares"
+        rows = [f"{t}|{c['name']} - Common Stock|Q|N|N|100|N|N" for t, c in COMPANIES.items() if c["exch"] == "Nasdaq"]
+        return "\n".join([head, *rows, "File Creation Time: 0925202621:31|||||||"])
+    head = "ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol"
+    rows = [f"{t}|{c['name']} Common Stock|N|{t}|N|100|N|{t}" for t, c in COMPANIES.items() if c["exch"] != "Nasdaq"]
+    rows += [f"{t}|{t} ETF Trust|P|{t}|Y|100|N|{t}" for t in INDEX]
+    return "\n".join([head, *rows, "File Creation Time: 0925202621:31||||||"])

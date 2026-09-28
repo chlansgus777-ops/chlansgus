@@ -7,6 +7,8 @@ for point-in-time analysis and replay.
 
 from __future__ import annotations
 
+import json
+
 import re
 from dataclasses import replace
 from datetime import date, datetime, timedelta
@@ -572,10 +574,18 @@ class MarketStore:
             # like a profile-confirmed one, even before its profile is fetched
             filed_foreign = {t for t, st, e in man_rows if st == "NOT_SUPPORTED" and e and "20-F/40-F" in e}
         days = sum(1 for d in self.grouped_days() if today - timedelta(days=400) <= d <= today)
-        listed = [a for a in active if a[3] != "OTC"]
+        kinds = self.instrument_kinds()
+        from marketlens.providers.live.nasdaq_symbols import COMMON_KINDS, canonical
+
+        listed_all = [a for a in active if a[3] != "OTC"]
+        # stocks only (Nasdaq Trader directory): preferreds, units, warrants, notes and funds are not what the scanner
+        # analyses — a ticker the directory does not know is counted (unknown ≠ excluded)
+        listed = [a for a in listed_all if kinds.get(canonical(a[0]), "unknown") in COMMON_KINDS]
         big = [a for a in listed if a[1] is not None and a[1] >= min_market_cap]
         return {
             "listed": len(listed),
+            "listed_all": len(listed_all),
+            "listed_non_stock": len(listed_all) - len(listed),
             "with_market_cap": sum(1 for a in listed if a[1] is not None),
             "large": len(big),
             "bars_60": sum(1 for a in listed if counts.get(a[0], 0) >= 60),
@@ -591,6 +601,13 @@ class MarketStore:
             "market_days": int(days),
             "estimate_history_days": (today - est_first).days if est_first else 0,
         }
+
+    def instrument_kinds(self) -> dict[str, str]:
+        raw = self.get_setting("instrument_kinds")
+        try:
+            return dict(json.loads(raw)) if raw else {}
+        except (ValueError, TypeError):
+            return {}
 
     def tickers_with_fundamentals(self) -> set[str]:
         with self.sf() as s:

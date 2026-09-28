@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from marketlens.config import Settings
@@ -18,6 +18,7 @@ class ProviderRegistry:
     health: HealthRegistry
     chains: dict[str, ProviderChain]
     world: object | None = None  # MockWorld in MOCK mode
+    extras: dict[str, object] = field(default_factory=dict)  # side sources outside the provider chains (symbol directory)
 
     def chain(self, kind: str) -> ProviderChain:
         return self.chains[kind]
@@ -87,7 +88,9 @@ def build_live_registry(settings: Settings, health: HealthRegistry | None = None
     }
     extra = {"sleep": sleep} if sleep is not None else {}
     chains = {k: ProviderChain(k, impl[k], DataMode.LIVE, health, **extra) for k in PROVIDER_KINDS}
-    return ProviderRegistry(DataMode.LIVE, health, chains)
+    from marketlens.providers.live.nasdaq_symbols import NasdaqSymbolDirectory
+
+    return ProviderRegistry(DataMode.LIVE, health, chains, extras={"symbol_directory": NasdaqSymbolDirectory(transport=transport)})
 
 
 def build_registry(settings: Settings, health: HealthRegistry | None = None) -> ProviderRegistry:

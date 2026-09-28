@@ -118,10 +118,12 @@ def evaluate(mode: str, reg: Any, stats: dict[str, Any] | None, sync_state: str 
         }
         if stats["market_days"] < MIN_MARKET_DAYS:
             reasons.append(f"저장된 거래일 {stats['market_days']}일 < {MIN_MARKET_DAYS}일 — 스캐너 최소 요건(60거래일) 미달")
+        basis = (f" (주식 {listed:,}종목 기준 — 우선주·워런트·유닛·채권·펀드 {stats['listed_non_stock']:,}종목 제외)"
+                 if stats.get("listed_non_stock") else "")
         if prog["price_history"] < MIN_PRICE_HISTORY:
-            reasons.append(f"60거래일 이상 가격 이력이 있는 종목 {prog['price_history']:.0%} < {MIN_PRICE_HISTORY:.0%}")
+            reasons.append(f"60거래일 이상 가격 이력이 있는 종목 {prog['price_history']:.0%} < {MIN_PRICE_HISTORY:.0%}{basis}")
         if prog["market_cap"] < MIN_MARKET_CAP:
-            reasons.append(f"시가총액 확인 종목 {prog['market_cap']:.0%} < {MIN_MARKET_CAP:.0%}")
+            reasons.append(f"시가총액 확인 종목 {prog['market_cap']:.0%} < {MIN_MARKET_CAP:.0%}{basis}")
         if prog["sector"] < MIN_SECTOR:
             reasons.append(f"대형주 업종 정보 {prog['sector']:.0%} < {MIN_SECTOR:.0%}")
         if prog["fundamentals"] < MIN_FUNDAMENTALS:

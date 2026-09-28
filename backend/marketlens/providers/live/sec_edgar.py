@@ -109,8 +109,12 @@ class SecEdgarProvider:
             exch = EXCHANGE_MAP.get(row[idx["exchange"]] or "")
             if exch is None:
                 continue  # OTC / CBOE / unlisted — not in scope
-            ticker = str(row[idx["ticker"]]).upper()
+            raw = str(row[idx["ticker"]]).upper()
+            # a share class is written 'BRK-B' by the SEC and 'BRK.B' by the exchanges and the price providers: without
+            # one spelling the class never met its prices (diagnosis 2026-09-28: 19 listings, BRK-B, BF-B, HEI-A …)
+            ticker = re.sub(r"-(?=[A-Z]$)", ".", raw)
             self._cik[ticker] = int(row[idx["cik"]])
+            self._cik.setdefault(raw, int(row[idx["cik"]]))
             out.append(Security(ticker=ticker, company_name=str(row[idx["name"]]), exchange=exch, sector="Unknown", industry="Unknown", market_cap=None,
                                 cik=int(row[idx["cik"]])))
         return out
@@ -200,25 +204,34 @@ class SecEdgarProvider:
         return out
 
     def shares_outstanding_all(self, as_of: date) -> dict[int, tuple[float, date]]:
-        """CIK → (shares outstanding, as-of date) from the most recent quarterly frames (one call each)."""
+        """CIK → (shares outstanding, as-of date): the cover-page shares (dei) of the last 8 quarterly frames, else the
+        balance-sheet shares (us-gaap CommonStockSharesOutstanding) of the last 4. Measured 2026-09-28 on the primary
+        common stocks with prices: dei 4 quarters 78.2 %, dei 8 quarters 80.5 %, both sources 83.0 % — a cover page
+        dated more than ~30 days from a quarter end falls outside the instant frames, the balance sheet never does."""
         self._require()
-        out: dict[int, tuple[float, date]] = {}
-        y, q = as_of.year, (as_of.month - 1) // 3 + 1
-        for _ in range(4):
-            q -= 1
-            if q == 0:
-                y, q = y - 1, 4
-            try:
-                data = self._data.get_json(f"/api/xbrl/frames/dei/EntityCommonStockSharesOutstanding/shares/CY{y}Q{q}I.json")
-            except ProviderDataError:
-                continue  # frame not published yet
-            for r in data.get("data", []):
+
+        def frames(concept: str, quarters: int) -> dict[int, tuple[float, date]]:
+            got: dict[int, tuple[float, date]] = {}
+            y, q = as_of.year, (as_of.month - 1) // 3 + 1
+            for _ in range(quarters):
+                q -= 1
+                if q == 0:
+                    y, q = y - 1, 4
                 try:
-                    cik, val, end = int(r["cik"]), float(r["val"]), date.fromisoformat(r["end"])
-                except (KeyError, TypeError, ValueError):
-                    continue
-                if end <= as_of and (cik not in out or end > out[cik][1]):
-                    out[cik] = (val, end)
+                    data = self._data.get_json(f"/api/xbrl/frames/{concept}/shares/CY{y}Q{q}I.json")
+                except ProviderDataError:
+                    continue  # frame not published yet
+                for r in data.get("data", []):
+                    try:
+                        cik, val, end = int(r["cik"]), float(r["val"]), date.fromisoformat(r["end"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if end <= as_of and val > 0 and (cik not in got or end > got[cik][1]):
+                        got[cik] = (val, end)
+            return got
+
+        out = frames("us-gaap/CommonStockSharesOutstanding", 4)
+        out.update(frames("dei/EntityCommonStockSharesOutstanding", 8))  # the cover page wins where it exists
         return out
 
     # ------------------------------------------------------------------ fundamentals

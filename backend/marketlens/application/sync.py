@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import json
+
 import logging
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -136,6 +138,16 @@ class MarketSync:
             _p("universe", 1, 1, "")
         except ProviderError as e:
             rep.errors.append(f"universe: {e}")
+        # 2a') what kind of security each ticker is (Nasdaq Trader symbol directory, two small files, once a day): the
+        #      readiness denominators count common stocks / ADSs, not preferreds, units, warrants, notes or funds
+        directory = getattr(self.reg, "extras", {}).get("symbol_directory")
+        if directory is not None and self.store.get_setting("instrument_kinds_day") != today.isoformat():
+            try:
+                kinds = directory.instrument_kinds()
+                self.store.set_setting("instrument_kinds", json.dumps(kinds, separators=(",", ":")))
+                self.store.set_setting("instrument_kinds_day", today.isoformat())
+            except ProviderError as e:
+                rep.errors.append(f"symbol directory: {e}")
         # 2b) stock splits (one bulk request) → rescale stored bars fetched before the split
         # Only splits that have already executed (New York date) are fetched and applied: an announced
         # future split must not rescale today's prices.

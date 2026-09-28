@@ -99,3 +99,84 @@ def test_readiness_leaves_filing_confirmed_foreign_issuers_out_of_the_filings_de
     st.record_ingestion(FUNDAMENTALS, t, svc.now(), "NOT_SUPPORTED", f"{t}: 20-F/40-F 외국 발행사 — 연간 us-gaap만 있고 분기 10-Q/10-K 없음")
     stats = st.coverage_stats(LF.NOW.date(), 1e9)
     assert stats["large_fund_not_supported"] >= 1 and stats["large_fund_parse_gap"] == 0
+
+
+# ---------------------------------------------------------------- measured 2026-09-28: the denominators counted non-stocks
+DIRECTORY_NASDAQ = """Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares
+AAPL|Apple Inc. - Common Stock|Q|N|N|100|N|N
+ABCW|ABC Acquisition Corp - Warrant|S|N|N|100|N|N
+ABCU|ABC Acquisition Corp - Unit|S|N|N|100|N|N
+QQQ|Invesco QQQ Trust, Series 1|G|N|N|100|Y|N
+ZZZZ|Test Co - Common Stock|Q|Y|N|100|N|N
+TSM2|Some Co - American Depositary Shares|Q|N|N|100|N|N
+File Creation Time: 0925202621:31|||||||"""
+DIRECTORY_OTHER = """ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol
+BRK.B|Berkshire Hathaway Inc. Class B Common Stock|N|BRK.B|N|100|N|BRK=B
+BAC-L|Bank of America Corp 7.25% Non-Cumulative Perpetual Convertible Preferred Stock, Series L|N|BAC-L|N|100|N|BAC-L
+PFH|Prudential Financial 4.125% Junior Subordinated Notes due 2060|N|PFH|N|100|N|PFH
+MS-A|Morgan Stanley Depositary Shares, each representing 1/1000th of a Share of Floating Rate Series A Preferred|N|MS-A|N|100|N|MS-A
+File Creation Time: 0925202621:31||||||"""
+
+
+def test_the_symbol_directory_tells_stocks_from_other_listings():
+    from marketlens.providers.live.nasdaq_symbols import canonical, parse_directory
+
+    k = parse_directory(DIRECTORY_NASDAQ, "Symbol") | parse_directory(DIRECTORY_OTHER, "ACT Symbol")
+    assert k["AAPL"] == "common" and k["TSM2"] == "common" and k[canonical("BRK-B")] == "common"
+    assert k["ABCW"] == "warrant" and k["ABCU"] == "unit" and k["QQQ"] == "etf"
+    assert k[canonical("BAC-L")] == "preferred" and k[canonical("MS-A")] == "preferred" and k["PFH"] == "note"
+    assert "ZZZZ" not in k  # test issues are not listings
+
+
+def test_readiness_counts_stocks_and_says_what_it_left_out(tmp_path):
+    import json
+
+    from marketlens.application.readiness import evaluate
+
+    svc = _live(tmp_path)
+    svc.start_sync()
+    _join()
+    st = svc.store
+    assert st.instrument_kinds()  # the sync stored the directory
+    kinds = st.instrument_kinds()
+    kinds["TINY"] = "preferred"  # pretend one listing is a preferred: it leaves the denominators
+    st.set_setting("instrument_kinds", json.dumps(kinds))
+    stats = st.coverage_stats(LF.NOW.date(), 1e9)
+    assert stats["listed_non_stock"] == 1 and stats["listed"] == stats["listed_all"] - 1
+    stats["bars_60"] = 0  # force the reason to be shown
+    rd = evaluate("LIVE", svc.registry, stats, None)
+    assert any("우선주·워런트·유닛·채권·펀드 1종목 제외" in r for r in rd.scanner_reasons)
+
+
+def test_a_share_class_meets_its_prices_under_one_spelling(monkeypatch):
+    import httpx
+
+    from marketlens.providers.live.sec_edgar import SecEdgarProvider
+
+    def handler(req):  # noqa: ANN001, ANN202
+        return httpx.Response(200, json={"fields": ["cik", "name", "ticker", "exchange"],
+                                         "data": [[1067983, "BERKSHIRE HATHAWAY INC", "BRK-B", "NYSE"], [1067983, "BERKSHIRE HATHAWAY INC", "BRK-A", "NYSE"]]})
+
+    sec = SecEdgarProvider("MarketLens test test@example.com", transport=httpx.MockTransport(handler))
+    assert [s.ticker for s in sec.list_securities()] == ["BRK.B", "BRK.A"]  # the exchanges' / Polygon's spelling
+    assert sec.cik_for("BRK.B") == sec.cik_for("BRK-B") == 1067983
+
+
+def test_shares_come_from_the_balance_sheet_when_no_cover_page_frame_has_the_company():
+    import httpx
+
+    from marketlens.providers.live.sec_edgar import SecEdgarProvider
+
+    def handler(req):  # noqa: ANN001, ANN202
+        p = req.url.path
+        if "/dei/EntityCommonStockSharesOutstanding/" in p:
+            return httpx.Response(200, json={"data": [{"cik": 1, "val": 100.0, "end": "2026-07-25"}]})
+        if "/us-gaap/CommonStockSharesOutstanding/" in p:
+            return httpx.Response(200, json={"data": [{"cik": 1, "val": 90.0, "end": "2026-06-30"}, {"cik": 2, "val": 50.0, "end": "2026-06-30"}]})
+        return httpx.Response(404)
+
+    from datetime import date
+
+    got = SecEdgarProvider("MarketLens test test@example.com", transport=httpx.MockTransport(handler)).shares_outstanding_all(date(2026, 9, 25))
+    assert got[1] == (100.0, date(2026, 7, 25))  # the cover page wins
+    assert got[2] == (50.0, date(2026, 6, 30))  # a company missing from the cover-page frames is not left without shares
