@@ -6,6 +6,7 @@ import { CommitteeSummary, CommitteeView } from "../components/CommitteeView";
 import { IRefresh, IStar } from "../components/icons";
 import { LivePrice } from "../components/LivePrice";
 import { refreshQuoteSubscriptions, useViewQuotes } from "../quotes";
+import { rememberStock } from "../components/QuickSearch";
 import { PlanChart } from "../components/PlanChart";
 import { Action, Bar, Card, Disclosure, Empty, Err, EvidenceChips, FreshnessTable, Loading, Metric, Notice, Quality, Ribbon, ScoreMeter, Section, StaleData, StatePanel, StatusBadge, Stmt, Term, isExpired } from "../components/ui";
 import { usePageTime, useStatus } from "../components/status";
@@ -128,7 +129,11 @@ function StockDetail({ ticker }: { ticker: string }) {
   const evIndex = useMemo(() => new Map<string, Evidence>((d.data?.analysis.evidence ?? []).map((e) => [e.evidence_id, e])), [d.data]);
   const live = useLiveStatus(ticker, d.data?.recommendation.id);
   useViewQuotes([ticker]);  // the viewed stock joins the app-wide quote subscription while this page is open
+  const wl = useApi<{ ticker: string }[]>("/watchlist");
+  const watched = Array.isArray(wl.data) && wl.data.some((w) => w?.ticker === ticker);  // an odd answer never breaks the page
   const mine = d.data && d.data.analysis.ticker === ticker ? d.data : null;
+  const mineOk = !!mine;
+  useEffect(() => { if (mineOk) rememberStock(ticker); }, [ticker, mineOk]);  // for 최근 본 종목 and the quick search
   usePageTime(mine ? { label: ticker, priceTs: mine.analysis.price_timestamp, priceSession: mine.analysis.session, quality: mine.analysis.price_quality, analysedAt: mine.recommendation.as_of } : null);
   if (d.state === "loading") return <Loading what={`${ticker} 분석`} steps={["가격·재무 데이터 확인", "업종 모델 적용", "이슈·거시 반영", "가격 계획 계산"]} />;
   if (!d.data) return <Err error={d.error} retry={d.reload} />;
@@ -230,7 +235,9 @@ function StockDetail({ ticker }: { ticker: string }) {
         </div>
         <div className="actions">
           <button className="primary" disabled={!!busy} onClick={() => setRefreshTick((t) => t + 1)}><IRefresh />분석 다시하기</button>
-          <button disabled={!!busy} onClick={() => run("watch", async () => { await api.post(`/watchlist/${a.ticker}`); refreshQuoteSubscriptions(); setNote("관심 종목에 추가했습니다. 종목 → 관심 탭에서 볼 수 있습니다."); })}><IStar />관심 종목 추가</button>
+          {watched
+            ? <button disabled={!!busy} aria-pressed onClick={() => run("watch", async () => { await api.del(`/watchlist/${a.ticker}`); wl.reload(); refreshQuoteSubscriptions(); setNote("관심 종목에서 뺐습니다."); })}><IStar />관심 종목에서 빼기</button>
+            : <button disabled={!!busy} aria-pressed={false} onClick={() => run("watch", async () => { await api.post(`/watchlist/${a.ticker}`); wl.reload(); refreshQuoteSubscriptions(); setNote("관심 종목에 추가했습니다. 종목 → 관심 탭과 홈에서 볼 수 있습니다."); })}><IStar />관심 종목 추가</button>}
           <button className="ghost" disabled={!!busy} onClick={() => run("replay", async () => {
             const r = await api.get<{ matches: boolean; replay_score: number; replay_action: string }>(`/recommendations/${rec.id}/replay`);
             setNote(r.matches ? `당시 분석을 저장된 데이터로 다시 계산해도 같은 결과입니다(점수 ${r.replay_score}, ${r.replay_action}).` : `재계산 결과가 다릅니다: 점수 ${r.replay_score}, ${r.replay_action}`);

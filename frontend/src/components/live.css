@@ -1,6 +1,6 @@
 /* Live price (real-time quotes 2026-09-28): fixed-width digits, a quiet state word, a short flash on a new price. */
 .lp { display: inline-flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
-.lp .lp-v { font-weight: 700; color: var(--text); border-radius: 6px; padding: 0 3px; margin: 0 -3px; transition: background-color .7s ease, color .7s ease; }
+.lp .lp-v { white-space: nowrap; font-weight: 700; color: var(--text); border-radius: 6px; padding: 0 3px; margin: 0 -3px; transition: background-color .7s ease, color .7s ease; }
 .lp-lg .lp-v { font-size: 34px; letter-spacing: -0.02em; }
 .lp-md .lp-v { font-size: 15px; }
 .lp-sm .lp-v { font-size: 13px; font-weight: 600; }

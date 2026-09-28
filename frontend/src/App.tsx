@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ModeBanner, StatePanel } from "./components/ui";
+import { QuickSearch } from "./components/QuickSearch";
 import { StatusBar, StatusProvider, useStatus } from "./components/status";
 import { BrandMark, IHelp, IHome, IMarket, IPerf, IPortfolio, ISettings, IStocks } from "./components/icons";
 import type { SystemInfo } from "./types";
@@ -42,6 +43,7 @@ function Shell() {
     <div className="layout">
       <nav className="nav" aria-label="주 메뉴">
         <div className="brand"><BrandMark className="mark" /><div>MarketLens<small>미국 주식 판단 도우미</small></div></div>
+        <QuickSearch />
         {NAV.map(([to, Icon, label]) => (
           <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => (isActive || (to === "/stocks" && inStocks) ? "active" : "")}>
             <Icon />{label}

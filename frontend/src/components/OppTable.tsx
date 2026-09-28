@@ -23,10 +23,10 @@ const COLS: [Key, string, string, boolean][] = [
  * a bare dash above it. */
 function PriceCell({ r }: { r: OppRow }) {
   const { row } = useQuote(r.ticker);
-  const basis = <span className="caption" title={`분석 기준가 · 출처 ${r.price_source ?? "N/A"} · ${stamp(r.price_timestamp)}`}>{row?.price != null ? <>분석 {price(r.price)}</> : "분석 시점 가격"}{r.price_quality !== "FRESH" ? <> <Quality q={r.price_quality} /></> : null}</span>;
+  const basis = <span className="caption" style={{ whiteSpace: "nowrap" }} title={`분석 기준가 · 출처 ${r.price_source ?? "N/A"} · ${stamp(r.price_timestamp)}`}>{row?.price != null ? <>분석 {price(r.price)}</> : "분석 시점"}{r.price_quality !== "FRESH" ? <> <Quality q={r.price_quality} /></> : null}</span>;
   return (
     <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
-      {row?.price != null ? <LivePrice ticker={r.ticker} size="sm" showState={false} /> : <span>{price(r.price)}</span>}
+      {row?.price != null ? <LivePrice ticker={r.ticker} size="sm" showState={false} /> : <span style={{ whiteSpace: "nowrap" }}>{price(r.price)}</span>}
       {basis}
     </span>
   );

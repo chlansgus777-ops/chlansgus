@@ -455,7 +455,7 @@ td { padding: 11px 12px; border-bottom: 1px solid rgba(38, 47, 71, 0.55); color:
 tr:last-child td { border-bottom: 0; }
 tbody tr { transition: background var(--t-fast); }
 tbody tr:hover td { background: rgba(164, 148, 248, 0.035); }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }  /* a number never breaks in the middle */
 tr.row-expired td { opacity: 0.62; }
 tr.row-expired:hover td { opacity: 0.9; }
 .tk-cell { display: grid; gap: 1px; min-width: 0; }
