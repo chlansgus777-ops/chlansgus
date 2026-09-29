@@ -4,6 +4,7 @@ import { api } from "../api";
 import { Card, ConfirmButton, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } from "../components/ui";
 import { Ledger } from "../components/Ledger";
 import { DomesticHoldings, TossCard, TossFills, type TossView } from "../components/TossConnect";
+import { KrwReturn, type KrwView } from "../components/KrwReturn";
 import { LivePrice } from "../components/LivePrice";
 import { LiveZone } from "../components/LiveZone";
 import { ITrash } from "../components/icons";
@@ -27,6 +28,8 @@ interface Pf {
   cash_source?: "manual" | "toss_usd" | "toss_usd_krw";
   /** the 토스증권 account (null in MOCK) */
   broker?: TossView | null;
+  /** the won return of each US holding, split into the stock and the dollar */
+  krw?: KrwView;
 }
 
 /** Plain-language reading of the portfolio (only from the numbers above). */
@@ -154,6 +157,7 @@ export default function Portfolio() {
           {x.correlations.length > 0 && <div className="caption" style={{ marginTop: 8 }}><Term k="correlation">상관계수</Term>: {x.correlations.map(([a, b, c]) => `${a}↔${b} ${num(c, 2)}`).join(" · ")}</div>}
         </Card>
       )}
+      {!empty && <KrwReturn k={x.krw} />}
       {toss && <DomesticHoldings items={toss.domestic ?? []} syncedAt={toss.synced_at} />}
       <div className="g2">
         <Card title="한 줄 해석" icon="✎">

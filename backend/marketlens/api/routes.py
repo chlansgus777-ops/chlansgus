@@ -464,11 +464,13 @@ def portfolio(req: Request) -> dict[str, Any]:
     bench = {b.day: b.close for b in series.get("SPY", []) if b.day <= end}
     snap = portfolio_snapshot(pf, closes, bench or None)
     s.broker_tick()
+    with s.sf() as ss:
+        krw = s.fx_attribution(ss, pf, snap)
     return encode(snap) | {"currency": "USD", "note": "MarketLens는 주문을 넣지 않습니다. 평가금액은 모든 종목을 같은 거래일 종가로 계산합니다.",
                            # False: the cash is the sizing assumption, not an entered amount (the account's cash counts as known)
                            "cash_entered": cash_entered or pf.cash_source != "manual", "cash_source": pf.cash_source,
                            "history_pending": pending, "unused_manual": [{"ticker": t, "quantity": q} for t, q in pf.unused_manual],
-                           "broker": s.broker.view() if s.broker.enabled else None}
+                           "broker": s.broker.view() if s.broker.enabled else None, "krw": krw}
 
 
 def _view_bars(s: MarketLensService, tickers: list[str], start: date, end: date, wait: float = STORE_FIRST_WAIT) -> tuple[dict[str, list[Any]], list[str]]:

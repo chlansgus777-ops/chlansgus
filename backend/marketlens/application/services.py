@@ -520,6 +520,54 @@ class MarketLensService:
             q = live_quote(self.quotes, ticker)
         return q
 
+    # ------------------------------------------------------------------ won-based return (domain.fx_attrib)
+    def usdkrw_rates(self, start: date, end: date) -> dict[date, float] | None:
+        """Daily KRW per USD from the macro provider (FRED DEXKOUS), cached 6 h; None while the first load runs."""
+        def load() -> dict[date, float]:
+            for p in self.registry.chain("macro").providers:
+                fn = getattr(p, "fx_history", None)
+                if fn is not None and getattr(p, "configured", True):
+                    return fn(start - timedelta(days=10), end)
+            return {}
+        v = self.refresher.get(f"fx:usdkrw:{start.isoformat()}:{end.isoformat()}", load, max_age=6 * 3600, wait=3.0, retry_after=600)
+        return v.value
+
+    def fx_attribution(self, s: Session, pf: Portfolio, snap: Any) -> dict[str, Any]:
+        """Per US holding: the won return split into the stock and the dollar (domain.fx_attrib). Purchase rates come
+        from the dated records behind the holding — the 토스 executions for an account holding, the trade records for a
+        ledger holding; an entered line has no dates and stays "unknown"."""
+        from dataclasses import asdict
+
+        from marketlens.domain.fx_attrib import Lot, attribute, totals
+
+        today = to_ny(self.now()).date()
+        ledger_lots: dict[str, list[Lot]] = {}
+        for g in self.ledger(s, today):
+            if g["ticker"]:
+                ledger_lots[g["ticker"]] = [Lot(t.day, t.kind, t.quantity, t.price, t.fees) for t in g["trades"] if t.kind in ("BUY", "SELL")]
+        toss_lots: dict[str, list[Lot]] = {}
+        for f in self.broker.fills(limit=2000):
+            if f.get("currency") != "USD" or not f.get("avg_price"):
+                continue
+            when = datetime.fromisoformat(f.get("filled_at") or f["ordered_at"])
+            toss_lots.setdefault(f["symbol"], []).append(Lot(to_ny(when).date(), f["side"], float(f["quantity"]), float(f["avg_price"]),
+                                                             float(f.get("commission") or 0) + float(f.get("tax") or 0)))
+        lots_of = {h.ticker: (toss_lots.get(h.ticker) if h.source == "toss" else ledger_lots.get(h.ticker) if h.source == "ledger" else None) for h in pf.holdings}
+        days = [lot.day for lots in lots_of.values() if lots for lot in lots]
+        start = min(days) if days else today - timedelta(days=30)
+        rates = self.usdkrw_rates(start, today)
+        fx_now: float | None = None
+        src, at = None, None
+        snap_b = self.broker.snapshot()
+        if snap_b and (snap_b.get("fx") or {}).get("mid"):
+            fx_now, src, at = float(snap_b["fx"]["mid"]), "토스증권 매매기준율", snap_b["fx"].get("at")
+        elif rates:
+            last = max(rates)
+            fx_now, src, at = rates[last], "FRED 원/달러(뉴욕 정오 기준)", last.isoformat()
+        rows = [attribute(h.ticker, h.quantity, h.cost_basis, hv.price, fx_now, lots_of.get(h.ticker), rates or {}) for h, hv in zip(pf.holdings, snap.holdings)]
+        return {"fx_now": fx_now, "fx_source": src, "fx_at": at, "loading": rates is None, "rows": [asdict(r) for r in rows], "totals": totals(rows),
+                "note": "매수 당시 환율은 FRED 원/달러 일별 기준환율(뉴욕 정오)입니다 — 증권사가 실제로 적용한 환율과 조금 다를 수 있습니다."}
+
     def broker_tick(self) -> None:
         """Keep the account current in the background — called by the quote stream's status tick and the portfolio
         routes; the refresher runs at most one sync at a time and backs off after a failure."""

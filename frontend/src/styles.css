@@ -853,3 +853,18 @@ main > .grid > *:nth-child(4) { animation-delay: 90ms; } main > .grid > *:nth-ch
 .grade-C { color: var(--wait); background: var(--wait-soft); }
 .grade-D, .grade-F { color: var(--down); background: var(--down-soft); border-color: rgba(255, 122, 152, 0.3); }
 @media (max-width: 760px) { .sig { grid-template-columns: 10px minmax(0, 1fr); } .sig .t { grid-column: 2; } }
+
+/* won-based return split (components/KrwReturn.tsx) */
+.krw-head { display: grid; grid-template-columns: minmax(180px, 0.9fr) minmax(0, 2fr); gap: 20px 28px; align-items: center; }
+.krw-total { font-size: clamp(24px, 2.4vw, 30px); font-weight: 750; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.krw-total span { font-size: 15px; font-weight: 650; margin-left: 6px; }
+.krw-split .bar { display: flex; gap: 3px; height: 12px; border-radius: 8px; overflow: hidden; background: var(--s3); }
+.krw-split .seg { display: block; height: 100%; min-width: 3px; border-radius: 3px; }
+.krw-split .seg.stock, .krw-split .sw.stock { background: linear-gradient(90deg, #7c6cf2, #a494f8); }
+.krw-split .seg.fx, .krw-split .sw.fx { background: linear-gradient(90deg, #3fb6d8, #72d7f0); }
+.krw-split .seg.neg { opacity: 0.55; background: repeating-linear-gradient(135deg, var(--down) 0 6px, rgba(255, 122, 152, 0.55) 6px 12px); }
+.krw-split .legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 10px; font-size: 13.5px; color: var(--sub); }
+.krw-split .legend b { font-variant-numeric: tabular-nums; margin-left: 2px; }
+.krw-split .legend em { font-style: normal; color: var(--muted); font-size: 12.5px; margin-left: 4px; }
+.krw-split .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; }
+@media (max-width: 900px) { .krw-head { grid-template-columns: minmax(0, 1fr); } }

@@ -312,6 +312,19 @@ class MockNewsProvider(_MockBase):
 class MockMacroProvider(_MockBase):
     name = "mock-macro"
 
+    def fx_history(self, start: date, end: date) -> dict[date, float]:
+        """A deterministic MOCK won/dollar path (1,300 → 1,390 over a year, weekdays only)."""
+        import math
+
+        out: dict[date, float] = {}
+        d = start
+        while d <= end:
+            if d.weekday() < 5:
+                t = (d - date(2025, 9, 1)).days
+                out[d] = round(1300 + 0.25 * t + 12 * math.sin(t / 17), 2)
+            d += timedelta(days=1)
+        return out
+
     def get_series(self, series_ids: Sequence[str], as_of: datetime) -> dict[str, MacroSeries]:
         base = {
             FED_FUNDS: (4.10, 0.0), US2Y: (3.72, 0.06), US10Y: (4.28, 0.18), US30Y: (4.78, 0.14),

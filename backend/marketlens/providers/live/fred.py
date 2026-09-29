@@ -75,6 +75,13 @@ class FredMacroProvider:
             out.append((date.fromisoformat(o["date"]), float(v)))
         return out
 
+    def fx_history(self, start: date, end: date) -> dict[date, float]:
+        """Daily KRW per USD (DEXKOUS, the noon buying rate in New York) — the purchase-day rates of the won-based
+        return split (domain.fx_attrib)."""
+        if not self.configured:
+            raise ProviderUnavailable("FRED_API_KEY 미설정")
+        return dict(self._observations("DEXKOUS", end, start, end))
+
     def get_series(self, series_ids: Sequence[str], as_of: datetime) -> dict[str, MacroSeries]:
         if not self.configured:
             raise ProviderUnavailable("FRED_API_KEY 미설정")
