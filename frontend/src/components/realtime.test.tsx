@@ -82,3 +82,14 @@ describe("sizing at the live price", () => {
     expect(screen.getByTestId("live-sizing").textContent).toContain("다시 계산하지 않습니다");
   });
 });
+
+describe("the candidates' '현재 유효한 추천만' filter", () => {
+  it("follows the live verdict of the same recommendation, else the stored status", async () => {
+    const { validNow } = await import("../pages/Opportunities");
+    const r = { ticker: "NVDA", id: 7, current_status: "CURRENT" };
+    expect(validNow(r, new Map())).toBe(true);  // no live verdict: the stored status
+    expect(validNow(r, new Map([["NVDA", row(1, J({ zone: "STOP_HIT", valid_now: false }))]]))).toBe(false);
+    expect(validNow({ ...r, current_status: "STALE" }, new Map([["NVDA", row(1, J())]]))).toBe(true);
+    expect(validNow(r, new Map([["NVDA", row(1, J({ rec_id: 8, valid_now: false }))]]))).toBe(true);  // another recommendation's plan
+  });
+});

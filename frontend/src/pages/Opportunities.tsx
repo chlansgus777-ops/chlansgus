@@ -4,11 +4,18 @@ import { Empty, Err, Loading, StaleData } from "../components/ui";
 import { NotReady, ReadinessBanner } from "../components/Readiness";
 import { useApi } from "../components/useApi";
 import { useStatus } from "../components/status";
-import { useViewQuotes } from "../quotes";
+import { useAllQuotes, useViewQuotes, type QuoteRow } from "../quotes";
 import { api } from "../api";
 import { stamp } from "../format";
 import { ACTION_INFO } from "../i18n";
 import type { Opportunities as Opp } from "../types";
+
+/** "현재 유효" now: the live verdict of this very recommendation when one is on the stream (it follows every quote),
+ * else the stored status — the same answer the row's "현재 유효성" column shows. */
+export function validNow(r: { ticker: string; id: number; current_status: string | null }, live: Map<string, QuoteRow>): boolean {
+  const j = live.get(r.ticker)?.judge;
+  return j && j.rec_id === r.id && j.zone !== "NO_PLAN" ? j.valid_now : r.current_status === "CURRENT";
+}
 
 /** The last scan's candidates (buy, wait and watch), searchable and filterable — the "후보" tab of the stock screen. */
 export default function Opportunities() {
@@ -27,16 +34,19 @@ export default function Opportunities() {
   const [filter, setFilter] = useState("");
   const [action, setAction] = useState("ALL");
   const [onlyCurrent, setOnlyCurrent] = useState(false);
+  const live = useAllQuotes();
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     for (const r of o.data?.rows ?? []) c[r.action] = (c[r.action] ?? 0) + 1;
     return c;
   }, [o.data]);
+  // the quote map only matters to the "현재 유효" filter: without it the table is not rebuilt on every print
+  const liveKey = onlyCurrent ? live : null;
+  const rows = useMemo(() => (o.data?.rows ?? []).filter((r) => (action === "ALL" || r.action === action)
+    && (!liveKey || validNow(r, liveKey))
+    && (filter === "" || `${r.ticker} ${r.company} ${r.sector}`.toLowerCase().includes(filter.toLowerCase()))), [o.data, action, liveKey, filter]);
   if (o.state === "loading") return <Loading what="매수 후보" rows={4} />;
   if (!o.data) return <Err error={o.error} retry={o.reload} />;
-  const rows = o.data.rows.filter((r) => (action === "ALL" || r.action === action)
-    && (!onlyCurrent || r.current_status === "CURRENT")
-    && (filter === "" || `${r.ticker} ${r.company} ${r.sector}`.toLowerCase().includes(filter.toLowerCase())));
   const scan = o.data.scan;
   const stale = stalePriceCause(o.data.rows);
   return (
