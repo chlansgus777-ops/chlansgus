@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Card, Empty, Err, Loading } from "../components/ui";
 import { useApi, useSettling } from "../components/useApi";
-import { num, stamp } from "../format";
+import { num, stamp, errKo } from "../format";
 import { HORIZON_KO } from "../i18n";
 import type { CompanyIssueImpact } from "../types";
 
@@ -24,7 +24,7 @@ export default function Issues() {
   const d = useApi<Detail>(sel ? `/issues/${sel}` : null);
   if (r.state === "loading" || r.data?.pending) return <Loading what="이슈(뉴스 수집·분류)" />;
   if (!r.data) return <Err error={r.error} retry={r.reload} />;
-  if (!r.data.available) return <div className="ribbon warn" role="alert"><span className="cap">⚠ 뉴스 없음</span><div className="msg">뉴스/이슈 데이터를 받지 못했습니다: {r.data.reason} — ‘이슈 없음’과 다릅니다. 이슈 점수는 계산하지 않습니다.</div></div>;
+  if (!r.data.available) return <div className="ribbon warn" role="alert"><span className="cap">⚠ 뉴스 없음</span><div className="msg" title={r.data.reason ?? ""}>{errKo(r.data.reason)} — ‘이슈 없음’과 다릅니다. 이슈 점수는 계산하지 않습니다.</div></div>;
   return (
     <div className="grid">
       {r.data.as_of ? <div className="caption" data-testid="issues-as-of">이슈 기준 시각 {stamp(r.data.as_of)}{r.data.refreshing ? " · 최신 뉴스로 다시 묶는 중(끝나면 바뀝니다)" : ""}</div> : null}
@@ -38,7 +38,7 @@ export default function Issues() {
             <tbody>{r.data.issues.map(({ issue: i, affected_stocks, affected_sectors }) => (
               <tr key={i.issue_id} onClick={() => setSel(i.issue_id)} onKeyDown={(e) => { if (e.key === "Enter") setSel(i.issue_id); }} tabIndex={0} style={{ cursor: "pointer" }} aria-selected={sel === i.issue_id}>
                 <td style={{ whiteSpace: "normal", minWidth: 280 }}><b>{i.title}</b><div className="caption">{stamp(i.publish_time)} · {i.sources.join(", ")}</div></td><td style={{ whiteSpace: "nowrap" }} title={i.category}>{CAT_KO[i.category] ?? i.category}</td><td style={{ whiteSpace: "nowrap" }}>{STATUS_KO[i.confirmed_status] ?? i.confirmed_status}</td><td className="num" style={{ borderLeft: "1px solid var(--line)" }}>{num(i.importance)}</td><td className="num">{num(i.confidence)}</td><td className="num">{num(i.market_awareness)}</td>
-                <td style={{ whiteSpace: "normal", minWidth: 120 }} title={affected_sectors.join(", ")}>{affected_sectors.slice(0, 2).join(", ")}{affected_sectors.length > 2 ? <span className="caption"> 외 {affected_sectors.length - 2}</span> : null}</td>
+                <td style={{ whiteSpace: "normal", minWidth: 120 }} title={affected_sectors.join(", ")}>{affected_sectors.map((x) => (x === "Unknown" ? "업종 미확인" : x)).slice(0, 2).join(", ")}{affected_sectors.length > 2 ? <span className="caption"> 외 {affected_sectors.length - 2}</span> : null}</td>
                 <td style={{ whiteSpace: "normal" }}><div className="row tight">{affected_stocks.slice(0, 8).map((s) => <span key={s.ticker} className={`pill ${s.swing > 3 ? "tone-ok" : s.swing < -3 ? "tone-danger" : ""}`}>{s.ticker}{s.hops ? `(${s.hops}단계)` : ""} {s.swing > 0 ? "▲" : s.swing < 0 ? "▼" : "■"}{num(s.swing, 0)}</span>)}</div></td>
               </tr>))}</tbody></table></div>
         ) : <div style={{ padding: 16 }}><Empty>현재 구조화된 이슈가 없습니다(뉴스 수집은 정상).</Empty></div>}

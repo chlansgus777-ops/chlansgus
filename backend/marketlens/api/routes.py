@@ -33,6 +33,15 @@ def svc(req: Request) -> MarketLensService:
     return s
 
 
+WATCH_STATUS_KO = {
+    "AGING": "마지막 분석 후 거래일이 지났습니다. 다시 분석해 보세요.",
+    "EXPIRED": "마지막 분석이 만료됐습니다. 다시 분석해 보세요.",
+    "NEEDS_REVALIDATION": "분석 후 가격이 움직였을 수 있습니다. 지금 가격으로 다시 확인하세요.",
+    "PLAN_INVALIDATED": "지금 가격이 분석 때 계획 범위를 벗어났습니다.",
+}
+DATA_STATE_VETOES = frozenset({"STALE_PRICE", "STALE_CORE_DATA", "MISSING_CORE_DATA", "INSUFFICIENT_MODEL_COVERAGE", "SEVERE_DATA_CONFLICT"})
+
+
 def _ticker(t: str) -> str:
     import re
 
@@ -93,7 +102,7 @@ def _row_summary(r: Any, s: MarketLensService | None = None, fetch_quote: bool =
         "valuation_price_basis": res.get("valuation_price_basis"),
         "sector_known": res.get("sector_known", True),
         "id": r.id, "rank": r.rank, "ticker": r.ticker, "company": res["security"]["company_name"], "sector": r.sector,
-        "sector_model": r.sector_model, "price": lv["price"] if lv else r.price, "split_factor_since": lv["split_factor"] if lv else 1.0, "session": r.session, "price_timestamp": r.price_timestamp.isoformat() if r.price_timestamp else None,
+        "sector_model": r.sector_model, "price": lv["price"] if lv else r.price, "split_factor_since": lv["split_factor"] if lv else 1.0, "session": r.session, "scan_session": classify_session(r.as_of).value if r.as_of else None, "price_timestamp": r.price_timestamp.isoformat() if r.price_timestamp else None,
         "price_source": r.price_source, "price_quality": r.price_quality, "score": r.score, "confidence": r.confidence,
         "action": r.final_action, "deterministic_action": r.deterministic_action, "committee_status": r.committee_status,
         "ideal_entry": lv["ideal_entry"] if lv else entry.get("ideal_entry"), "max_buy": lv["max_buy"] if lv else entry.get("max_buy"),
@@ -365,6 +374,7 @@ def dashboard(req: Request) -> dict[str, Any]:
     with s.sf() as ss:
         scan, rows, results = _scan_rows(s, ss)
         pf = s.portfolio(ss)
+        cash_entered = repo.get_setting(ss, "portfolio_cash") is not None
         for w in repo.watchlist(ss):
             rec = s.latest_company_recommendation(ss, w.ticker)
             if rec is None:
@@ -373,8 +383,11 @@ def dashboard(req: Request) -> dict[str, Any]:
             row = _row_summary(rec, s)
             if row["action"] in bullish_set and row["actionable_now"]:
                 alerts.append({"ticker": w.ticker, "level": "positive", "text": f"{row['action_ko']} 신호 — 최대 매수가 {row['max_buy']}달러 이하에서 유효"})
+            elif row["action"] == Action.DATA_INSUFFICIENT.value:  # says why, never "old" for a fresh analysis
+                why = "현재가가 최신이 아니어서" if "STALE_PRICE" in row["vetoes"] else "핵심 데이터가 부족해"
+                alerts.append({"ticker": w.ticker, "level": "info", "text": f"판단 보류 — {why} 판단하지 않았습니다."})
             elif row["current_status"] != "CURRENT":
-                alerts.append({"ticker": w.ticker, "level": "info", "text": "마지막 분석이 오래되었습니다. 다시 분석해 보세요."})
+                alerts.append({"ticker": w.ticker, "level": "info", "text": WATCH_STATUS_KO.get(row["current_status"], "마지막 분석을 지금 가격으로 다시 확인해야 합니다.")})
             elif row["vetoes"]:
                 alerts.append({"ticker": w.ticker, "level": "warning", "text": "주의: " + ", ".join(row["vetoes"])})
             else:  # nothing to act on: still listed, so a watched name never reads as "no watchlist"
@@ -382,8 +395,10 @@ def dashboard(req: Request) -> dict[str, Any]:
     top = [r for r in rows if r["action"] in bullish_set][:8] or rows[:8]
     risks = []
     for r in rows:
-        if r["vetoes"]:
-            risks.append({"ticker": r["ticker"], "text": ", ".join(r["vetoes"])})
+        # missing / stale / conflicting data is a data state (explained with the list), not a risk of the company
+        vetoes = [v for v in r["vetoes"] if v not in DATA_STATE_VETOES]
+        if vetoes:
+            risks.append({"ticker": r["ticker"], "text": ", ".join(vetoes)})
         elif r["risk"] in ("HIGH", "EXTREME"):
             risks.append({"ticker": r["ticker"], "text": f"이벤트 위험 {r['risk']}"})
     changes = []
@@ -415,7 +430,7 @@ def dashboard(req: Request) -> dict[str, Any]:
         "major_risks": risks[:10],
         "upcoming_catalysts": cal["events"][:10],
         "catalysts_status": {k: cal.get(k) for k in ("available", "pending", "reason", "fetched_at", "refreshing", "refresh_error")},
-        "portfolio": {"holdings": len(pf.holdings), "cash": pf.cash},
+        "portfolio": {"holdings": len(pf.holdings), "cash": pf.cash, "cash_entered": cash_entered},
         "provider_health": [h.as_dict() for h in s.health.all()],
         "readiness": ready,
     }
@@ -438,6 +453,7 @@ def portfolio(req: Request) -> dict[str, Any]:
     s = svc(req)
     with s.sf() as ss:
         pf = s.portfolio(ss)
+        cash_entered = repo.get_setting(ss, "portfolio_cash") is not None
     end = last_completed_session(s.now())
     start = end - timedelta(days=260)
     series, pending = _view_bars(s, [h.ticker for h in pf.holdings] + ["SPY"], start, end)
@@ -445,6 +461,7 @@ def portfolio(req: Request) -> dict[str, Any]:
     bench = {b.day: b.close for b in series.get("SPY", []) if b.day <= end}
     snap = portfolio_snapshot(pf, closes, bench or None)
     return encode(snap) | {"currency": "USD", "note": "MarketLens는 주문을 넣지 않습니다. 평가금액은 모든 종목을 같은 거래일 종가로 계산합니다.",
+                           "cash_entered": cash_entered,  # False: the cash is the sizing assumption, not an entered amount
                            "history_pending": pending, "unused_manual": [{"ticker": t, "quantity": q} for t, q in pf.unused_manual]}
 
 

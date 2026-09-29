@@ -2,7 +2,7 @@ export interface OppRow {
   /** stock page: the current price was still being fetched when the page was built (re-judged shortly) */
   quote_pending?: boolean;
   id: number; rank: number | null; ticker: string; company: string; sector: string; sector_model: string;
-  price: number | null; session: string | null; price_timestamp: string | null; price_source: string | null; price_quality: string;
+  price: number | null; session: string | null; /** the US session at the scan time (``session`` is the quote's own session) */ scan_session?: string | null; price_timestamp: string | null; price_source: string | null; price_quality: string;
   score: number; confidence: number; action: string; deterministic_action: string; committee_status: string;
   ideal_entry: number | null; max_buy: number | null; target: number | null; stop: number | null; downside: number | null; rr: number | null;
   catalyst: string | null; catalyst_date: string | null; risk: string | null; data_quality: string; mode: string; vetoes: string[]; as_of: string;

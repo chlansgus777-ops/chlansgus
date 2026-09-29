@@ -129,7 +129,7 @@ const JOB_KO: Record<SyncJob["status"], string> = {
 
 /** LIVE: the button that fills the local data store (SEC list and filings, Polygon daily prices), with its progress.
  * Without it an installed app had no way to leave "NOT READY". */
-export function SyncControl({ onChange }: { onChange?: () => void }) {
+export function SyncControl({ onChange, compact = false }: { onChange?: () => void; compact?: boolean }) {
   const st = useApi<{ job: SyncJob | null }>("/sync/status");
   const [err, setErr] = useState<string | null>(null);
   const job = st.data?.job ?? null;
@@ -146,6 +146,21 @@ export function SyncControl({ onChange }: { onChange?: () => void }) {
     setErr(null);
     try { await api.post("/sync/start"); st.reload(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
+  const [open, setOpen] = useState(false);
+  if (compact && job?.status === "DONE" && !job.missing?.length && !open) {
+    // finished: one line (when, what next) instead of a finished checklist taking half the home screen
+    return (
+      <div className="row" data-testid="sync-done">
+        <span className="pos" aria-hidden>✓</span>
+        <span>준비 완료{job.finished_at ? ` · ${stamp(job.finished_at)}` : ""}</span>
+        <span className="t-sub">하루 한 번 누르면 새 거래일만 받습니다.</span>
+        <span style={{ flex: 1 }} />
+        <button className="ghost sm" onClick={() => setOpen(true)}>자세히</button>
+        <button className="sm" onClick={start}>새 거래일 받기</button>
+        {err && <Notice tone="neg">{err}</Notice>}
+      </div>
+    );
+  }
   return (
     <div className="sync-control">
       <div className="row">
@@ -179,9 +194,18 @@ export function SyncControl({ onChange }: { onChange?: () => void }) {
 
 /** Shown instead of "no opportunities" when the scanner's data is not ready. */
 export function NotReady({ r, onChange }: { r: ReadinessInfo; onChange?: () => void }) {
+  // says what is really happening: collecting only while a job runs — a fresh install has started nothing yet
+  const st = useApi<{ job: SyncJob | null }>(r.mode === "LIVE" ? "/sync/status" : null);
+  const job = st.data?.job ?? null;
+  const running = job?.status === "RUNNING";
+  const idle = r.mode === "LIVE" && st.data !== null && !running;
   return (
-    <Card title="데이터를 준비하는 중입니다" icon="⏳" tone="warn" explain="데이터가 준비되지 않아 추천 종목이 없는 것처럼 보일 수 있습니다. 이 목록이 비어 있어도 ‘살 종목이 없다’는 뜻이 아닙니다.">
-      <div style={{ marginBottom: 12 }}><StatePanel kind="collecting" /></div>
+    <Card title={idle ? (job ? "데이터 준비가 끝나지 않았습니다" : "먼저 데이터를 준비하세요") : "데이터를 준비하는 중입니다"} icon="⏳" tone="warn" explain="데이터가 준비되지 않아 추천 종목이 없는 것처럼 보일 수 있습니다. 이 목록이 비어 있어도 ‘살 종목이 없다’는 뜻이 아닙니다.">
+      <div style={{ marginBottom: 12 }}>{idle
+        ? <StatePanel kind="collecting" testId="state-not-started" title={job ? "받다가 멈춘 데이터가 있습니다" : "아직 받은 데이터가 없습니다"}
+            what={job ? "지난 데이터 준비가 끝까지 가지 못했습니다. 받은 데이터는 남아 있고, 아래 버튼을 다시 누르면 이어서 받습니다." : "가격 이력·시가총액·재무 자료가 아직 이 PC에 없습니다. 아래 ‘데이터 준비 시작’을 누르면 무료 공급원에서 받기 시작합니다."}
+            todo="‘데이터 준비 시작’을 누르세요. 처음 한 번은 1시간 안팎 걸리고, 진행률이 여기에 표시됩니다." />
+        : <StatePanel kind="collecting" />}</div>
       {r.mode === "LIVE" && <SyncControl onChange={onChange} />}
       <ProgressBars p={r.progress} />
       <ul className="list">{r.scanner_reasons.map((x, i) => <li key={i}><span className="dot warn">!</span><span>{x}</span></li>)}</ul>

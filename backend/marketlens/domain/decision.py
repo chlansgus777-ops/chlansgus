@@ -83,7 +83,12 @@ def evaluate_vetoes(ctx: DecisionContext, th: DecisionThresholds) -> list[HardVe
         v.append(HardVeto.SEVERE_DATA_CONFLICT)
     if ctx.thesis_invalidated:
         v.append(HardVeto.THESIS_INVALIDATED)
-    if ctx.avg_dollar_volume is None or ctx.avg_dollar_volume < th.min_liquidity_dollar_volume:
+    if ctx.avg_dollar_volume is None:
+        # unknown volume: when the data is already vetoed as missing/stale, that says it — "illiquid" would name a
+        # company risk nobody measured (fresh install: no price history yet). Alone it still blocks a buy.
+        if not {HardVeto.STALE_PRICE, HardVeto.STALE_CORE_DATA, HardVeto.MISSING_CORE_DATA} & set(v):
+            v.append(HardVeto.UNACCEPTABLE_LIQUIDITY)
+    elif ctx.avg_dollar_volume < th.min_liquidity_dollar_volume:
         v.append(HardVeto.UNACCEPTABLE_LIQUIDITY)
     if ctx.event_risk_level == "EXTREME":
         v.append(HardVeto.EXTREME_EVENT_RISK)

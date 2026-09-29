@@ -33,8 +33,10 @@ export function Quality({ q }: { q: string | null | undefined }) {
 
 const STATUS_ICON: Record<string, string> = { CURRENT: "✓", NEEDS_REVALIDATION: "!", PLAN_INVALIDATED: "✕", AGING: "◷", UNVERIFIED: "?", SUPERSEDED: "↻", EXPIRED: "◷" };
 
-export function StatusBadge({ s, reason }: { s: string | null | undefined; reason?: string | null }) {
+export function StatusBadge({ s, reason, action }: { s: string | null | undefined; reason?: string | null; action?: string | null }) {
   if (!s) return null;
+  // an undecided call has no plan whose validity could expire: "만료" right after a fresh analysis misleads
+  if (action === "DATA INSUFFICIENT") return <span className="status s-HELD" title={reason ?? "데이터가 부족하거나 오래되어 판단하지 않았습니다 — 실행할 계획이 없습니다"}><span aria-hidden>◌</span>판단 보류</span>;
   const info = STATUS_INFO[s];
   return <span className={`status s-${s}`} title={reason ?? info?.help ?? ""}><span aria-hidden>{STATUS_ICON[s] ?? "•"}</span>{info?.label ?? s}</span>;
 }
@@ -230,7 +232,7 @@ const STATE: Record<StateKind, { icon: string; tone: "info" | "warn" | "danger";
 };
 
 /** One of the named screen states: what it is, what cannot be known right now, and what the user can do. */
-export function StatePanel({ kind, title, what, children, actions, testId }: { kind: StateKind; title?: string; what?: ReactNode; children?: ReactNode; actions?: ReactNode; testId?: string }) {
+export function StatePanel({ kind, title, what, todo, children, actions, testId }: { kind: StateKind; title?: string; what?: ReactNode; todo?: ReactNode; children?: ReactNode; actions?: ReactNode; testId?: string }) {
   const s = STATE[kind];
   return (
     <div className={`state tone-${s.tone}`} role={s.tone === "danger" ? "alert" : "status"} data-testid={testId ?? `state-${kind}`}>
@@ -239,7 +241,7 @@ export function StatePanel({ kind, title, what, children, actions, testId }: { k
       <dl>
         <dt>무슨 상황</dt><dd>{what ?? s.what}</dd>
         <dt>알 수 없는 것</dt><dd>{s.unknown}</dd>
-        <dt>할 수 있는 일</dt><dd>{s.todo}</dd>
+        <dt>할 수 있는 일</dt><dd>{todo ?? s.todo}</dd>
       </dl>
       {children}
       {actions ? <div className="actions">{actions}</div> : null}

@@ -18,7 +18,7 @@ export default function Opportunities() {
   const [scanErr, setScanErr] = useState<string | null>(null);
   // the top of the list joins the app-wide quote stream, so 현재가 is live even when the scan's price was not
   useViewQuotes((o.data?.rows ?? []).slice(0, 30).map((r) => r.ticker));
-  const marketOpen = st?.system.data?.market?.session === "REGULAR";
+  const sessionNow = st?.system.data?.market?.session ?? null;
   const rescan = async () => {
     if (busy) return;  // never a second scan (and its AI calls) from a double click
     setBusy(true); st?.setScanning(true); setScanErr(null);
@@ -44,7 +44,7 @@ export default function Opportunities() {
       <ReadinessBanner r={o.data.readiness} />
       <StaleData error={o.error} at={o.fetchedAt} retry={o.reload} />
       <Err error={scanErr} />
-      {stale && <StalePriceNote c={stale} marketOpen={marketOpen} onRescan={() => void rescan()} busy={busy || st?.scanning} />}
+      {stale && <StalePriceNote c={stale} session={sessionNow} onRescan={() => void rescan()} busy={busy || st?.scanning} />}
       {o.data.readiness?.scanner_status === "SCANNER_NOT_READY" && !o.data.rows.length && <NotReady r={o.data.readiness} onChange={o.reload} />}
       <section className="card flush">
         <div className="row spread" style={{ padding: "16px 18px 12px", borderBottom: "1px solid var(--line)" }}>

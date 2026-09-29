@@ -1,6 +1,6 @@
 import { useSearchParams } from "react-router-dom";
 import { Err, Loading, Quality, Tabs } from "../components/ui";
-import { num, pct, stamp } from "../format";
+import { ago, num, pct, stamp, errKo } from "../format";
 import { REGIME_KO, ko } from "../i18n";
 import CalendarPage from "./Calendar";
 import Issues from "./Issues";
@@ -29,10 +29,10 @@ export default function Market() {
         <div><h1>시장</h1><div className="t-sub">지금 시장 분위기와, 뉴스·일정·금리·환율이 종목에 어떤 바람을 만드는지 봅니다. 사실(기사·지표)과 MarketLens의 해석을 나눠 표시합니다.</div></div>
       </div>
       {m.state === "loading" || d?.pending ? <Loading what="시장 분위기(거시 지표)" rows={0} /> : !d ? <Err error={m.error} retry={m.reload} /> : !d.available ? (
-        <div className="ribbon warn" role="alert"><span className="cap">⚠ 거시 데이터 없음</span><div className="msg">{d.reason} — 다른 값으로 대체하지 않습니다. 시장 국면은 판단하지 않습니다.</div></div>
+        <div className="ribbon warn" role="alert"><span className="cap">⚠ 거시 데이터 없음</span><div className="msg" title={d.reason ?? ""}>{errKo(d.reason)} — 다른 값으로 대체하지 않습니다. 시장 국면은 판단하지 않습니다.</div></div>
       ) : (
         <section className="today enter" aria-label="시장 분위기">
-          <div className="t-kicker">지금 시장 분위기{d.as_of ? ` · ${stamp(d.as_of)} 기준` : ""}{d.refreshing ? " · 새로 받는 중" : d.refresh_error ? " · 새로 받기 실패(이전 값)" : ""}</div>
+          <div className="t-kicker">시장 분위기{d.as_of ? ` · ${stamp(d.as_of)} 기준${Date.now() - Date.parse(d.as_of) > 30 * 60_000 ? ` (${ago(d.as_of, Date.now())})` : ""}` : ""}{d.refreshing ? " · 새로 받는 중" : d.refresh_error ? " · 새로 받기 실패(이전 값)" : ""}</div>
           <div className="big" style={{ marginTop: 6 }}><span className="count-l" style={{ fontSize: 30, letterSpacing: "-0.03em" }}>{ko(REGIME_KO, d.primary_regime)}</span></div>
           <p className="lead">{REGIME_HELP[d.primary_regime] ?? "거시 지표로 판단한 현재 환경"}{d.regimes.filter((r) => r.active && r.regime !== d.primary_regime).length ? ` · 함께 나타난 국면: ${d.regimes.filter((r) => r.active && r.regime !== d.primary_regime).map((r) => ko(REGIME_KO, r.regime)).join(", ")}` : ""}</p>
           <div className="facts" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>

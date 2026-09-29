@@ -39,10 +39,13 @@ export function PriceCell({ r, quiet = false }: { r: OppRow; quiet?: boolean }) 
 /** Most of a scan's rows withheld for the same reason — the price was not current when the scan ran. Said once above
  * the table (with why and what to do) instead of three identical badges on every row (owner report 2026-09-28:
  * "전부 오래됨·데이터부족·거부권 — 뭘 보라는 거야, 오류야?"). */
+/** Vetoes that already say the data is missing / stale — a separate data-quality chip would repeat them. */
+const DATA_VETOES = new Set(["STALE_PRICE", "STALE_CORE_DATA", "MISSING_CORE_DATA", "SEVERE_DATA_CONFLICT"]);
+
 export function stalePriceCause(rows: OppRow[]): { n: number; total: number; session: string | null } | null {
   const n = rows.filter((r) => r.vetoes.includes("STALE_PRICE")).length;
   if (n < 3 || n < rows.length * 0.6) return null;
-  return { n, total: rows.length, session: rows.find((r) => r.vetoes.includes("STALE_PRICE"))?.session ?? null };
+  return { n, total: rows.length, session: (() => { const r = rows.find((x) => x.vetoes.includes("STALE_PRICE")); return r?.scan_session ?? r?.session ?? null; })() };
 }
 
 const STALE_WHY: Record<string, string> = {
@@ -53,16 +56,19 @@ const STALE_WHY: Record<string, string> = {
   REGULAR: "정규장인데도 현재가를 받지 못했습니다 — 시세 공급자(Finnhub) 연결이나 키를 확인하세요.",
 };
 
-export function StalePriceNote({ c, marketOpen = false, onRescan, busy = false }: { c: { n: number; total: number; session: string | null }; marketOpen?: boolean; onRescan?: () => void; busy?: boolean }) {
+/** ``session``: the US session NOW — a rescan gives a verdict in the regular session and while the market is fully
+ * closed (the last close is then the current price); in pre-market / after-hours it would be held again. */
+export function StalePriceNote({ c, session = null, onRescan, busy = false }: { c: { n: number; total: number; session: string | null }; session?: string | null; onRescan?: () => void; busy?: boolean }) {
+  const rescanNow = session === "REGULAR" || session === "CLOSED";
   return (
     <div className="ribbon info" role="note" data-testid="stale-price-note">
       <span className="cap">판단 보류 이유</span>
       <div className="msg">
         <b>{c.total}개 중 {c.n}개가 ‘데이터 부족’인 것은 오류가 아니라, 스캔할 때 현재가가 최신이 아니었기 때문입니다.</b>{" "}
         {STALE_WHY[c.session ?? ""] ?? "스캔할 때 20분 안의 체결가가 없어 매수 판단을 보류했습니다."}{" "}
-        점수·가격 계획은 참고로 볼 수 있고, 정규장(한국 시간 밤 10:30~새벽 5:00, 서머타임이 아니면 11:30~6:00)에 다시 스캔하면 판단이 나옵니다.
+        점수·가격 계획은 참고로 볼 수 있습니다. 판단이 나오는 시간에 다시 스캔하세요: 정규장(한국 시간 밤 10:30~새벽 5:00) 또는 장이 완전히 닫힌 뒤(한국 시간 오전 9:00~오후 5:00·주말, 종가 기준) — 서머타임이 아니면 각각 1시간 늦습니다.
         표에서는 이 공통 사유를 줄마다 반복하지 않습니다.
-        {marketOpen && onRescan ? <div style={{ marginTop: 8 }}><button className="primary sm" disabled={busy} onClick={onRescan} data-testid="rescan-now">{busy ? <><span className="spin" />스캔 중…</> : "지금 정규장 — 다시 스캔하기"}</button></div> : null}
+        {rescanNow && onRescan ? <div style={{ marginTop: 8 }}><button className="primary sm" disabled={busy} onClick={onRescan} data-testid="rescan-now">{busy ? <><span className="spin" />스캔 중…</> : session === "REGULAR" ? "지금 정규장 — 다시 스캔하기" : "지금 장 마감 — 종가 기준으로 다시 스캔하기"}</button></div> : null}
       </div>
     </div>
   );
@@ -127,7 +133,7 @@ function cell(r: OppRow, k: Key, commonStale = false) {
       // the scan-wide "price not current" reason is explained above the table: only what differs stays on the row
       const vetoes = commonStale ? r.vetoes.filter((v) => v !== "STALE_PRICE") : r.vetoes;
       const priceOnly = commonStale && r.vetoes.includes("STALE_PRICE") && r.price_quality !== "FRESH" && r.price_quality !== "DELAYED";
-      return <div className="row tight"><Action a={r.action} status={r.current_status} quality={r.data_quality} /><Vetoes v={vetoes} />{r.data_quality !== "FRESH" && r.data_quality !== "DELAYED" && !priceOnly ? <Quality q={r.data_quality} /> : null}</div>;
+      return <div className="row tight"><Action a={r.action} status={r.current_status} quality={r.data_quality} /><Vetoes v={vetoes} />{r.data_quality !== "FRESH" && r.data_quality !== "DELAYED" && !priceOnly && !r.vetoes.some((v) => DATA_VETOES.has(v)) ? <Quality q={r.data_quality} /> : null}</div>;
     }
     case "score":
       return <span className="score-mini"><b>{num(r.score, 1)}</b><span className="bar"><span style={{ display: "block", height: "100%", width: `${Math.max(0, Math.min(100, r.score))}%`, borderRadius: 99, background: r.score >= 80 ? "var(--buy)" : r.score >= 72 ? "rgba(114,184,255,.6)" : "var(--faint)" }} /></span></span>;
@@ -136,12 +142,14 @@ function cell(r: OppRow, k: Key, commonStale = false) {
     case "max_buy": {
       if (r.max_buy == null) return <span className="muted" title="분석 때 현재가가 없어 가격 계획을 만들지 않음">—</span>;
       const d = r.price != null && r.max_buy != null ? r.max_buy / r.price - 1 : null;
+      // an undecided name's plan is reference only — muted, never styled like an actionable price
+      if (r.action === "DATA INSUFFICIENT") return <span className="muted" title="판단 보류 종목의 가격 계획은 참고용입니다 — 실행 근거가 아닙니다">{price(r.max_buy)}<span className="caption" style={{ display: "block" }}>참고용</span></span>;
       return <span>{price(r.max_buy)}{d != null ? <span className={`caption ${d < 0 ? "warn" : ""}`} style={{ display: "block" }}>{d < 0 ? `${pct(-d, 1, false)} 초과` : `여유 ${pct(d, 1, false)}`}</span> : null}</span>;
     }
     case "rr":
-      return r.rr == null ? <span className="muted" title="분석 때 현재가가 없어 계산하지 않음">—</span> : <span className={r.rr < 2 ? "warn" : undefined}>{num(r.rr, 2)}</span>;
+      return r.rr == null ? <span className="muted" title="분석 때 현재가가 없어 계산하지 않음">—</span> : <span className={r.action === "DATA INSUFFICIENT" ? "muted" : r.rr < 2 ? "warn" : undefined}>{num(r.rr, 2)}</span>;
     case "current_status":
-      return <StatusBadge s={r.current_status} reason={r.current_status_reason} />;
+      return <StatusBadge s={r.current_status} reason={r.current_status_reason} action={r.action} />;
     case "risk":
       return r.catalyst ? <span title={r.catalyst_date ?? ""}><span className={r.risk === "EXTREME" || r.risk === "HIGH" ? "neg" : r.risk === "MEDIUM" ? "warn" : "muted"}>{ko(RISK_KO, r.risk, "N/A")}</span> <span className="caption">· {r.catalyst.length > 22 ? `${r.catalyst.slice(0, 22)}…` : r.catalyst}</span></span>
         : <span className={r.risk === "EXTREME" || r.risk === "HIGH" ? "neg" : r.risk === "MEDIUM" ? "warn" : "muted"}>{ko(RISK_KO, r.risk, "N/A")}</span>;

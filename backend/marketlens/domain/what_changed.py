@@ -12,6 +12,7 @@ from datetime import date, datetime
 from typing import Mapping
 
 from marketlens.domain.decision import DecisionThresholds
+from marketlens.domain.scoring import COMPONENT_KO
 
 ZONE_BUFFER_ATR = 0.25
 
@@ -107,7 +108,7 @@ def diff(prev: AnalysisDigest | None, cur: AnalysisDigest, th: DecisionThreshold
     for comp, v in cur.components.items():
         pv = prev.components.get(comp)
         if pv is not None and abs(v - pv) >= 0.05:
-            out.append(ChangeItem("component", f"{comp} 세부점수 {pv:.2f} → {v:.2f}", False, v - pv))
+            out.append(ChangeItem("component", f"{COMPONENT_KO.get(comp, comp)} 세부점수 {pv:.2f} → {v:.2f}", False, v - pv))
     if prev.price and cur.price:
         mv = cur.price / prev.price - 1
         if abs(mv) >= 0.005:

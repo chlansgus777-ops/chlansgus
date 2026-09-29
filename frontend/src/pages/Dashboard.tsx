@@ -9,7 +9,7 @@ import { useApi, usePoll } from "../components/useApi";
 import { LivePrice } from "../components/LivePrice";
 import { StalePriceNote, stalePriceCause } from "../components/OppTable";
 import { useQuote, useViewQuotes } from "../quotes";
-import { ago, day, num, pct, price, stampEt } from "../format";
+import { ago, day, num, pct, price, stampEt, errKo } from "../format";
 import { ACTION_PLAIN, BULLISH, HEALTH_KO, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
 import type { OppRow, ScanInfo } from "../types";
 
@@ -21,7 +21,7 @@ interface Dash {
   top_opportunities: OppRow[];
   major_risks: { ticker: string; text: string }[];
   upcoming_catalysts: { event_id: string; title: string; event_date: string; days_until: number; importance: number }[];
-  portfolio: { holdings: number; cash: number };
+  portfolio: { holdings: number; cash: number; cash_entered?: boolean };
   provider_health: { name: string; kind: string; status: string }[];
   performance: { equity: number; starting_capital: number; return: number | null; max_drawdown: number | null; as_of: string; curve: number[] } | null;
   recommendation_changes: { ticker: string; text: string; action: string }[];
@@ -127,7 +127,7 @@ export function CoverageCard({ s }: { s: ScanStatus | null }) {
     </Card>
   );
 }
-const FIELD_KO: Record<string, string> = { price: "현재가", price_history: "가격 이력", fundamentals: "재무", analyst: "애널리스트 추정치", earnings: "실적", macro: "거시", news: "뉴스", options: "옵션", ownership: "수급" };
+const FIELD_KO: Record<string, string> = { price: "현재가", price_history: "가격 이력", fundamentals: "재무", analyst: "애널리스트 추정치", earnings: "실적", macro: "거시", news: "뉴스", short_interest: "공매도 잔고" };
 
 /** The scan's real scope in one line — never "the whole market" when only a list or part of it was judged. */
 export function scopeLine(s: ScanStatus | null | undefined, mode: string | undefined): string | null {
@@ -220,20 +220,21 @@ export default function Dashboard() {
               <div><div className="t">시장 분위기</div><div className="v">{x.regime_status?.pending ? <span className="muted" data-testid="regime-loading">거시 지표 불러오는 중…</span> : ko(REGIME_KO, x.regime.primary, "판단 불가")}</div>
                 <SectionAge s={x.regime_status} nowMs={nowMs} what="거시 지표" />
                 {x.regime.readings.length > 1 && <div className="s" title={x.regime.readings.map((r) => `${ko(REGIME_KO, r.regime)}: ${r.evidence.join(", ")}`).join("\n")}>함께 나타난 국면: {x.regime.readings.filter((r) => r.regime !== x.regime.primary).slice(0, 2).map((r) => ko(REGIME_KO, r.regime)).join(", ")}</div>}</div>
-              <div className={risk0 || notValid.length ? "warn" : ""}><div className="t">가장 큰 위험</div><div className="v">{risk0 ? `${risk0.ticker} — ${risk0.text.split(", ").map((v) => VETO_KO[v] ?? v).join(", ")}` : notValid.length ? `유효하지 않은 추천 ${notValid.length}개` : "상위 후보에 거부권·고위험 일정 없음"}</div>
-                <div className="s">{risk0 ? "상위 후보 중 거부권이나 큰 이벤트가 걸린 종목" : "종목별 가장 큰 위험은 후보 카드에 있습니다"}</div></div>
+              <div className={risk0 || notValid.length ? "warn" : ""}><div className="t">가장 큰 위험</div><div className="v">{risk0 ? `${risk0.ticker} — ${risk0.text.split(", ").map((v) => VETO_KO[v] ?? v).join(", ")}` : notValid.length ? `유효하지 않은 추천 ${notValid.length}개` : !x.scan ? <span className="muted">스캔 후 표시</span> : "상위 후보에 유동성·이벤트·투자 논리 위험 신호 없음"}</div>
+                <div className="s">{risk0 ? "상위 후보 중 위험 거부권이나 큰 이벤트가 걸린 종목" : !x.scan ? "시장 스캔을 실행하면 후보 중 가장 큰 위험을 보여줍니다" : "종목별 가장 큰 위험은 후보 카드에 있습니다"}</div></div>
               <div><div className="t">다음 핵심 일정</div><div className="v">{next ? next.title : x.catalysts_status?.pending ? <span className="muted">일정 불러오는 중…</span> : "일정 자료 없음"}</div>
-                <div className="s">{next ? `${day(next.event_date)} (미국 날짜) · ${next.days_until === 0 ? "오늘" : `${next.days_until}일 후`}` : x.catalysts_status?.pending ? "일정 공급자에게 요청했습니다" : x.catalysts_status?.reason ? `일정을 받지 못함 — ${x.catalysts_status.reason}` : "일정 공급자에게서 받은 일정이 없습니다"}</div></div>
+                <div className="s">{next ? `${day(next.event_date)} (미국 날짜) · ${next.days_until === 0 ? "오늘" : `${next.days_until}일 후`}` : x.catalysts_status?.pending ? "일정 공급자에게 요청했습니다" : x.catalysts_status?.reason ? errKo(x.catalysts_status.reason) : "일정 공급자에게서 받은 일정이 없습니다"}</div></div>
             </div>
           </section>
 
           {sysMode === "LIVE" && notReady && !shown.length && <span id="data-prep" />}
           <Card title="지금 검토할 후보" right={<Link to="/stocks?tab=candidates" className="row tight">전체 후보 보기 <IArrow width={15} height={15} /></Link>}
                 explain="매수 조건을 통과하고 지금 다시 확인해도 유효한 종목만, 최대 5개까지 보여줍니다.">
-            {!shown.length && staleCause ? <div style={{ marginBottom: 12 }}><StalePriceNote c={staleCause} marketOpen={st?.system.data?.market?.session === "REGULAR"} onRescan={() => void scan()} busy={running} /></div> : null}
+            {!shown.length && staleCause ? <div style={{ marginBottom: 12 }}><StalePriceNote c={staleCause} session={st?.system.data?.market?.session ?? null} onRescan={() => void scan()} busy={running} /></div> : null}
             {shown.length ? <div className="cands">{shown.map((r, i) => <CandidateCard key={r.id} r={r} lead={i === 0 && shown.length !== 2 && shown.length !== 4} />)}</div>
               : notReady && x.readiness ? <NotReady r={x.readiness} onChange={d.reload} />
               : !x.scan ? <StatePanel kind="not_scanned" actions={<button className="primary" disabled={running} onClick={scan}>시장 스캔 실행</button>} />
+              : staleCause ? null /* the note above already says why and what to do */
               : <StatePanel kind="no_candidates" actions={<Link to="/stocks?tab=candidates">대기·관찰 종목 보기 →</Link>} />}
             {shown.length > 0 && shown.length < 3 && (
               <div className="explain" style={{ marginTop: 12 }} data-testid="few-candidates">매수 조건을 통과한 종목이 {shown.length}개뿐입니다. 빈자리를 점수 상위 종목으로 채우지 않았습니다. 대기·관찰 종목은 ‘전체 후보 보기’에서 볼 수 있습니다.</div>
@@ -242,7 +243,7 @@ export default function Dashboard() {
               <div style={{ marginTop: 16 }} data-testid="not-valid">
                 <div className="t-kicker" style={{ marginBottom: 8 }}>지금은 유효하지 않은 추천 — 매수 신호로 보지 마세요</div>
                 <div className="invalid-list">{notValid.slice(0, 5).map((r) => (
-                  <div className="it" key={r.id}><Link to={`/stocks/${r.ticker}`}>{r.ticker}</Link> <Action a={r.action} status={r.current_status} quality={r.data_quality} /> <StatusBadge s={r.current_status} reason={r.current_status_reason} /> <span className="caption">{r.current_status_reason ?? ""}</span></div>
+                  <div className="it" key={r.id}><Link to={`/stocks/${r.ticker}`}>{r.ticker}</Link> <Action a={r.action} status={r.current_status} quality={r.data_quality} /> <StatusBadge s={r.current_status} reason={r.current_status_reason} action={r.action} /> <span className="caption">{r.current_status_reason ?? ""}</span></div>
                 ))}</div>
               </div>
             )}
@@ -251,7 +252,7 @@ export default function Dashboard() {
           {sysMode === "LIVE" && !(notReady && !shown.length) && (
             <div id="data-prep"><Card title="데이터 준비" testId="data-prep"
                   explain="가격·재무 데이터를 받아 이 PC에 저장합니다. 처음 한 번은 오래 걸리고, 그 뒤로는 하루 한 번 누르면 새 거래일만 받습니다.">
-              <SyncControl onChange={() => { d.reload(); st?.refresh(); }} />
+              <SyncControl compact onChange={() => { d.reload(); st?.refresh(); }} />
             </Card></div>
           )}
 
@@ -279,7 +280,7 @@ export default function Dashboard() {
           <div className="rail-card">
             <div className="head"><h2><IPortfolio />내 포트폴리오</h2><Link to="/portfolio">관리 →</Link></div>
             {x.portfolio.holdings ? (
-              <div className="kv"><span className="k">보유 종목</span><span>{x.portfolio.holdings}개</span><span className="k">현금</span><span>{price(x.portfolio.cash)}</span></div>
+              <div className="kv"><span className="k">보유 종목</span><span>{x.portfolio.holdings}개</span><span className="k">현금</span><span>{x.portfolio.cash_entered === false ? <span className="muted" title={`매수 수량은 가정 금액 ${price(x.portfolio.cash)} 기준으로 계산합니다`}>미입력</span> : price(x.portfolio.cash)}</span></div>
             ) : <div className="caption">아직 입력한 보유 종목이 없습니다. 입력하면 새 종목을 넣을 때 쏠림·한도를 자동으로 확인합니다.</div>}
           </div>
           <div className="rail-card">

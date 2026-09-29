@@ -68,3 +68,56 @@ def test_every_watched_stock_is_listed_on_the_home_screen():
             c.post(f"/api/watchlist/{t}")
         listed = {a["ticker"] for a in c.get("/api/dashboard").json()["watchlist_alerts"]}
     assert set(tickers[:6]) <= listed
+
+
+def test_cash_nobody_entered_is_marked_as_the_sizing_assumption():
+    # real-usage audit 2026-09-29: a fresh install showed "현금 $100,000" and a $100,000 total — the sizing default,
+    # presented as the user's money
+    svc = make_service(universe=40)
+    with _client(svc) as c:
+        assert c.get("/api/portfolio").json()["cash_entered"] is False
+        assert c.get("/api/dashboard").json()["portfolio"]["cash_entered"] is False
+        c.put("/api/portfolio", json={"cash": 25000, "holdings": []})
+        assert c.get("/api/portfolio").json()["cash_entered"] is True
+        assert c.get("/api/dashboard").json()["portfolio"]["cash_entered"] is True
+
+
+def test_candidate_rows_carry_the_session_of_the_scan_time():
+    # real-usage audit 2026-09-29: a 06:50 ET (pre-market) scan was explained as "after-hours" — the row's session
+    # was the QUOTE's (yesterday's close), not the time of the scan
+    from marketlens.domain.market_calendar import classify_session
+
+    svc = make_service(universe=40)
+    svc._clock["t"] = datetime(2026, 9, 25, 10, 50, tzinfo=timezone.utc)  # 06:50 ET
+    svc.run_scan(run_committee=False)
+    with _client(svc) as c:
+        rows = c.get("/api/opportunities").json()["rows"]
+    assert rows and all(r["scan_session"] == classify_session(datetime.fromisoformat(r["as_of"])).value for r in rows)
+    assert rows[0]["scan_session"] == "PREMARKET"
+
+
+def test_data_gaps_are_not_listed_as_the_biggest_risk():
+    # real-usage audit 2026-09-29: "가장 큰 위험: NVDA — 현재가 오래됨" — a data state is not a risk of the company
+    import marketlens.api.routes as R
+
+    svc = make_service(universe=80)
+    svc.run_scan(run_committee=False)
+    real = R._scan_rows
+
+    def with_vetoes(s, ss):  # the MOCK world never has a stale quote: give three rows the vetoes a LIVE pre-market scan has
+        scan, rows, results = real(s, ss)
+        rows[0]["vetoes"] = ["STALE_PRICE"]
+        rows[1]["vetoes"] = ["MISSING_CORE_DATA", "INSUFFICIENT_MODEL_COVERAGE"]
+        rows[2]["vetoes"] = ["STALE_PRICE", "UNACCEPTABLE_LIQUIDITY"]
+        return scan, rows, results
+
+    R._scan_rows = with_vetoes
+    try:
+        with _client(svc) as c:
+            risks = c.get("/api/dashboard").json()["major_risks"]
+            ticker2 = c.get("/api/opportunities").json()["rows"][2]["ticker"]
+    finally:
+        R._scan_rows = real
+    for r in risks:
+        assert not set(r["text"].split(", ")) & R.DATA_STATE_VETOES, r
+    assert {"ticker": ticker2, "text": "UNACCEPTABLE_LIQUIDITY"} in risks  # a real risk still leads the list

@@ -34,6 +34,8 @@ export function confidenceLevel(c: number | null | undefined): string {
 }
 
 /** What exactly is missing when no decision is made (vetoes, sector-model gaps, stale/missing inputs). */
+const DATA_STATE_VETOES = new Set(["STALE_PRICE", "STALE_CORE_DATA", "MISSING_CORE_DATA", "INSUFFICIENT_MODEL_COVERAGE", "SEVERE_DATA_CONFLICT"]);
+
 export function missingData(a: Analysis): string[] {
   const out: string[] = [];
   for (const rs of [a.fundamental_rules, a.valuation_rules]) {
@@ -42,7 +44,8 @@ export function missingData(a: Analysis): string[] {
     if (rs.subscore === null) for (const i of rs.items) if (i.value === null && !(rs.critical_missing ?? []).includes(i.metric)) out.push(i.label);
   }
   for (const c of a.data_quality.checks ?? []) if (c.quality === "MISSING" || c.quality === "STALE" || c.quality === "CONFLICTING") out.push(`${DATA_TYPE_KO[c.data_type] ?? c.data_type} (${c.quality === "STALE" ? "오래됨" : c.quality === "CONFLICTING" ? "충돌" : "없음"})`);
-  for (const v of a.decision.vetoes) if (v !== "INSUFFICIENT_MODEL_COVERAGE") out.push(VETO_KO[v] ?? v);
+  const priceListed = (a.data_quality.checks ?? []).some((c) => c.data_type === "price" && c.quality !== "FRESH" && c.quality !== "DELAYED");
+  for (const v of a.decision.vetoes) if (v !== "INSUFFICIENT_MODEL_COVERAGE" && !(v === "STALE_PRICE" && priceListed)) out.push(VETO_KO[v] ?? v);
   return [...new Set(out)].slice(0, 16);
 }
 
@@ -174,7 +177,8 @@ function StockDetail({ ticker }: { ticker: string }) {
   const zone = rec.current_status && rec.current_status !== "CURRENT" && zone0.tone !== "neutral"
     ? { text: `분석 당시 가격 기준 ${zone0.text} — 지금은 ${STATUS_INFO[rec.current_status]?.label ?? "재확인 필요"}`, tone: "warn" as const } : zone0;
   const cautions: string[] = [
-    ...a.decision.vetoes.map((v) => `거부권(hard veto): ${VETO_KO[v] ?? v}`),
+    // missing / stale data is shown as the reason for holding the call (below), not as a risk of the company
+    ...a.decision.vetoes.filter((v) => !DATA_STATE_VETOES.has(v)).map((v) => `거부권(hard veto): ${VETO_KO[v] ?? v}`),
     ...(a.event_risk.level === "HIGH" || a.event_risk.level === "EXTREME" ? [`이벤트 위험 ${ko(RISK_KO, a.event_risk.level)}: ${a.event_risk.reasons.join("; ")}`] : []),
     ...(brief ? brief.against.map((x) => x.text) : negatives.map((r) => r.text)),
     ...(a.portfolio_review?.warnings ?? []),
@@ -213,7 +217,7 @@ function StockDetail({ ticker }: { ticker: string }) {
           <span><Link to="/stocks">종목</Link> / {a.security.exchange} · {a.sector_known === false ? <span className="warn">업종 분류 불명확</span> : a.security.industry}{a.security.is_adr ? ` · 해외 발행사(${a.security.country_of_incorporation})` : ""}</span>
           <span className="right">
             {a.mode === "MOCK" && <span className="pill tone-danger">모의 데이터</span>}
-            <StatusBadge s={rec.current_status} reason={rec.current_status_reason} />
+            <StatusBadge s={rec.current_status} reason={rec.current_status_reason} action={finalAction} />
           </span>
         </div>
         <div className="ident">
@@ -237,9 +241,9 @@ function StockDetail({ ticker }: { ticker: string }) {
                     {rec.revalidated_price != null && rec.revalidated_price !== priceNow ? <> · 재확인 {price(rec.revalidated_price)}</> : null}
                   </span>} />
           <Metric title={<Term k="max_buy">최대 매수가</Term>} value={e ? price(e.max_buy) : NO_DATA} testId="tile-maxbuy" tone={zoneTone}
-                  sub={<>{zone.text}{distMax !== null && zone.tone !== "neutral" ? ` · 현재가 대비 ${pct(distMax)}` : ""}</>} />
+                  sub={<>{zone.text}{distMax !== null && zone.tone !== "neutral" ? ` · 분석 기준가 대비 ${pct(distMax)}` : ""}</>} />
           <Metric title={<Term k="stop">손절 기준(종가)</Term>} value={e ? price(e.stop) : NO_DATA} testId="tile-stop"
-                  sub={e ? `현재가 대비 ${pct(distStop)} · 논리 철회 조건은 ⑤` : "가격 계획 없음"} />
+                  sub={e ? `분석 기준가 대비 ${pct(distStop)} · 논리 철회 조건은 ⑤` : "가격 계획 없음"} />
           <Metric title="가장 큰 위험" text value={cautions[0] ?? "분석이 표시한 부정 요인 없음"} tone={cautions.length ? "warn" : undefined} testId="tile-risk" />
         </div>
         <div className="foot">
@@ -267,9 +271,9 @@ function StockDetail({ ticker }: { ticker: string }) {
       </section>
 
       <StaleData error={d.error} at={d.fetchedAt} retry={d.reload} nowMs={nowMs} />
-      {rec.current_status && rec.current_status !== "CURRENT" && (
+      {rec.current_status && rec.current_status !== "CURRENT" && finalAction !== "DATA INSUFFICIENT" && ( /* no plan to execute: the card below says why */
         <StatePanel kind={rec.current_status === "PLAN_INVALIDATED" ? "out_of_range" : "stale"} title={`${STATUS_INFO[rec.current_status]?.label ?? rec.current_status} — 지금은 이 계획대로 실행하지 마세요`}
-                    what={<>{rec.current_status_reason ?? ""} {STATUS_INFO[rec.current_status]?.help ?? ""}</>}
+                    what={<>{STATUS_INFO[rec.current_status]?.help ?? ""}{rec.current_status_reason ? <div className="caption" style={{ marginTop: 4 }}>{rec.current_status_reason}</div> : null}</>}
                     actions={<>{live?.newer !== undefined && <button onClick={d.reload}>최신 분석 보기</button>}<button className="primary" disabled={!!busy} onClick={() => setRefreshTick((t) => t + 1)}>분석 다시하기</button></>} />
       )}
       {split !== 1 && a.entry && (
@@ -285,6 +289,12 @@ function StockDetail({ ticker }: { ticker: string }) {
             <div style={{ gridColumn: "2" }}>
               <div className="caption" style={{ marginTop: 8 }}>부족한 데이터</div>
               <div className="row tight" style={{ marginTop: 6 }}>{missingData(a).map((m) => <span key={m} className="pill tone-warn">{m}</span>)}</div>
+              {a.decision.vetoes.includes("STALE_PRICE") && (
+                <div className="explain" style={{ marginTop: 10 }} data-testid="stale-price-why">
+                  분석한 시각에 20분 안의 체결가가 없어(장 시작 전·시간외에는 흔함) 오래된 가격으로 판단하지 않았습니다. 정규장에 다시 분석하면 판단이 나옵니다.
+                  <div style={{ marginTop: 8 }}><button className="primary sm" disabled={!!busy} onClick={() => setRefreshTick((t) => t + 1)}>분석 다시하기</button></div>
+                </div>
+              )}
             </div>
           </StatePanel>
         </Card>

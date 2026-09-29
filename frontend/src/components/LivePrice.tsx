@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { price as fmtPrice, stamp } from "../format";
+import { price as fmtPrice, stamp, stampEt } from "../format";
 import { effectiveState, stateLabel, useQuote, useQuoteStatus, type QuoteRow, type Link } from "../quotes";
 import "./live.css";
 
@@ -11,7 +11,10 @@ const TONE: Record<string, string> = {
 function hms(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  if (Number.isNaN(d.getTime())) return "—";
+  // a trade from hours ago (yesterday's close before the open) reads as its day and US time, never a bare clock
+  if (Date.now() - d.getTime() > 3 * 3600_000) return `${stampEt(iso)} 체결`;
+  return d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 }
 
 export function quoteTitle(row: QuoteRow | undefined, l: Link): string {
@@ -65,7 +68,7 @@ export function LivePrice({ ticker, size = "md", showState = true, showTime = fa
   return (
     <span className={`lp lp-${size} tone-${TONE[st]}`} title={quoteTitle(row, link)} data-testid={`live-${ticker}`} data-state={st}>
       <span className={`lp-v num${flash ? ` flash-${flash}` : ""}`}>{row?.price != null ? fmtPrice(row.price) : "—"}</span>
-      {ch !== null && size !== "sm" ? <span className={`lp-ch num ${ch >= 0 ? "pos" : "neg"}`}>{ch >= 0 ? "+" : ""}{(ch * 100).toFixed(2)}%</span> : null}
+      {ch !== null && size !== "sm" ? (() => { const v = Math.abs(ch) < 0.00005 ? 0 : ch; /* never "-0.00%" */ return <span className={`lp-ch num ${v > 0 ? "pos" : v < 0 ? "neg" : ""}`}>{v > 0 ? "+" : ""}{(v * 100).toFixed(2)}%</span>; })() : null}
       {showState ? <span className="lp-s"><i aria-hidden />{stateLabel(row, link)}{showTime && row?.trade_time ? ` · ${hms(row.trade_time)}` : ""}</span> : null}
     </span>
   );

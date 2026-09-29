@@ -1,6 +1,6 @@
 import { Card, Empty, Err, Loading } from "../components/ui";
 import { useSettling } from "../components/useApi";
-import { day, num, pct, stamp } from "../format";
+import { day, num, pct, stamp, errKo } from "../format";
 
 interface Ev { event_id: string; event_type: string; event_date: string; title: string; affected: string[]; importance: number; expected_move: number | null; days_until: number; source: string }
 
@@ -14,7 +14,7 @@ export default function CalendarPage() {
   if (c.state === "loading" || c.data?.pending) return <Loading what="일정" rows={2} />;
   if (!c.data) return <Err error={c.error} retry={c.reload} />;
   const moves = c.data?.events.some((e) => e.expected_move !== null) ?? false;  // only a source that gives a move gets the column
-  if (!c.data.available) return <div className="ribbon warn" role="alert"><span className="cap">⚠ 일정 없음</span><div className="msg">일정 데이터를 받지 못했습니다: {c.data.reason} — ‘일정 없음’과 다릅니다.</div></div>;
+  if (!c.data.available) return <div className="ribbon warn" role="alert"><span className="cap">⚠ 일정 없음</span><div className="msg" title={c.data.reason ?? ""}>{errKo(c.data.reason)} — ‘일정 없음’과 다릅니다.</div></div>;
   return (
     <div className="grid">
       <div className="explain">앞으로 60일 안의 촉매 일정입니다(미국 동부시간 기준 날짜).{c.data.fetched_at ? ` 일정 받은 시각 ${stamp(c.data.fetched_at)}` : ""}{c.data.refreshing ? " · 새로 받는 중" : c.data.refresh_error ? " · 새로 받기 실패(이전 값)" : ""}</div>

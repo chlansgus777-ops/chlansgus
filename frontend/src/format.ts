@@ -130,3 +130,35 @@ export function ago(iso: string | null | undefined, nowMs: number): string {
   if (h < 48) return `${h}시간 전`;
   return `${Math.floor(h / 24)}일 전`;
 }
+
+const ERR_CAUSE_KO: [RegExp, string][] = [
+  [/\b401\b|\b403\b|Unauthorized|Forbidden|invalid api key|api key/i, "API 키가 거부되었습니다 — 설정에서 키를 확인하세요"],
+  [/\b429\b|rate.?limit|too many requests/i, "무료 요청 한도에 걸렸습니다 — 잠시 뒤 자동으로 다시 받습니다"],
+  [/ConnectError|Connection refused|getaddrinfo|Name or service|NetworkError|network unreachable/i, "네트워크에 연결하지 못했습니다 — 인터넷 연결을 확인하세요"],
+  [/Timeout/i, "응답이 너무 늦었습니다(시간 초과) — 잠시 뒤 다시 받습니다"],
+  [/breaker|circuit/i, "연속으로 실패해 잠시 요청을 멈췄습니다 — 몇 분 뒤 다시 시도합니다"],
+  [/\b5\d\d\b|server error/i, "공급자 서버 오류 — 잠시 뒤 다시 받습니다"],
+];
+/** Provider kinds as the screens name them. */
+export const KIND_KO: Record<string, string> = {
+  macro: "거시 지표", calendar: "일정", news: "뉴스", price: "시세·가격", fundamental: "재무", fundamentals: "재무", analyst: "애널리스트 추정치",
+  estimates: "애널리스트 추정치", events: "일정", short_interest: "공매도 잔고", universe: "종목 목록", insider: "내부자 거래", splits: "주식분할",
+};
+const ERR_KIND_KO = KIND_KO;
+
+/** Only the cause of a provider failure, in words (for a table that already names the provider). */
+export function errCauseKo(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return ERR_CAUSE_KO.find(([re]) => re.test(raw))?.[1] ?? raw;
+}
+
+/** A provider failure in words: which data, which provider, what to do — the raw exception text (English class
+ * names, tuples) is for the tooltip / logs only. Text that is already a sentence is returned unchanged. */
+export function errKo(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const kind = raw.match(/all (\w+) providers failed/i)?.[1];
+  const cause = ERR_CAUSE_KO.find(([re]) => re.test(raw))?.[1];
+  if (!kind && !cause) return raw;
+  const names = [...new Set([...raw.matchAll(/\('([\w.-]+)'/g)].map((m) => m[1]))];
+  return `${kind ? (ERR_KIND_KO[kind] ?? kind) : "데이터"} 공급자${names.length ? `(${names.join(", ")})` : ""}에서 받지 못했습니다 — ${cause ?? "원인은 설정 → 연결 상태에서 확인하세요"}`;
+}
