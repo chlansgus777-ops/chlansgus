@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import { Card, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } from "../components/ui";
+import { Card, ConfirmButton, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } from "../components/ui";
 import { Ledger } from "../components/Ledger";
 import { LivePrice } from "../components/LivePrice";
+import { ITrash } from "../components/icons";
 import { refreshQuoteSubscriptions } from "../quotes";
 import { useApi, usePoll } from "../components/useApi";
-import { day, num, pct, price, shares, usdWithKo } from "../format";
+import { day, num, parseAmount, pct, price, shares, usdWithKo } from "../format";
 
 
 interface HoldingV { ticker: string; quantity: number; cost_basis: number; price: number | null; price_day: string | null; market_value: number | null; unrealized_pnl: number | null; unrealized_pct: number | null; weight: number | null; sector: string; split_adjusted?: number; source?: "manual" | "ledger"; realized_pnl?: number; dividends?: number }
@@ -68,9 +69,28 @@ export default function Portfolio() {
     setBusy(tag);
     try { await save({ holdings: tickers.map((t) => ({ ticker: t, quantity: 0, cost_basis: 0 })) }); } finally { setBusy(null); }
   };
+  const removeHolding = async (ticker: string) => {
+    if (busy) return;
+    setBusy(ticker);
+    setErr(null);
+    try { await api.del(`/portfolio/holdings/${encodeURIComponent(ticker)}`); p.reload(); refreshQuoteSubscriptions(); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(null); }
+  };
+  // "수정": the entered line goes back into the form below, in view, quantity focused
+  const edit = (h: HoldingV) => {
+    setRow({ ticker: h.ticker, quantity: String(h.quantity), cost: String(h.cost_basis) });
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLInputElement>('input[aria-label="보유 수량"]');
+      el?.scrollIntoView?.({ block: "center" });
+      el?.focus();
+      el?.select();
+    });
+  };
   const x = p.data;
   const unused = x.unused_manual ?? [];
   const assumed = x.cash_entered === false;
+  const existing = row.ticker.trim() ? x.holdings.find((h) => h.ticker === row.ticker.trim().toUpperCase()) : undefined;
   const reading = interpret(x);
   const unvalued = x.valuation_status === "UNAVAILABLE";
   const empty = !x.holdings.length;  // no holdings: nothing to diversify and no P&L — never "좋음" or a green ▲ $0  // holdings exist but none could be valued (review 2026-09-28 F10)
@@ -88,7 +108,7 @@ export default function Portfolio() {
       )}
       {unused.length > 0 && (
         <Ribbon tone="info" cap="겹친 입력" testId="unused-manual">
-          <b>{unused.map((u) => u.ticker).join(", ")}</b>는 거래 기록이 있어 보유 수량·평단을 거래 기록으로 계산하고 있습니다. 위에서 직접 입력한 줄({unused.map((u) => `${u.ticker} ${num(u.quantity, 0)}주`).join(", ")})은 계산에 쓰이지 않으니 지워도 결과가 바뀌지 않습니다.{" "}
+          <b>{unused.map((u) => u.ticker).join(", ")}</b>는 거래 기록이 있어 보유 수량·평단을 거래 기록으로 계산하고 있습니다. 위에서 직접 입력한 줄({unused.map((u) => `${u.ticker} ${shares(u.quantity)}주`).join(", ")})은 계산에 쓰이지 않으니 지워도 결과가 바뀌지 않습니다.{" "}
           <button className="sm" disabled={busy === "unused"} onClick={() => void removeManual(unused.map((u) => u.ticker), "unused")}>{busy === "unused" ? "지우는 중…" : "직접 입력한 줄 지우기"}</button>
         </Ribbon>
       )}
@@ -108,13 +128,18 @@ export default function Portfolio() {
       </div>
       {!empty && (
         <Card title="보유 종목" explain="평가액·손익·비중은 모든 종목을 같은 거래일 종가로 계산합니다. ‘최신 시세’는 표시용입니다." testId="holdings">
-<div className="scroll"><table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th title="표시용 최신 시세 — 평가액·손익은 모든 종목 같은 거래일 종가 기준">최신 시세</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th><th><span className="sr-only">정리</span></th></tr></thead>
-            <tbody>{x.holdings.map((h) => <tr key={h.ticker} className="nowrap-row"><td><Link to={`/stocks/${h.ticker}`}><b>{h.ticker}</b></Link></td><td>{h.source === "ledger" ? shares(h.quantity) : num(h.quantity, 0)}{h.source === "ledger" ? <div className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}>거래 기록 기준</div> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)}<div className="caption">{day(h.price_day)}</div></>}</td>
+<div className="scroll"><table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th title="표시용 최신 시세 — 평가액·손익은 모든 종목 같은 거래일 종가 기준">최신 시세</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th><th className="row-actions"><span className="sr-only">정리</span></th></tr></thead>
+            <tbody>{x.holdings.map((h) => <tr key={h.ticker} className="nowrap-row"><td><Link to={`/stocks/${h.ticker}`}><b>{h.ticker}</b></Link></td><td>{shares(h.quantity)}{h.source === "ledger" ? <div className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}>거래 기록 기준</div> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)}<div className="caption">{day(h.price_day)}</div></>}</td>
               <td><LivePrice ticker={h.ticker} size="sm" /></td>
               <td>{h.market_value === null ? "—" : price(h.market_value)}</td><td className={h.unrealized_pnl === null ? "" : h.unrealized_pnl >= 0 ? "pos" : "neg"}>{h.unrealized_pnl === null ? "계산 안 함" : <>{h.unrealized_pnl >= 0 ? "▲" : "▼"} {price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</>}</td><td>{h.weight === null ? "—" : pct(h.weight, 1, false)}</td><td className="wrap" style={{ minWidth: 110 }}>{h.sector}</td>
-              <td>{h.source === "ledger"
-                ? <button className="sm ghost" title="거래 기록 기준 보유는 매도를 기록하면 줄어들고, 전부 팔면 목록에서 빠집니다(기록은 아래 ‘거래 기록’에서 지울 수도 있습니다)" onClick={() => setSellFor(`${h.ticker}:${h.quantity}`)}>매도 기록</button>
-                : <button className="sm ghost" aria-label={`${h.ticker} 보유에서 빼기`} disabled={busy === h.ticker} onClick={() => { if (window.confirm(`${h.ticker} ${num(h.quantity, 0)}주 보유 줄을 지울까요? (거래 기록은 그대로입니다)`)) void removeManual([h.ticker], h.ticker); }}>{busy === h.ticker ? "빼는 중…" : "빼기"}</button>}</td></tr>)}</tbody></table></div>
+              <td className="row-actions"><div className="row tight" style={{ flexWrap: "nowrap", justifyContent: "flex-end" }}>
+                {h.source === "ledger"
+                  ? <button type="button" className="sm" title="일부나 전부를 팔았다면 매도를 기록하세요 — 수량·평단·실현 손익이 계산됩니다" onClick={() => setSellFor(`${h.ticker}:${h.quantity}:${Date.now()}`)}>매도 기록</button>
+                  : <button type="button" className="sm" title="수량·매입 단가를 고칩니다" onClick={() => edit(h)}>수정</button>}
+                <ConfirmButton label={busy === h.ticker ? "삭제 중…" : "삭제"} icon={<ITrash />} busy={busy === h.ticker} ariaLabel={`${h.ticker} 포트폴리오에서 삭제`} testId={`remove-${h.ticker}`}
+                  confirm={h.source === "ledger" ? <>{h.ticker} 거래 기록을 모두 지울까요? <span className="caption">판 것이면 ‘매도 기록’이 맞습니다</span></> : <>{h.ticker} {shares(h.quantity)}주를 뺄까요?</>}
+                  onConfirm={() => void removeHolding(h.ticker)} />
+              </div></td></tr>)}</tbody></table></div>
           {x.correlations.length > 0 && <div className="caption" style={{ marginTop: 8 }}><Term k="correlation">상관계수</Term>: {x.correlations.map(([a, b, c]) => `${a}↔${b} ${num(c, 2)}`).join(" · ")}</div>}
         </Card>
       )}
@@ -134,19 +159,23 @@ export default function Portfolio() {
           )}
         </Card>
       </div>
-      <Card title="보유 종목 직접 입력" explain="증권사 기록 없이 보유만 빠르게 입력합니다. 수량 0으로 저장하면 그 줄을 지웁니다. 거래 기록이 있는 종목은 거래 기록이 우선입니다. MarketLens는 실제 주문을 넣지 않습니다.">
+      <Card title="보유 종목 직접 입력" explain="증권사 기록 없이 보유만 빠르게 입력합니다. 고치려면 보유 표의 ‘수정’, 빼려면 ‘삭제’를 누르세요. 거래 기록이 있는 종목은 거래 기록이 우선입니다. MarketLens는 실제 주문을 넣지 않습니다.">
         <form className="form-grid holding" onSubmit={(e) => {
           e.preventDefault();
-          const q = Number(row.quantity), c = Number(row.cost);
-          if (!row.ticker.trim() || !Number.isFinite(q) || q < 0 || !Number.isFinite(c) || c < 0) { setErr("종목 코드, 수량(0 이상), 매입 단가(0 이상)를 입력하세요."); return; }
+          const q = parseAmount(row.quantity), c = parseAmount(row.cost);
+          if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(row.ticker.trim().toUpperCase())) { setErr("종목 코드를 확인하세요 (예: NVDA, BRK.B)."); return; }
+          if (row.quantity.trim() === "" || !Number.isFinite(q) || q <= 0) { setErr("수량은 0보다 커야 합니다. 종목을 빼려면 보유 표의 ‘삭제’를 누르세요."); return; }
+          if (row.cost.trim() === "" || !Number.isFinite(c) || c <= 0) { setErr("평균 매입 단가는 0보다 커야 합니다."); return; }
           void save({ holdings: [{ ticker: row.ticker.trim().toUpperCase(), quantity: q, cost_basis: c }] }).then((ok) => { if (ok) setRow({ ticker: "", quantity: "", cost: "" }); });
         }}>
           <label><span>종목 코드</span><input aria-label="보유 종목 코드" placeholder="예: NVDA" value={row.ticker} onChange={(e) => setRow({ ...row, ticker: e.target.value })} /></label>
           <label><span>수량(주)</span><input aria-label="보유 수량" inputMode="decimal" placeholder="0" value={row.quantity} onChange={(e) => setRow({ ...row, quantity: e.target.value })} /></label>
           <label><span>평균 매입 단가(USD)</span><input aria-label="매입 단가(USD)" inputMode="decimal" placeholder="0.00" value={row.cost} onChange={(e) => setRow({ ...row, cost: e.target.value })} /></label>
-          <button className="primary">보유 저장</button>
+          <button className="primary">{existing?.source === "manual" ? "수정 저장" : "보유 저장"}</button>
         </form>
-        <form className="form-grid cash" onSubmit={(e) => { e.preventDefault(); const v = Number(cash); if (Number.isFinite(v) && v >= 0) void save({ cash: v }).then((ok) => { if (ok) setCash(""); }); else setErr("현금은 0 이상의 숫자여야 합니다."); }}>
+        {existing?.source === "manual" && <div className="caption" data-testid="holding-edit-hint">이미 입력한 {existing.ticker} {shares(existing.quantity)}주 · 평단 {price(existing.cost_basis)}을(를) 이 값으로 바꿉니다.</div>}
+        {existing?.source === "ledger" && <Notice tone="warn">{existing.ticker}는 거래 기록으로 계산하는 종목이라 여기 입력한 줄은 쓰이지 않습니다. 아래 ‘거래 기록’에 매수·매도를 적으세요.</Notice>}
+        <form className="form-grid cash" onSubmit={(e) => { e.preventDefault(); const v = parseAmount(cash); if (cash.trim() !== "" && Number.isFinite(v) && v >= 0) void save({ cash: v }).then((ok) => { if (ok) setCash(""); }); else setErr("현금은 0 이상의 숫자여야 합니다."); }}>
           <label><span>현금(USD) <em className="caption">{assumed ? `미입력 · 가정 ${price(x.cash)}` : `지금 ${price(x.cash)}`}</em></span><input aria-label="현금(USD)" inputMode="decimal" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="예: 25000" /></label>
           <button>현금 저장</button>
         </form>

@@ -38,7 +38,7 @@ from marketlens.domain.portfolio import Holding, Portfolio
 from marketlens.domain.sizing import effective_size, recommendation_size_cap, tightest
 from marketlens.domain.what_changed import AnalysisDigest
 from marketlens.infrastructure.db import repository as repo
-from marketlens.infrastructure.db.models import CommitteeRow, FactorSnapshotRow, PaperPositionRow, RecommendationRow, ScanRunRow
+from marketlens.infrastructure.db.models import CommitteeRow, FactorSnapshotRow, HoldingRow, PaperPositionRow, RecommendationRow, ScanRunRow
 from marketlens.infrastructure.health import HealthRegistry
 from marketlens.infrastructure.logging import Event, log_event, redact_text
 from marketlens.providers.llm.base import LLMProvider, UnavailableLLM
@@ -459,6 +459,23 @@ class MarketLensService:
             check_delete([ledger_trade(r) for r in group["rows"]], tid, group["splits"], today)
             repo.delete_transaction(s, tid)
             s.commit()
+
+    def remove_holding(self, ticker: str, keep_manual: bool = False, security: str | None = None) -> dict[str, Any]:
+        """Take a stock out of the portfolio in one step: its entered line and every trade record of the same security
+        (under any ticker it used), deleted together — one by one, deleting a buy before its sale would be refused.
+        ``security``: the ledger's security id (an archived company whose ticker now names another one)."""
+        with self._ledger_lock, self.sf() as s:
+            manual = not keep_manual and s.get(HoldingRow, ticker) is not None
+            if manual:
+                repo.upsert_holding(s, ticker, 0, 0)
+            # exactly one security: the one named (the ledger lists an archived company by its id), else the one that
+            # uses this ticker today — never another company that used the same symbol before (ticker reuse)
+            ids = [r.id for g in self.data.ledger_securities(s, repo.transactions(s))
+                   if (g["security"] == security if security else g["ticker"] == ticker) for r in g["rows"]]
+            for tid in ids:
+                repo.delete_transaction(s, tid)
+            s.commit()
+        return {"ticker": ticker, "manual_removed": manual, "trades_removed": len(ids)}
 
     def company_recommendations(self, s: Session, ticker: str, before: datetime | None = None, on: date | None = None, limit: int = 500,
                                 inclusive: bool = True, exclude_id: int | None = None, light: bool = False) -> list[RecommendationRow]:

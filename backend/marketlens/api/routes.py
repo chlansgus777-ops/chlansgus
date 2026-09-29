@@ -511,6 +511,13 @@ def set_portfolio(req: Request, body: PortfolioIn) -> dict[str, Any]:
     return portfolio(req)
 
 
+@router.delete("/portfolio/holdings/{ticker}")
+def remove_holding(req: Request, ticker: str, trades_only: bool = False, security: str | None = None) -> dict[str, Any]:
+    """Removes a stock from the portfolio: its entered line and all its trade records, in one transaction
+    (``trades_only``: the trade records only — "delete all records" in the ledger keeps an entered line)."""
+    return svc(req).remove_holding(_ticker(ticker), keep_manual=trades_only, security=security)
+
+
 class TradeIn(BaseModel):
     ticker: str = Field(min_length=1, max_length=10)
     day: date

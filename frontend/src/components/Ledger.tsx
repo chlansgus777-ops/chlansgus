@@ -1,7 +1,8 @@
 import { useCallback, useState } from "react";
 import { api } from "../api";
-import { day, price, shares } from "../format";
-import { Card, Empty, Err, Notice } from "./ui";
+import { day, parseAmount, price, shares } from "../format";
+import { ITrash } from "./icons";
+import { Card, ConfirmButton, Empty, Err, Notice } from "./ui";
 import { useApi } from "./useApi";
 
 export type Kind = "BUY" | "SELL" | "DIVIDEND" | "SPLIT";
@@ -24,7 +25,7 @@ export function tradeBody(f: TradeForm, today: string): { body?: Record<string, 
   if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker)) return { error: "종목 코드를 입력하세요 (예: NVDA)." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(f.day)) return { error: "체결일을 입력하세요." };
   if (f.day > today) return { error: "미래 날짜의 거래는 적을 수 없습니다." };
-  const n = (s: string) => (s.trim() === "" ? 0 : Number(s));
+  const n = (s: string) => (s.trim() === "" ? 0 : parseAmount(s));
   const fees = n(f.fees);
   if (!Number.isFinite(fees) || fees < 0) return { error: "수수료는 0 이상의 숫자여야 합니다." };
   const body: Record<string, unknown> = { ticker, day: f.day, kind: f.kind, fees };
@@ -108,13 +109,19 @@ export function Ledger({ today, onChange, prefill }: { today: string; onChange: 
             <div key={c.security}>
               <div className="row spread">
                 <b>{c.ticker ?? `${c.last_ticker} (옛 회사)`}</b>
-                {c.position && <span className="caption">보유 {shares(c.position.quantity)}주 · 평단 {price(c.position.avg_cost)} · 실현 {price(c.position.realized_pnl)} · 배당 {price(c.position.dividends)}{c.position.splits_applied.length ? ` · 분할 ${c.position.splits_applied.length}건 반영` : ""}</span>}
+                <span className="row tight" style={{ flexWrap: "nowrap" }}>
+                  {c.position && <span className="caption">{c.position.quantity > 0 ? `보유 ${shares(c.position.quantity)}주 · 평단 ${price(c.position.avg_cost)}` : "전량 매도"} · 실현 {price(c.position.realized_pnl)} · 배당 {price(c.position.dividends)}{c.position.splits_applied.length ? ` · 분할 ${c.position.splits_applied.length}건 반영` : ""}</span>}
+                  <ConfirmButton label="기록 모두 삭제" icon={<ITrash />} disabled={busy} ariaLabel={`${c.ticker ?? c.last_ticker} 거래 기록 모두 삭제`}
+                    confirm={<>{c.ticker ?? c.last_ticker} 기록 {c.trades.length}건을 모두 지울까요?</>}
+                    onConfirm={() => void run(() => api.del(`/portfolio/holdings/${encodeURIComponent(c.ticker ?? c.last_ticker)}?trades_only=true&security=${encodeURIComponent(c.security)}`))} />
+                </span>
               </div>
               {c.error && <Notice tone="warn">거래 기록으로 보유를 계산할 수 없음 — {c.error}</Notice>}
               {c.ticker === null && <Notice tone="warn">이 회사는 지금 쓰는 티커를 알 수 없습니다(티커가 다른 회사에 재사용됨 등). 가격이 없어 평가에서 빠집니다.</Notice>}
-              <table><tbody>{c.trades.map((t) => (
-                <tr key={t.id}><td>{day(t.day)}</td><td>{t.ticker}</td><td>{describe(t)}</td>
-                  <td><button disabled={busy} onClick={() => { if (window.confirm(`${day(t.day)} ${describe(t)} 기록을 지울까요?`)) void run(() => api.del(`/transactions/${t.id}`)); }}>삭제</button></td></tr>
+              <table className="ledger-rows"><tbody>{c.trades.map((t) => (
+                <tr key={t.id} className="nowrap-row"><td style={{ width: 110 }}>{day(t.day)}</td><td style={{ width: 80 }} className="muted">{t.ticker}</td><td className={t.kind === "SELL" ? "neg" : t.kind === "BUY" ? "" : "muted"}>{describe(t)}</td>
+                  <td className="row-actions" style={{ textAlign: "right" }}><ConfirmButton label="삭제" icon={<ITrash />} disabled={busy} ariaLabel={`${day(t.day)} ${describe(t)} 기록 삭제`}
+                    confirm={<>이 기록을 지울까요?</>} onConfirm={() => void run(() => api.del(`/transactions/${t.id}`))} /></td></tr>
               ))}</tbody></table>
             </div>
           ))}

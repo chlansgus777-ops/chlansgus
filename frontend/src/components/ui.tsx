@@ -41,6 +41,24 @@ export function StatusBadge({ s, reason, action }: { s: string | null | undefine
   return <span className={`status s-${s}`} title={reason ?? info?.help ?? ""}><span aria-hidden>{STATUS_ICON[s] ?? "•"}</span>{info?.label ?? s}</span>;
 }
 
+/** A destructive action asked twice in place: the first click shows what will happen with 확인 / 취소 (Escape or
+ * leaving cancels) — the app's own look, and no reliance on a browser dialog the desktop webview may not show. */
+export function ConfirmButton({ label, confirm, onConfirm, busy = false, disabled = false, className = "sm danger-ghost", icon, ariaLabel, testId }:
+  { label: ReactNode; confirm: ReactNode; onConfirm: () => void; busy?: boolean; disabled?: boolean; className?: string; icon?: ReactNode; ariaLabel?: string; testId?: string }) {
+  const [asking, setAsking] = useState(false);
+  const yes = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => { if (asking) yes.current?.focus(); }, [asking]);
+  if (!asking) return <button type="button" className={className} disabled={disabled || busy} aria-label={ariaLabel} data-testid={testId} onClick={() => setAsking(true)}>{icon}{label}</button>;
+  return (
+    <span className="confirm-inline" role="group" aria-label="확인" onKeyDown={(e) => { if (e.key === "Escape") setAsking(false); }}
+          onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setAsking(false); }}>
+      <span className="q">{confirm}</span>
+      <button type="button" ref={yes} className="sm danger-solid" data-testid={testId ? `${testId}-yes` : undefined} onClick={() => { setAsking(false); onConfirm(); }}>확인</button>
+      <button type="button" className="sm ghost" onClick={() => setAsking(false)}>취소</button>
+    </span>
+  );
+}
+
 export function Vetoes({ v }: { v: string[] }) {
   if (!v.length) return null;
   return <span className="pill tone-danger" title={v.map((x) => VETO_KO[x] ?? x).join(", ")}>거부권 · {v.map((x) => VETO_KO[x] ?? x).join(", ")}</span>;

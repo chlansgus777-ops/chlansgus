@@ -219,3 +219,39 @@ def test_an_entered_line_of_a_reused_ticker_is_not_valued_as_the_new_company(wor
 def test_deleting_a_missing_record_is_404_by_type(client):
     c, _svc = client
     assert c.delete("/api/transactions/424242").status_code == 404
+
+
+def test_a_holding_is_removed_in_one_step(client):
+    # owner 2026-09-29 "포트폴리오에 왜 넣는 기능만 있고 빼는 기능은 없어?": one delete takes a stock out whether it was
+    # entered by hand or computed from trade records (deleting records one by one fails: a buy before its sale)
+    c, _svc = client
+    d = NOW.date() - timedelta(days=20)
+    c.put("/api/portfolio", json={"holdings": [{"ticker": "MSFT", "quantity": 3, "cost_basis": 400}]})
+    c.post("/api/transactions", json={"ticker": "NVDA", "day": d.isoformat(), "kind": "BUY", "quantity": 10, "price": 100})
+    c.post("/api/transactions", json={"ticker": "NVDA", "day": (d + timedelta(days=1)).isoformat(), "kind": "SELL", "quantity": 4, "price": 110})
+    assert _holding(c, "MSFT") and _holding(c, "NVDA")
+    r = c.delete("/api/portfolio/holdings/msft").json()
+    assert r == {"ticker": "MSFT", "manual_removed": True, "trades_removed": 0} and _holding(c, "MSFT") is None
+    r = c.delete("/api/portfolio/holdings/NVDA").json()
+    assert r["trades_removed"] == 2 and _holding(c, "NVDA") is None
+    assert c.get("/api/transactions").json()["securities"] == []
+    # the ledger's "delete all records" keeps an entered line of the same stock
+    c.put("/api/portfolio", json={"holdings": [{"ticker": "AMD", "quantity": 2, "cost_basis": 150}]})
+    c.post("/api/transactions", json={"ticker": "AMD", "day": d.isoformat(), "kind": "BUY", "quantity": 5, "price": 10})
+    r = c.delete("/api/portfolio/holdings/AMD?trades_only=true").json()
+    assert r == {"ticker": "AMD", "manual_removed": False, "trades_removed": 1}
+    h = _holding(c, "AMD")
+    assert h and h["source"] == "manual" and h["quantity"] == 2
+
+
+def test_removing_a_reused_ticker_leaves_the_old_company_alone(world):  # noqa: F811
+    svc, _ = world
+    svc.add_transaction("ABC", D1, "BUY", 5, 20.0)  # company B, archived as ABC~2
+    svc.add_transaction("ABC", D3, "BUY", 3, 6.0)  # company C uses ABC now
+    assert svc.remove_holding("ABC")["trades_removed"] == 1  # C's record only
+    with svc.sf() as s:
+        g = {x["security"]: x for x in svc.ledger(s)}
+    assert list(g) == ["sec:ABC~2"] and g["sec:ABC~2"]["position"].quantity == 5
+    assert svc.remove_holding("ABC", keep_manual=True, security="sec:ABC~2")["trades_removed"] == 1
+    with svc.sf() as s:
+        assert svc.ledger(s) == []

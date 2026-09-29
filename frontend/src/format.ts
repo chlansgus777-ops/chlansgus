@@ -162,3 +162,9 @@ export function errKo(raw: string | null | undefined): string {
   const names = [...new Set([...raw.matchAll(/\('([\w.-]+)'/g)].map((m) => m[1]))];
   return `${kind ? (ERR_KIND_KO[kind] ?? kind) : "데이터"} 공급자${names.length ? `(${names.join(", ")})` : ""}에서 받지 못했습니다 — ${cause ?? "원인은 설정 → 연결 상태에서 확인하세요"}`;
 }
+
+/** A number as people type it: "25,000", "$1,250.50", " 12 " → the number; anything else → NaN (never a guess). */
+export function parseAmount(v: string): number {
+  const t = v.trim().replace(/^\$/, "").replace(/,(?=\d{3}(\D|$))/g, "");
+  return t === "" || !/^\d*\.?\d+$|^\d+\.$/.test(t) ? NaN : Number(t);
+}

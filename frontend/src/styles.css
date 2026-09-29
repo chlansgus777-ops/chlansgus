@@ -757,3 +757,11 @@ tr.row-expired:hover td { opacity: 0.9; }
 /* a table of short machine values: one line per cell; only the free-text column wraps */
 tr.nowrap-row td { white-space: nowrap; }
 tr.nowrap-row td.wrap { white-space: normal; min-width: 180px; }
+
+/* row actions stay in view when a wide table scrolls sideways (narrow windows) */
+td.row-actions, th.row-actions { position: sticky; right: 0; background: var(--surface); box-shadow: -10px 0 12px -10px rgba(0, 0, 0, 0.5); }
+button.danger-ghost { background: transparent; color: var(--danger); border-color: rgba(255, 127, 142, 0.35); }
+button.danger-ghost:hover:not(:disabled) { background: var(--danger-soft); }
+button.danger-solid { background: var(--danger); color: #1a0a0d; border-color: transparent; font-weight: 700; }
+.confirm-inline { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.confirm-inline .q { font-size: 12.5px; color: var(--danger); white-space: normal; max-width: 320px; text-align: right; }
