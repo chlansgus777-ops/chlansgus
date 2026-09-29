@@ -3,7 +3,9 @@ import { Card } from "./ui";
 
 /** /api/portfolio ``krw``: the won return of each US holding split into the stock and the dollar (domain.fx_attrib). */
 export interface KrwRow { ticker: string; known: boolean; reason: string | null; buy_fx: number | null; cost_krw: number | null; value_krw: number | null;
-  stock_krw: number | null; fx_krw: number | null; total_krw: number | null; stock_pct: number | null; fx_pct: number | null; total_pct: number | null }
+  stock_krw: number | null; fx_krw: number | null; total_krw: number | null; stock_pct: number | null; fx_pct: number | null; total_pct: number | null;
+  /** BROKER: every purchase at 토스증권's own rate at the execution · REFERENCE: the day's FRED rate · MIXED */
+  basis?: "BROKER" | "REFERENCE" | "MIXED" | null }
 export interface KrwView { fx_now: number | null; fx_source: string | null; fx_at: string | null; loading: boolean; rows: KrwRow[]; note: string;
   totals: { count: number; cost_krw: number | null; stock_krw: number | null; fx_krw: number | null; total_krw: number | null; stock_pct: number | null; fx_pct: number | null; total_pct: number | null } }
 
@@ -16,7 +18,7 @@ export function KrwReturn({ k }: { k: KrwView | undefined }) {
   const s = t.stock_krw ?? 0, f = t.fx_krw ?? 0;
   const span = Math.abs(s) + Math.abs(f) || 1;
   return (
-    <Card title="원화 기준 수익" testId="krw-return" explain="주가가 오른 몫과 원/달러 환율이 움직인 몫을 나눴습니다. 두 몫을 더하면 원화 손익과 정확히 같습니다.">
+    <Card title="원화 기준 수익 · 매수 당시 환율" testId="krw-return" explain="산 때의 환율로 원화 매입금액을 계산해, 주가가 오른 몫과 원/달러 환율이 움직인 몫을 나눴습니다. 두 몫을 더하면 원화 손익과 정확히 같습니다. 토스 앱의 원화 손익은 지금 환율로 환산한 값이라(위 ‘토스증권 계좌’ 카드) 환율이 움직인 만큼 이 값과 다릅니다.">
       {k.loading ? <div className="caption">매수 당시 환율을 불러오는 중…</div> : t.count === 0 ? (
         <div className="caption">매수일이 기록된 보유가 없어 나눌 수 없습니다. 거래 기록으로 입력하거나 토스증권을 연결하면 매수일의 환율로 계산합니다.</div>
       ) : (
@@ -39,14 +41,14 @@ export function KrwReturn({ k }: { k: KrwView | undefined }) {
       )}
       <div className="scroll" style={{ marginTop: 12 }}><table><thead><tr><th>종목</th><th className="num">매수 환율</th><th className="num">주가 효과</th><th className="num">환율 효과</th><th className="num">원화 손익</th></tr></thead>
         <tbody>{k.rows.map((r) => r.known ? (
-          <tr key={r.ticker} className="nowrap-row"><td><b>{r.ticker}</b></td><td className="num">{num(r.buy_fx, 1)}원</td>
+          <tr key={r.ticker} className="nowrap-row"><td><b>{r.ticker}</b></td><td className="num">{num(r.buy_fx, 1)}원<div className="caption">{r.basis === "BROKER" ? "토스 체결 환율" : r.basis === "MIXED" ? "토스·FRED 섞임" : "FRED 기준환율"}</div></td>
             <td className={`num ${tone(r.stock_krw)}`}>{signed(r.stock_krw)}<div className="caption">{pct(r.stock_pct)}</div></td>
             <td className={`num ${tone(r.fx_krw)}`}>{signed(r.fx_krw)}<div className="caption">{pct(r.fx_pct)}</div></td>
             <td className={`num ${tone(r.total_krw)}`}><b>{signed(r.total_krw)}</b><div className="caption">{pct(r.total_pct)}</div></td></tr>
         ) : (
           <tr key={r.ticker}><td><b>{r.ticker}</b></td><td colSpan={4} className="caption" style={{ whiteSpace: "normal" }}>나눌 수 없음 — {r.reason}</td></tr>
         ))}</tbody></table></div>
-      <div className="caption" style={{ marginTop: 8 }}>지금 환율 {k.fx_now ? `${num(k.fx_now, 2)}원` : "N/A"}{k.fx_source ? ` · ${k.fx_source}` : ""}{k.fx_at ? ` · ${k.fx_at.slice(0, 16).replace("T", " ")}` : ""} · 주가는 평가 기준일 종가 · {k.note}</div>
+      <div className="caption" style={{ marginTop: 8 }}>지금 환율 {k.fx_now ? `${num(k.fx_now, 2)}원` : "N/A"}{k.fx_source ? ` · ${k.fx_source}` : ""}{k.fx_at ? ` · ${k.fx_at.slice(0, 16).replace("T", " ")}` : ""} · 주가는 지금 가격(없으면 종가) · {k.note}</div>
     </Card>
   );
 }

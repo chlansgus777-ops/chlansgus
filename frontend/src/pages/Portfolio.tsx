@@ -5,10 +5,11 @@ import { Card, ConfirmButton, Donut, Empty, Err, Loading, Notice, Ribbon, StaleD
 import { Ledger } from "../components/Ledger";
 import { DomesticHoldings, TossCard, TossFills, type TossView } from "../components/TossConnect";
 import { KrwReturn, type KrwView } from "../components/KrwReturn";
+import { AccountLiveCard, signedWon, useAccountLive, type AccountRow } from "../components/AccountLive";
 import { LivePrice } from "../components/LivePrice";
 import { LiveZone } from "../components/LiveZone";
 import { ITrash } from "../components/icons";
-import { refreshQuoteSubscriptions, useAllQuotes, useQuote } from "../quotes";
+import { refreshQuoteSubscriptions } from "../quotes";
 import { useApi, usePoll } from "../components/useApi";
 import { day, num, parseAmount, pct, price, shares, usdWithKo } from "../format";
 
@@ -59,6 +60,7 @@ export function nyToday(now: Date = new Date()): string {
 
 export default function Portfolio() {
   const p = useApi<Pf>("/portfolio");
+  const acct = useAccountLive(!!p.data?.holdings?.length);  // the account now, every second (as the Toss app counts it)
   // prices the store lacked, or the purchase-day exchange rates, are being fetched in the background: ask again shortly
   usePoll(p.reload, 3_000, !!p.data?.history_pending?.length || !!p.data?.krw?.loading);
   const [params] = useSearchParams();
@@ -113,6 +115,7 @@ export default function Portfolio() {
       <div className="page-head"><div><h1>내 포트폴리오</h1><div className="t-sub">{x.note}</div></div></div>
       <StaleData error={p.error} at={p.fetchedAt} retry={p.reload} />
       {x.broker?.enabled && <TossCard view={x.broker} compact onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />}
+      {acct && !empty && <AccountLiveCard a={acct} />}
       {(x.history_pending?.length ?? 0) > 0 && <Notice tone="info">가격 이력을 받는 중: {x.history_pending?.join(", ")} — 받는 대로 평가금액을 다시 계산합니다.</Notice>}
       {x.missing_prices.length > 0 && (
         <Ribbon tone="warn" cap="가격 없음" testId="missing-prices">
@@ -132,7 +135,7 @@ export default function Portfolio() {
           <Card title="총 평가금액" testId="nav-unavailable"><div className="t-key muted">평가 불가</div><div className="caption">보유 종목의 공통 거래일 종가가 없어 합계를 계산하지 않았습니다(현금 {price(x.cash)}만으로 표시하지 않음).</div></Card>
         ) : assumed && empty ? (
           <Card title="총 평가금액"><div className="t-key muted">—</div><div className="caption">현금과 보유 종목을 입력하면 계산합니다</div></Card>
-        ) : <Card title="총 평가금액"><div className="t-key">{price(x.nav)}</div><div className="caption">{Math.abs(x.nav) >= 1e8 ? `${usdWithKo(x.nav)} · ` : ""}{empty ? "현금만" : `기준일 ${day(x.valuation_day)} 종가`}{x.valuation_status === "PARTIAL" ? " · 일부 종목 제외" : ""}{assumed ? ` · 현금은 가정값 ${price(x.cash)}` : ""}</div>{!empty && <LiveNav x={x} />}</Card>}
+        ) : <Card title="총 평가금액"><div className="t-key">{price(x.nav)}</div><div className="caption">{Math.abs(x.nav) >= 1e8 ? `${usdWithKo(x.nav)} · ` : ""}{empty ? "현금만" : `기준일 ${day(x.valuation_day)} 종가`}{x.valuation_status === "PARTIAL" ? " · 일부 종목 제외" : ""}{assumed ? ` · 현금은 가정값 ${price(x.cash)}` : ""}</div></Card>}
         <Card title="평가손익">{unvalued ? <><div className="t-key muted">평가 불가</div><div className="caption">가격을 확인한 뒤 계산합니다</div></> : empty ? <><div className="t-key muted">—</div><div className="caption">보유 종목이 없어 손익이 없습니다</div></>
           : <><div className={`t-key ${x.unrealized_pnl > 0 ? "pos" : x.unrealized_pnl < 0 ? "neg" : ""}`}>{x.unrealized_pnl > 0 ? "▲ " : x.unrealized_pnl < 0 ? "▼ " : ""}{price(x.unrealized_pnl)}</div><div className="caption">매입금액 대비 {pct(pnlPct)}{x.missing_prices.length ? " · 가격 없는 종목 제외" : ""}</div></>}</Card>
         {tossCash ? <Card title="현금" testId="cash-toss"><div className="t-key">{price(x.cash)}</div><div className="caption">토스증권 {x.cash_source === "toss_usd_krw" ? "달러+원화(환산)" : "달러"} 예수금{unvalued || empty ? "" : ` · 전체의 ${pct(x.nav > 0 ? x.cash / x.nav : null, 0, false)}`}</div></Card>
@@ -141,11 +144,11 @@ export default function Portfolio() {
           : <><div className="t-key">{x.hhi < 0.15 ? "좋음" : x.hhi < 0.3 ? "보통" : "쏠림"}</div><div className="caption"><Term k="hhi">집중도(HHI)</Term> {num(x.hhi, 2)} · <Term k="beta">베타</Term> {num(x.beta, 2)}</div></>}</Card>
       </div>
       {!empty && (
-        <Card title="보유 종목" explain="평가액·손익·비중은 모든 종목을 같은 거래일 종가로 계산합니다. ‘최신 시세’는 표시용입니다." testId="holdings">
-<div className="scroll"><table><thead><tr><th>종목</th><th className="num">수량</th><th className="num">매입 단가</th><th className="num">종가(기준일)</th><th title="표시용 최신 시세 — 평가액·손익은 모든 종목 같은 거래일 종가 기준">최신 시세</th><th title="최신 시세 기준 손익 — 체결마다 바뀝니다">실시간 손익</th><th className="num">평가액</th><th className="num">평가손익</th><th className="num">비중</th><th>섹터</th><th className="row-actions"><span className="sr-only">정리</span></th></tr></thead>
+        <Card title="보유 종목" explain="‘지금 손익’과 ‘오늘’은 1초마다 최신 가격으로 계산합니다(토스증권 계좌 종목은 토스증권 계산 기준). 종가 기준 평가액·비중은 모든 종목을 같은 거래일 종가로 계산한 값으로, 쏠림·베타 계산에 씁니다." testId="holdings">
+<div className="scroll"><table><thead><tr><th>종목</th><th className="num">수량</th><th className="num">매입 단가</th><th className="num">종가(기준일)</th><th>현재가</th><th className="num" title="지금 가격 기준 — 토스증권 계좌 종목은 토스증권이 계산한 손익에 그 뒤 가격 변화만 더한 값">지금 손익</th><th className="num" title="오늘 손익 — 오늘 산 주식은 산 가격부터 계산(토스 앱과 같은 기준)">오늘</th><th className="num">평가액(종가)</th><th className="num">평가손익(종가)</th><th className="num">비중</th><th>섹터</th><th className="row-actions"><span className="sr-only">정리</span></th></tr></thead>
             <tbody>{x.holdings.map((h) => <tr key={h.ticker} className="nowrap-row"><td><Link to={`/stocks/${h.ticker}`}><b>{h.ticker}</b></Link></td><td className="num">{shares(h.quantity)}{h.source === "toss" ? <div className="caption src-toss" title="토스증권 계좌의 수량·평균 매입가 (자동 동기화)">토스 계좌</div> : null}{h.outside_broker ? <div className="caption warn" title="토스증권 계좌에 없는 종목 — 다른 증권사 보유면 그대로, 판 종목이면 삭제">토스에 없음</div> : null}{h.source === "ledger" ? <div className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}>거래 기록 기준</div> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td className="num">{price(h.cost_basis)}</td><td className="num">{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)}<div className="caption">{day(h.price_day)}</div></>}</td>
               <td><LivePrice ticker={h.ticker} size="sm" /><div style={{ marginTop: 4 }}><LiveZone ticker={h.ticker} compact /></div></td>
-              <td><LivePnl ticker={h.ticker} qty={h.quantity} cost={h.cost_basis} /></td>
+              <LiveCells r={acct?.rows.find((a) => a.ticker === h.ticker)} />
               <td className="num">{h.market_value === null ? "—" : price(h.market_value)}</td><td className={`num ${h.unrealized_pnl === null ? "" : h.unrealized_pnl >= 0 ? "pos" : "neg"}`}>{h.unrealized_pnl === null ? "계산 안 함" : <>{h.unrealized_pnl >= 0 ? "▲" : "▼"} {price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</>}</td><td className="num">{h.weight === null ? "—" : pct(h.weight, 1, false)}</td><td className="wrap" style={{ minWidth: 110 }}>{h.sector}</td>
               <td className="row-actions">{h.source === "toss" ? <span className="caption" title="토스증권에서 사고팔면 자동으로 바뀝니다">자동</span> : <div className="row tight" style={{ flexWrap: "nowrap", justifyContent: "flex-end" }}>
                 {h.source === "ledger"
@@ -205,37 +208,15 @@ export default function Portfolio() {
   );
 }
 
-/** Profit on the latest price (moves with every trade); the valuation above stays on one common close. */
-function LivePnl({ ticker, qty, cost }: { ticker: string; qty: number; cost: number }) {
-  const { row } = useQuote(ticker);
-  if (row?.price == null || !(cost > 0)) return <span className="muted">—</span>;
-  const d = (row.price - cost) * qty;
-  const r = row.price / cost - 1;
-  return <span className={d > 0 ? "pos" : d < 0 ? "neg" : ""} data-testid={`live-pnl-${ticker}`}>{d > 0 ? "▲" : d < 0 ? "▼" : ""} {price(Math.abs(d))} ({pct(r)})</span>;
-}
-
-/** Total on the latest prices (a name without one counts at its close) — the live counterpart of 총 평가금액. */
-export function LiveNav({ x }: { x: { cash: number; holdings: { ticker: string; quantity: number; price: number | null; cost_basis: number }[] } }) {
-  const q = useAllQuotes();
-  let live = 0, value = x.cash, cost = 0, fromClose = 0, day = 0, dayN = 0;
-  for (const h of x.holdings) {
-    const qr = q.get(h.ticker);
-    const p = qr?.price ?? null;
-    if (p != null) live += 1;
-    if (p != null && qr?.previous_close) { day += (p - qr.previous_close) * h.quantity; dayN += 1; }
-    const px = p ?? h.price;
-    if (px == null) continue;
-    if (p == null) fromClose += 1;
-    value += px * h.quantity;
-    cost += h.cost_basis * h.quantity;
-  }
-  if (!live) return null;
-  const pnl = value - x.cash - cost;
+/** The account view's row of a holding: P&L now and today's, in dollars with the won value (the Toss app's figures). */
+function LiveCells({ r }: { r: AccountRow | undefined }) {
+  if (!r) return <><td className="num muted">—</td><td className="num muted">—</td></>;
+  const cls = (v: number | null) => (v == null ? "" : v > 0 ? "pos" : v < 0 ? "neg" : "");
+  const arrow = (v: number | null) => (v == null ? "" : v > 0 ? "▲ " : v < 0 ? "▼ " : "");
   return (
-    <div className="caption" data-testid="live-nav" title="최신 시세로 다시 계산한 값입니다(체결마다 바뀜). 위 금액은 모든 종목을 같은 거래일 종가로 계산한 값입니다.">
-      실시간 {price(value)} · 손익 <span className={pnl > 0 ? "pos" : pnl < 0 ? "neg" : ""}>{pnl > 0 ? "▲" : pnl < 0 ? "▼" : ""}{price(Math.abs(pnl))}</span>
-      {dayN > 0 && <> · 오늘 <span className={day > 0 ? "pos" : day < 0 ? "neg" : ""} data-testid="live-day">{day > 0 ? "▲" : day < 0 ? "▼" : ""}{price(Math.abs(day))}</span>{dayN < live ? ` (${dayN}종목)` : ""}</>}
-      {fromClose ? ` · ${fromClose}종목은 종가` : ""}
-    </div>
+    <>
+      <td className={`num ${cls(r.pnl)}`} data-testid={`live-pnl-${r.ticker}`}>{r.pnl == null ? "—" : <>{arrow(r.pnl)}{price(Math.abs(r.pnl))} ({pct(r.pnl_rate)})<div className="caption">{signedWon(r.pnl_krw)}</div></>}</td>
+      <td className={`num ${cls(r.daily)}`} data-testid={`live-day-${r.ticker}`}>{r.daily == null ? <span className="muted" title="지금 가격이 없어 오늘 손익을 계산하지 않았습니다">—</span> : <>{arrow(r.daily)}{price(Math.abs(r.daily))} ({pct(r.daily_rate, 2)})<div className="caption">{signedWon(r.daily_krw)}</div></>}</td>
+    </>
   );
 }

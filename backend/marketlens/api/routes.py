@@ -514,11 +514,17 @@ def portfolio(req: Request) -> dict[str, Any]:
     s.broker_tick()
     with s.sf() as ss:
         krw = s.fx_attribution(ss, pf, snap)
-    return encode(snap) | {"currency": "USD", "note": "MarketLens는 주문을 넣지 않습니다. 평가금액은 모든 종목을 같은 거래일 종가로 계산합니다.",
+    return encode(snap) | {"currency": "USD", "note": "MarketLens는 주문을 넣지 않습니다. 지금 손익·오늘 손익은 1초마다 최신 가격으로(토스증권 계좌 종목은 토스증권 계산 기준), 비중·쏠림은 같은 거래일 종가로 계산합니다.",
                            # False: the cash is the sizing assumption, not an entered amount (the account's cash counts as known)
                            "cash_entered": cash_entered or pf.cash_source != "manual", "cash_source": pf.cash_source,
                            "history_pending": pending, "unused_manual": [{"ticker": t, "quantity": q} for t, q in pf.unused_manual],
                            "broker": s.broker.view() if s.broker.enabled else None, "krw": krw}
+
+
+@router.get("/portfolio/live")
+def portfolio_live(req: Request) -> dict[str, Any]:
+    """The account now, every second: 토스증권's own figures moved by the live price (application/account_live.py)."""
+    return svc(req).account_live()
 
 
 def _view_bars(s: MarketLensService, tickers: list[str], start: date, end: date, wait: float = STORE_FIRST_WAIT) -> tuple[dict[str, list[Any]], list[str]]:

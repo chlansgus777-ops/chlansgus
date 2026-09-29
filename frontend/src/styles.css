@@ -947,3 +947,11 @@ a.brief-row:hover .txt { color: var(--text); }
 @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
 .live-cap { display: inline-flex; align-items: center; }
 .live-line { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin-top: 6px; color: var(--sub); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+
+/* the account now (components/AccountLive.tsx): three figures, dollars with won under them */
+.acct-live { display: grid; gap: 10px; }
+.acct-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.acct-head h3 { margin: 0; font-size: 15px; }
+.acct-figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.acct-fig .t-key small { font-size: 13px; font-weight: 600; margin-left: 4px; }
+@media (max-width: 720px) { .acct-figs { grid-template-columns: 1fr; } }

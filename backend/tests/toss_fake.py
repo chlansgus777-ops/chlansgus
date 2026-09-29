@@ -95,6 +95,7 @@ class FakeToss:
         self.cash = {"USD": "1234.56", "KRW": "500000"}
         self.orders: list[dict[str, Any]] = [order(i, "NVDA", "BUY", "1", "100.00", "2026-09-%02d" % (1 + i % 20)) for i in range(1, 131)]
         self.rate = {"rate": "1385.50", "midRate": "1380.00"}
+        self.rate_at: Any = None  # dateTime (ISO) -> {"rate", "midRate"}: the rate valid at that moment
         self.prices: dict[str, tuple[str, str | None]] = {}  # symbol -> (lastPrice, timestamp) for /api/v1/prices
         self.faults: list[httpx.Response | Exception] = []  # served first, in order (429, 500, a network error…)
         self.requests: list[httpx.Request] = []
@@ -173,7 +174,8 @@ class FakeToss:
             cur = q.get("currency", "USD")
             return self._resp(path, method, 200, {"result": {"currency": cur, "cashBuyingPower": self.cash[cur]}})
         if path == "/api/v1/exchange-rate":
-            return self._resp(path, method, 200, {"result": {"baseCurrency": "USD", "quoteCurrency": "KRW", **self.rate, "basisPoint": "40", "rateChangeType": "UP",
+            rate = self.rate_at(q["dateTime"]) if q.get("dateTime") and self.rate_at is not None else self.rate
+            return self._resp(path, method, 200, {"result": {"baseCurrency": "USD", "quoteCurrency": "KRW", **rate, "basisPoint": "40", "rateChangeType": "UP",
                                                              "validFrom": "2026-09-29T09:30:00+09:00", "validUntil": "2026-09-29T09:31:00+09:00"}})
         if path == "/api/v1/orders":
             if q.get("status") != "CLOSED":

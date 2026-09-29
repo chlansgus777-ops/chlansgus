@@ -25,7 +25,7 @@ it("shows the session, the market, my account and what to check — each with it
   expect(t).toContain("+0.81%");
   expect(t).toContain("QQQ 가격 없음");  // a part without data says so
   expect(t).toContain("−$1,234");
-  expect(t).toContain("2/3종목 가격 확인");
+  expect(t).toContain("2/3종목");  // the tile counts the names in today's figure (wording changed 2026-09-29)
   expect(t).toContain("AMD 손절 기준 근처");
   expect(t).toContain("NVDA 실적 발표 · NVDA");
   expect(t).toContain("AVGO · 점수 83");

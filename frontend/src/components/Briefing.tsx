@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { Change } from "./ui";
+import { signedWon } from "./AccountLive";
 import { useApi, usePoll } from "./useApi";
 import { pct, price } from "../format";
 
@@ -10,7 +11,9 @@ export type Briefing = {
   date_kst: string; ready: boolean; built_at: string; session: string; session_expected: string; notes: string[];
   live?: boolean; live_at?: string | null;
   market: { name: string; ticker: string; close: number | null; change: number | null; live?: boolean }[];
-  account: { holdings: number; priced: number; pnl: number | null; change: number | null; movers: { ticker: string; change: number | null; pnl: number | null; close: number | null }[] };
+  /** the account's today as the 토스증권 app counts it (a share bought today from its purchase price), live */
+  account: { holdings: number; priced: number; pnl: number | null; change: number | null; movers: { ticker: string; change: number | null; pnl: number | null; close: number | null }[];
+    pnl_krw?: number | null; total_pnl?: number | null; total_rate?: number | null; total_pnl_krw?: number | null; basis?: "TOSS" | "PRICE"; notes?: string[] };
   watch: { ticker: string; kind: "STOP" | "TARGET"; price: number; level: number; distance: number; text: string }[];
   alerts: { id: number; at: string; ticker: string; kind: string; level: string; text: string }[];
   events: { date: string; title: string; tickers: string[]; type: string }[];
@@ -75,9 +78,10 @@ export function BriefingView({ x, onRefresh }: { x: Briefing; onRefresh?: () => 
           </div>
         ))}
         <div className={`brief-tile acct ${tone(acc.pnl)}`}>
-          <div className="t">내 계좌 (미국 주식)</div>
-          <div className="v">{acc.holdings === 0 ? <span className="muted">보유 종목 없음</span> : acc.pnl == null ? <span className="muted">등락 계산 불가</span> : signedUsd(acc.pnl)}</div>
-          <div className="s">{acc.change != null ? `${pct(acc.change, 2)} · ` : ""}{acc.holdings ? `${acc.priced}/${acc.holdings}종목 가격 확인` : "포트폴리오에 종목을 넣으면 표시됩니다"}</div>
+          <div className="t">내 계좌 오늘 (미국 주식{acc.basis === "TOSS" ? " · 토스 기준" : ""})</div>
+          <div className="v">{acc.holdings === 0 ? <span className="muted">보유 종목 없음</span> : acc.pnl == null ? <span className="muted">지금 가격 대기</span> : signedUsd(acc.pnl)}</div>
+          <div className="s">{acc.change != null ? `${pct(acc.change, 2)} · ` : ""}{acc.pnl_krw != null ? `${signedWon(acc.pnl_krw)} · ` : ""}{acc.holdings ? (acc.priced < acc.holdings ? `${acc.priced}/${acc.holdings}종목` : `${acc.holdings}종목`) : "포트폴리오에 종목을 넣으면 표시됩니다"}</div>
+          {acc.total_pnl != null && <div className="s" data-testid="brief-total">총 손익 {signedUsd(acc.total_pnl)}{acc.total_rate != null ? ` (${pct(acc.total_rate, 2)})` : ""}{acc.total_pnl_krw != null ? ` · ${signedWon(acc.total_pnl_krw)}` : ""}</div>}
         </div>
       </div>
 

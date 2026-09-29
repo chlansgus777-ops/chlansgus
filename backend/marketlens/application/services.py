@@ -557,12 +557,13 @@ class MarketLensService:
             if g["ticker"]:
                 ledger_lots[g["ticker"]] = [Lot(t.day, t.kind, t.quantity, t.price, t.fees) for t in g["trades"] if t.kind in ("BUY", "SELL")]
         toss_lots: dict[str, list[Lot]] = {}
+        fill_fx = self.broker.fill_rates()
         for f in self.broker.fills(limit=2000):
             if f.get("currency") != "USD" or not f.get("avg_price"):
                 continue
             when = datetime.fromisoformat(f.get("filled_at") or f["ordered_at"])
             toss_lots.setdefault(f["symbol"], []).append(Lot(to_ny(when).date(), f["side"], float(f["quantity"]), float(f["avg_price"]),
-                                                             float(f.get("commission") or 0) + float(f.get("tax") or 0)))
+                                                             float(f.get("commission") or 0) + float(f.get("tax") or 0), fill_fx.get(f["order_id"])))
         lots_of = {h.ticker: (toss_lots.get(h.ticker) if h.source == "toss" else ledger_lots.get(h.ticker) if h.source == "ledger" else None) for h in pf.holdings}
         days = [lot.day for lots in lots_of.values() if lots for lot in lots]
         start = min(days) if days else today - timedelta(days=30)
@@ -575,9 +576,27 @@ class MarketLensService:
         elif rates:
             last = max(rates)
             fx_now, src, at = rates[last], "FRED 원/달러(뉴욕 정오 기준)", last.isoformat()
-        rows = [attribute(h.ticker, h.quantity, h.cost_basis, hv.price, fx_now, lots_of.get(h.ticker), rates or {}) for h, hv in zip(pf.holdings, snap.holdings)]
+        def now_price(h: Any, hv: Any) -> float | None:  # the live price, as the account shows it; else the close
+            q = self._fresh_quote(h.ticker)
+            return q.price if q is not None else hv.price
+
+        rows = [attribute(h.ticker, h.quantity, h.cost_basis, now_price(h, hv), fx_now, lots_of.get(h.ticker), rates or {}) for h, hv in zip(pf.holdings, snap.holdings)]
+        bases = {r.basis for r in rows if r.known}
+        note = ("매수 당시 환율: 토스증권 계좌 종목은 체결 시각의 토스증권 매수 환율, 그 밖의 종목은 FRED 원/달러 일별 기준환율(뉴욕 정오)입니다."
+                if bases & {"BROKER", "MIXED"} else
+                "매수 당시 환율은 FRED 원/달러 일별 기준환율(뉴욕 정오)입니다 — 증권사가 실제로 적용한 환율과 조금 다를 수 있습니다.")
+        if "MIXED" in bases or (self.broker.active() and "REFERENCE" in {r.basis for r, h in zip(rows, pf.holdings) if r.known and h.source == "toss"}):
+            note += " 토스증권 체결 환율을 아직 다 받지 못한 체결은 FRED 환율로 계산했습니다(몇 분 안에 채워짐)."
         return {"fx_now": fx_now, "fx_source": src, "fx_at": at, "loading": rates is None, "rows": [asdict(r) for r in rows], "totals": totals(rows),
-                "note": "매수 당시 환율은 FRED 원/달러 일별 기준환율(뉴욕 정오)입니다 — 증권사가 실제로 적용한 환율과 조금 다를 수 있습니다."}
+                "note": note}
+
+    def account_live(self) -> dict[str, Any]:
+        """The account now (application/account_live.py): Toss's own figures moved by the live price — computed on each
+        request (a few ms), so a new price or sync is never hidden behind a cache."""
+        from marketlens.application import account_live
+
+        self.broker_tick()
+        return account_live.build(self, self.now())
 
     def broker_tick(self) -> None:
         """Keep the account current in the background — called by the quote stream's status tick and the portfolio

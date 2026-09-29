@@ -373,9 +373,13 @@ class TossClient:
             raise _err("BAD_DATA", extra="매수 가능 금액 형식")
         return dec(res.get("cashBuyingPower"), "매수 가능 금액")  # type: ignore[return-value]
 
-    def usd_krw(self) -> tuple[Decimal, Decimal, datetime | None]:
-        """(buy rate, mid rate, valid from) for 1 USD in KRW — a reference rate (the spec: the rate of an order may differ)."""
-        res = self._get("/api/v1/exchange-rate", {"baseCurrency": "USD", "quoteCurrency": "KRW"})
+    def usd_krw(self, at: datetime | None = None) -> tuple[Decimal, Decimal, datetime | None]:
+        """(buy rate, mid rate, valid from) for 1 USD in KRW — a reference rate (the spec: the rate of an order may differ).
+        ``at``: the rate that was valid at that moment (the spec's ``dateTime``), e.g. an execution's time."""
+        params = {"baseCurrency": "USD", "quoteCurrency": "KRW"}
+        if at is not None:
+            params["dateTime"] = at.isoformat()
+        res = self._get("/api/v1/exchange-rate", params)
         if not isinstance(res, dict):
             raise _err("BAD_DATA", extra="환율 형식")
         return dec(res.get("rate"), "환율"), dec(res.get("midRate"), "매매기준율"), _ts(res.get("validFrom"))  # type: ignore[return-value]

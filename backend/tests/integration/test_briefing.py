@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
+
 from tests.integration.test_service_api import NOW
 from tests.integration.test_transactions import client  # noqa: F401
 
@@ -26,17 +28,37 @@ def test_the_briefing_sums_up_the_session_for_my_account(client):  # noqa: F811
     assert b["session"] == "2026-09-24" and any("9/25 종가가 아직" in n for n in b["notes"])
     assert [m["ticker"] for m in b["market"]] == ["SPY", "QQQ"] and all(m["change"] is not None for m in b["market"])
     acct = b["account"]
-    assert acct["holdings"] == 2 and acct["priced"] == 2 and acct["pnl"] is not None and len(acct["movers"]) == 2
-    # the P&L is the session's close-to-close move of each holding × its quantity, summed
-    assert abs(acct["pnl"] - sum(m["pnl"] for m in acct["movers"])) < 0.02
-    assert "S&P 500" in b["headline"] and "내 계좌" in b["headline"]
+    # the account's today is the 9/25 session's: its closes are not stored and no live price came — not calculated,
+    # said so (owner 2026-09-29: "내 계좌 수익이 안 맞아" — the 9/24 move was shown as today's before)
+    assert acct["holdings"] == 2 and acct["priced"] == 0 and acct["pnl"] is None and acct["movers"] == []
+    assert any("오늘 손익에서 뺐습니다" in n for n in acct["notes"])
+    assert "S&P 500" in b["headline"] and "내 계좌" not in b["headline"]
     assert isinstance(b["events"], list) and isinstance(b["candidates"], list) and isinstance(b["watch"], list)
+
+
+def _close(svc, ticker, day):
+    bars = svc.store.bars(ticker, day, day) if getattr(svc, "store", None) is not None else svc.data.bars(ticker, day - timedelta(days=7), day).value
+    return next(b.close for b in bars if b.day == day)
+
+
+def test_the_accounts_today_is_the_live_price_against_the_previous_close(client):  # noqa: F811
+    c, svc = client
+    c.put("/api/portfolio", json={"holdings": [{"ticker": "NVDA", "quantity": 10, "cost_basis": 100}, {"ticker": "MSFT", "quantity": 2, "cost_basis": 300}]})
+    now = svc.now()  # Fri 9/25 11:00 New York, in the session
+    prev = {t: _close(svc, t, now.date() - timedelta(days=1)) for t in ("NVDA", "MSFT")}
+    svc.quotes.ingest_poll("NVDA", prev["NVDA"] * 1.03, now - timedelta(seconds=1), "toss")
+    b = c.get("/api/briefing?refresh=true").json()
+    acct = b["account"]
+    # MSFT has no live price in the session: left out of today's figure (not its previous move), and said
+    assert acct["priced"] == 1 and acct["pnl"] == pytest.approx(10 * prev["NVDA"] * 0.03, abs=0.02)
+    assert [m["ticker"] for m in acct["movers"]] == ["NVDA"] and any("1종목" in n for n in acct["notes"])
+    assert "내 계좌" in b["headline"]
 
 
 def test_the_briefing_follows_the_live_prices(client):  # noqa: F811
     c, svc = client
     c.put("/api/portfolio", json={"holdings": [{"ticker": "NVDA", "quantity": 10, "cost_basis": 100}]})
-    svc._clock["t"] = MORNING
+    svc._clock["t"] = NOW  # in the session (Fri 11:00 New York): the live price against Thursday's close
     before = c.get("/api/briefing?refresh=true").json()
     assert before["live"] is False  # no live print yet: the stored closes, said so
     spy_prev = before["market"][0]["close"]

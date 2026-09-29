@@ -112,21 +112,19 @@ def build(svc: Any, now: datetime) -> dict[str, Any]:
                 mb = None
             cands.append({"ticker": r.ticker, "action": r.final_action, "action_ko": ACTION_KO.get(Action(r.final_action), r.final_action), "score": r.score,
                           "max_buy": mb, "as_of": r.as_of.isoformat()})
-    rows, pnl, base = [], 0.0, 0.0
-    for h in pf.holdings:
-        try:
-            c1, c0, ch, lt = _live_move(svc, h.ticker, d)
-        except Exception:  # noqa: BLE001
-            c1 = c0 = ch = lt = None
-        if lt is not None:
-            live_at.append(lt)
-        if c1 and c0:
-            pnl += (c1 - c0) * h.quantity
-            base += c0 * h.quantity
-        rows.append({"ticker": h.ticker, "change": ch, "pnl": (c1 - c0) * h.quantity if c1 and c0 else None, "close": c1})
-    movers = sorted((r for r in rows if r["change"] is not None), key=lambda r: -abs(r["change"]))[:3]
-    out["account"] = {"holdings": len(pf.holdings), "priced": sum(1 for r in rows if r["change"] is not None), "pnl": round(pnl, 2) if base else None,
-                      "change": pnl / base if base else None, "movers": movers}
+    # the account exactly as the 토스증권 app counts it (application/account_live.py): its own today's P&L moved by the
+    # live price — a share bought today counts from its purchase price; no yesterday's move shown as today's
+    acct = svc.account_live() if hasattr(svc, "account_live") else None
+    rows = [{"ticker": r["ticker"], "change": r["daily_rate"], "pnl": r["daily"], "close": r["price"], "live": r["live"]} for r in (acct or {}).get("rows", [])]
+    if acct and acct.get("live_at"):
+        live_at.append(datetime.fromisoformat(acct["live_at"]))
+    tot = (acct or {}).get("totals") or {}
+    pnl = tot.get("daily") or 0.0
+    movers = sorted((r for r in rows if r["pnl"] is not None), key=lambda r: -abs(r["pnl"]))[:3]
+    out["account"] = {"holdings": len(pf.holdings), "priced": tot.get("daily_count", 0), "pnl": tot.get("daily"), "change": tot.get("daily_rate"),
+                      "pnl_krw": tot.get("daily_krw"), "total_pnl": tot.get("pnl"), "total_rate": tot.get("pnl_rate"), "total_pnl_krw": tot.get("pnl_krw"),
+                      "value": tot.get("value"), "basis": "TOSS" if any(r.get("basis") == "TOSS" for r in (acct or {}).get("rows", [])) else "PRICE",
+                      "synced_at": (acct or {}).get("synced_at"), "notes": (acct or {}).get("notes", []), "movers": movers}
 
     # 3. stops and targets (the live plans, at the newest price the app has)
     watch: list[dict[str, Any]] = []

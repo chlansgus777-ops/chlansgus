@@ -31,11 +31,12 @@ from marketlens.providers.live.toss import TossClient, TossError, TossFill
 
 log = logging.getLogger("marketlens.broker")
 KST = ZoneInfo("Asia/Seoul")
-SNAP_KEY, FILLS_KEY, PREFS_KEY = "broker.toss.snapshot", "broker.toss.fills", "broker.toss.prefs"
+SNAP_KEY, FILLS_KEY, PREFS_KEY, FILL_FX_KEY = "broker.toss.snapshot", "broker.toss.fills", "broker.toss.prefs", "broker.toss.fill_fx"
 CASH_SOURCES = ("toss_usd", "toss_usd_krw", "manual")
 FILLS_EVERY_S = 600.0
 FILLS_FIRST_DAYS = 365
 FILLS_KEEP = 2000
+FILL_FX_PER_SYNC = 30  # executions whose Toss rate is looked up per sync (once each, kept): a long history fills in over a few minutes
 KEY_TROUBLE = ("NOT_CONFIGURED", "BAD_KEY", "IP_NOT_ALLOWED", "TOKEN_REVOKED", "NO_ACCOUNT")
 
 
@@ -68,6 +69,7 @@ class BrokerSync:
         self.on_change: Callable[[], None] | None = None
         self._snap: dict[str, Any] | None = None
         self._fills: dict[str, Any] | None = None
+        self._fill_fx: dict[str, str] = {}
         try:
             with self.sf() as s:
                 raw = repo.get_setting(s, SNAP_KEY)
@@ -76,6 +78,8 @@ class BrokerSync:
                 self._fills = json.loads(raw) if raw else None
                 raw = repo.get_setting(s, PREFS_KEY)
                 self._prefs = json.loads(raw) if raw else {}
+                raw = repo.get_setting(s, FILL_FX_KEY)
+                self._fill_fx = json.loads(raw) if raw else {}
         except Exception as e:  # noqa: BLE001 - no table yet on a first start: nothing stored
             log.info("broker snapshot not loaded: %s", type(e).__name__)
             self._prefs = {}
@@ -173,6 +177,10 @@ class BrokerSync:
         return out | {"domestic": kr, "totals": snap.get("totals"), "cash": snap.get("cash"), "fx": snap.get("fx"),
                       "other": [h for h in snap["holdings"] if h["market"] not in ("US", "KR")]}
 
+    def fill_rates(self) -> dict[str, float]:
+        """order id → the won per dollar Toss quoted (its buy rate) at the moment of that USD execution."""
+        return {k: float(v) for k, v in self._fill_fx.items()} if self.active() else {}
+
     def fills(self, limit: int = 300) -> list[dict[str, Any]]:
         if not self.active() or not self._fills:
             return []
@@ -213,9 +221,9 @@ class BrokerSync:
         return self.status()
 
     def _clear(self) -> None:
-        self._snap, self._fills = None, None
+        self._snap, self._fills, self._fill_fx = None, None, {}
         with self.sf() as s:
-            for k in (SNAP_KEY, FILLS_KEY):
+            for k in (SNAP_KEY, FILLS_KEY, FILL_FX_KEY):
                 repo.delete_setting(s, k)
             s.commit()
 
@@ -263,13 +271,37 @@ class BrokerSync:
         if full or fills is None or changed or time.monotonic() - self._fills_at >= FILLS_EVERY_S:
             fills = self._sync_fills(c, acct.seq, now, fills if not full else None)
             self._fills_at = time.monotonic()
+        fill_fx = self._sync_fill_fx(c, fills) if not full else self._fill_fx  # connecting stays quick; the next sync looks them up
         with self.sf() as s:
             repo.set_setting(s, SNAP_KEY, json.dumps(snap))
             if fills is not self._fills:
                 repo.set_setting(s, FILLS_KEY, json.dumps(fills))
+            if fill_fx is not self._fill_fx:
+                repo.set_setting(s, FILL_FX_KEY, json.dumps(fill_fx))
             s.commit()
         self._snap, self._fills = snap, fills
+        self._fill_fx = fill_fx  # read per request by the won-based return: no new version (nothing held changed)
         return changed
+
+    def _sync_fill_fx(self, c: TossClient, fills: dict[str, Any] | None) -> dict[str, str]:
+        """The Toss rate at each USD execution not looked up yet (newest first, a few per sync). A failed lookup is
+        tried again next sync; a key problem stops the sync as any other request would."""
+        todo = [f for f in (fills or {}).get("items", []) if f.get("currency") == "USD" and f["order_id"] not in self._fill_fx]
+        if not todo:
+            return self._fill_fx
+        out = dict(self._fill_fx)
+        for f in todo[:FILL_FX_PER_SYNC]:
+            when = datetime.fromisoformat(f.get("filled_at") or f["ordered_at"])
+            try:
+                rate, _mid, _at = c.usd_krw(when)
+            except TossError as e:
+                if e.kind in KEY_TROUBLE:
+                    raise
+                log.info("toss fill rate %s: %s", f["order_id"], e.kind)
+                break
+            if rate and rate > 0:
+                out[f["order_id"]] = _s(rate)  # type: ignore[assignment]
+        return out if out != self._fill_fx else self._fill_fx
 
     def _sync_fills(self, c: TossClient, seq: int, now: datetime, prev: dict[str, Any] | None) -> dict[str, Any]:
         today = now.astimezone(KST).date()

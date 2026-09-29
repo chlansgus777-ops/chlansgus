@@ -10,6 +10,9 @@ at the rate F now:
 The two effects add up exactly to value − cost. F0 is found by replaying the dated buys and sales with the average-cost
 method (a sale keeps the average, as brokers and Korean tax practice do); the replay must reproduce the holding's own
 dollar cost (±1.5 %, fees and rounding), otherwise the purchase rate is not known and nothing is guessed.
+
+The rate of a purchase is the broker's own when it is known (토스증권: its buy rate at the moment of the execution),
+else the day's reference rate (FRED, New York noon) — ``basis`` says which.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ class Lot:
     quantity: float
     price: float  # USD per share
     fees: float = 0.0
+    fx: float | None = None  # KRW per USD the broker quoted at this execution, when known
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +49,7 @@ class FxAttribution:
     stock_pct: float | None = None  # P / C − 1
     fx_pct: float | None = None  # F / F0 − 1
     total_pct: float | None = None  # (P·F) / (C·F0) − 1
+    basis: str | None = None  # BROKER (every purchase at the broker's rate) / REFERENCE (the day's rate) / MIXED
 
 
 def rate_on(rates: Mapping[date, float], d: date) -> float | None:
@@ -57,20 +62,27 @@ def rate_on(rates: Mapping[date, float], d: date) -> float | None:
 
 def purchase_rate(lots: Sequence[Lot], rates: Mapping[date, float]) -> tuple[float | None, float, float, str | None]:
     """(share-weighted purchase rate of what is still held, quantity held, dollar cost held, reason if unknown)."""
+    f0, qty, usd, why, _basis = _replay(lots, rates)
+    return f0, qty, usd, why
+
+
+def _replay(lots: Sequence[Lot], rates: Mapping[date, float]) -> tuple[float | None, float, float, str | None, str | None]:
     qty = usd = krw = 0.0
+    kinds: set[str] = set()
     for lot in sorted(lots, key=lambda x: (x.day, x.kind != "BUY")):
         if lot.kind == "BUY":
-            r = rate_on(rates, lot.day)
+            r = lot.fx if lot.fx and lot.fx > 0 else rate_on(rates, lot.day)
             if r is None:
-                return None, qty, usd, f"{lot.day.isoformat()} 환율 없음"
+                return None, qty, usd, f"{lot.day.isoformat()} 환율 없음", None
+            kinds.add("BROKER" if lot.fx and lot.fx > 0 else "REFERENCE")
             amount = lot.quantity * lot.price + lot.fees
             qty, usd, krw = qty + lot.quantity, usd + amount, krw + amount * r
         elif lot.kind == "SELL" and qty > 0:
             keep = max(0.0, 1 - min(lot.quantity, qty) / qty)
             qty, usd, krw = qty * keep, usd * keep, krw * keep
     if usd <= 0:
-        return None, qty, usd, "남은 매수 기록 없음"
-    return krw / usd, qty, usd, None
+        return None, qty, usd, "남은 매수 기록 없음", None
+    return krw / usd, qty, usd, None, (kinds.pop() if len(kinds) == 1 else "MIXED")
 
 
 def attribute(ticker: str, quantity: float, avg_cost: float, price: float | None, fx_now: float | None,
@@ -81,7 +93,7 @@ def attribute(ticker: str, quantity: float, avg_cost: float, price: float | None
         return FxAttribution(ticker, False, "현재 환율 없음")
     if not lots:
         return FxAttribution(ticker, False, "매수일 기록이 없어 매수 당시 환율을 알 수 없음(직접 입력한 줄)")
-    f0, _qty, usd, why = purchase_rate(lots, rates)
+    f0, _qty, usd, why, basis = _replay(lots, rates)
     if f0 is None:
         return FxAttribution(ticker, False, why)
     own = quantity * avg_cost
@@ -92,7 +104,7 @@ def attribute(ticker: str, quantity: float, avg_cost: float, price: float | None
     # whole won, and the parts add up exactly on screen: total = stock + fx, value = cost + total
     c, st, fxk = round(cost), round(stock), round(fx)
     return FxAttribution(ticker, True, None, round(f0, 4), c, c + st + fxk, st, fxk, st + fxk,
-                         round(price / avg_cost - 1, 6), round(fx_now / f0 - 1, 6), round(value / cost - 1, 6))
+                         round(price / avg_cost - 1, 6), round(fx_now / f0 - 1, 6), round(value / cost - 1, 6), basis)
 
 
 def totals(rows: Sequence[FxAttribution]) -> dict[str, float | int | None]:
