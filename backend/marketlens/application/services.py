@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Mapping
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from marketlens import __version__
@@ -248,6 +249,7 @@ class MarketLensService:
         self._rejudge_inputs: dict[int, Any] = {}  # rec id -> decoded stored inputs (they never change)
         self._rejudged: dict[int, dict[str, Any]] = {}  # rec id -> the live re-judgement shown over the stored row
         self._rotate = 0
+        self._pool_cache: tuple[int, float, list[tuple[int, str, float]]] | None = None
         # 토스증권 account (read-only): decides the holdings and cash it has; LIVE only (never valued on mock prices)
         # its prices are the app's real-time feed in every session Toss quotes (application/toss_quotes.py)
         self.toss_feed = TossQuoteFeed(self.quotes, None)
@@ -647,6 +649,8 @@ class MarketLensService:
     LIVE_ROTATE = 20  # names of the rest per round
     LIVE_REJUDGE_EVERY = 1.0  # seconds between two rounds over them (owner: "1초마다"); a name whose print did not change is skipped
     LIVE_QUOTE_MAX_AGE = 60.0
+    LIVE_MIN_MOVE = 0.0005  # a name is judged again when its price moved 0.05 % since its last judgement …
+    LIVE_MAX_AGE = 15.0  # … or at least every 15 seconds
 
     def _fresh_quote(self, ticker: str) -> Any:
         """The newest real-time price the app holds for ``ticker`` (Toss poll, else the stream in the regular session),
@@ -667,45 +671,43 @@ class MarketLensService:
         decision follow the price. Kept in memory and shown over the stored row (the database keeps the analyses)."""
         from dataclasses import replace as _replace
 
-        with self.sf() as s:
-            scan = self.shown_scan(s)
-            if scan is None:
-                return 0
-            recs = [r for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None and r.rank <= self.LIVE_POOL]
-            newer = repo.newer_single_analyses(s, [r.ticker for r in recs], scan.as_of, self.mode.value)
-            # the current live order: the top names every round, the rest in rotation
-            def live_score(r: Any) -> float:
-                u = newer.get(r.ticker) or r
-                lj = self._rejudged.get(u.id)
-                return lj["score"] if lj else u.score
-            order = sorted(recs, key=lambda r: -live_score(r))
-            head, rest = order[: self.LIVE_TOP], order[self.LIVE_TOP:]
-            if rest:
-                k = self._rotate % len(rest)
-                rest = (rest[k:] + rest[:k])[: self.LIVE_ROTATE]
-                self._rotate += self.LIVE_ROTATE
-            todo = []
-            for r in head + rest:
-                use = newer.get(r.ticker) or r
-                q = self._fresh_quote(use.ticker)
-                if q is None:
-                    continue
-                lv = self.levels_now(use)
-                if abs((lv.get("split_factor") or 1.0) - 1.0) > 1e-9:
-                    continue  # a split since the analysis: its stored bars are on another share basis — the next scan
-                inp = self._rejudge_inputs.get(use.id)
-                if inp is None:
-                    inp = decode(AnalysisInputs, use.inputs)
-                    self._rejudge_inputs[use.id] = inp
-                todo.append((use.id, inp, q))
+        pool = self._live_pool()
+        if not pool:
+            return 0
+
+        # the current live order: the top names every round, the rest in rotation
+        def live_score(p: tuple[int, str, float]) -> float:
+            lj = self._rejudged.get(p[0])
+            return lj["score"] if lj else p[2]
+
+        order = sorted(pool, key=lambda p: -live_score(p))
+        head, rest = order[: self.LIVE_TOP], order[self.LIVE_TOP:]
+        if rest:
+            k = self._rotate % len(rest)
+            rest = (rest[k:] + rest[:k])[: self.LIVE_ROTATE]
+            self._rotate += self.LIVE_ROTATE
+        todo = []
+        need = [rid for rid, t, _sc in head + rest if rid not in self._rejudge_inputs and self._fresh_quote(t) is not None]
+        if need:  # the stored inputs of names not judged before (decoded once, kept)
+            with self.sf() as s:
+                for row in s.scalars(select(RecommendationRow).where(RecommendationRow.id.in_(need))):
+                    self._rejudge_inputs[row.id] = decode(AnalysisInputs, row.inputs)
+        for rid, t, _sc in head + rest:
+            q = self._fresh_quote(t)
+            inp = self._rejudge_inputs.get(rid)
+            if q is not None and inp is not None:
+                todo.append((rid, inp, q))
         cfg = self.model_config()
         now = self.now()
         done = 0
         changed = False
         for rid, inp, q in todo:
             prev = self._rejudged.get(rid)
-            if prev is not None and prev["price"] == q.price and prev["quote_ts"] == q.timestamp.isoformat():
-                continue  # the same print: nothing to recompute
+            if prev is not None and prev["price"]:
+                moved = abs(q.price / prev["price"] - 1)
+                age = (now - datetime.fromisoformat(prev["at"])).total_seconds()
+                if moved < self.LIVE_MIN_MOVE and age < self.LIVE_MAX_AGE:
+                    continue  # the price barely moved since its judgement: the same decision (the PC stays quiet)
             try:
                 res = run_analysis(_replace(inp, quote=q, as_of=now), cfg, fingerprint=False)
             except Exception as e:  # noqa: BLE001 - one name never stops the round; its stored row stays shown
@@ -740,6 +742,30 @@ class MarketLensService:
         return _replace(p, action=lj["action"], bullish=lj["action"] in {a.value for a in BULLISH_ACTIONS},
                         data_ok=lj["data_quality"] in ("FRESH", "DELAYED"), max_buy=lj["max_buy"], stop=lj["stop"], target1=lj["target1"],
                         ideal_entry=lj["ideal_entry"])
+
+    LIVE_POOL_AGE = 30.0  # seconds the pool list is reused (a new selection or a single re-analysis shows within this)
+
+    def _live_pool(self) -> list[tuple[int, str, float]]:
+        """(rec id, ticker, stored score) of the pooled analyses — each name's newest (a re-analysis after the selection
+        wins) — without a split since the analysis (its stored bars would be on another share basis). Rebuilt when the
+        shown selection changes or every LIVE_POOL_AGE; reading ~100 stored analyses every second cost half a round."""
+        with self.sf() as s:
+            scan = self.shown_scan(s)
+            if scan is None:
+                return []
+            c = self._pool_cache
+            if c is not None and c[0] == scan.id and time.monotonic() - c[1] < self.LIVE_POOL_AGE:
+                return c[2]
+            recs = [r for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None and r.rank <= self.LIVE_POOL]
+            newer = repo.newer_single_analyses(s, [r.ticker for r in recs], scan.as_of, self.mode.value)
+            pool = []
+            for r in recs:
+                use = newer.get(r.ticker) or r
+                if abs((self.levels_now(use).get("split_factor") or 1.0) - 1.0) > 1e-9:
+                    continue
+                pool.append((use.id, use.ticker, float(use.score)))
+        self._pool_cache = (scan.id, time.monotonic(), pool)
+        return pool
 
     def live_rejudge_tick(self) -> None:
         """Called by the quote stream's status tick: a round in the background at most every LIVE_REJUDGE_EVERY."""
