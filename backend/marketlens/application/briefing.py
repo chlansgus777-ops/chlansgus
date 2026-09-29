@@ -1,19 +1,20 @@
-"""The morning briefing (owner 2026-09-29: "아침 브리핑 (한국시간 오전 7시)" — in the PC app only).
+"""오늘의 브리핑 (owner 2026-09-29: the morning briefing, "계속 고정되어 있으면 도움이 안 돼 — 오늘의 브리핑으로 바꾸고
+실시간으로"; in the PC app only).
 
-From 07:00 KST it sums up the US session that ended overnight, in the order a person checks in the morning:
-1. the market (S&P 500 / Nasdaq-100 via SPY / QQQ closes),
-2. my account over that session (USD and %, the biggest movers),
-3. holdings at or near their stop or first target,
-4. what the live judge announced overnight,
-5. earnings and major events today and tomorrow for my names, and the buy candidates of the last scan.
-Every number carries its session date; a part without data says so instead of disappearing. Built once per Korean day
-(and on request), announced once by an alert. Pure reads — it never starts a scan or a provider storm.
+What a person checks through the day, live:
+1. the market now (S&P 500 / Nasdaq-100 via SPY / QQQ: the live price against the previous close),
+2. my account today (USD and %, the biggest movers — live prices where the feed has them),
+3. holdings at or near their stop or first target (the live plans, the newest price),
+4. what the live judge announced in the last 24 hours,
+5. earnings and major events today and tomorrow for my names, and the best candidates of the list.
+A figure without a live price uses the stored closes and says so; a part without data says so instead of disappearing.
+Pure reads — it never starts an analysis or a provider request.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -23,16 +24,11 @@ from marketlens.infrastructure.db import repository as repo
 
 log = logging.getLogger("marketlens.briefing")
 KST = ZoneInfo("Asia/Seoul")
-READY_AT = time(7, 0)
 NEAR = 0.03  # within 3 % of a stop or a target
 
 
 def kst_day(now: datetime) -> date:
     return now.astimezone(KST).date()
-
-
-def is_ready(now: datetime) -> bool:
-    return now.astimezone(KST).time() >= READY_AT
 
 
 def _closes(svc: Any, ticker: str, upto: date) -> list[tuple[date, float]]:
@@ -52,9 +48,25 @@ def _move(svc: Any, ticker: str, day: date) -> tuple[float | None, float | None,
     return c1, c0, c1 / c0 - 1
 
 
+def _live_move(svc: Any, ticker: str, day: date) -> tuple[float | None, float | None, float | None, datetime | None]:
+    """(price, previous close, change, live time): the live price against the last close before its session when the
+    feed has a fresh one (Toss 1 s / the stream), else the stored closes of ``day`` (live time None)."""
+    fresh = getattr(svc, "_fresh_quote", None)
+    q = fresh(ticker) if fresh is not None else None
+    if q is not None and q.price:
+        qday = to_ny(q.timestamp).date()
+        before = qday if q.session.value in ("PREMARKET", "REGULAR") else qday + timedelta(days=1)  # after the close: vs today's close
+        cl = [c for c in _closes(svc, ticker, qday) if c[0] < before]
+        if cl:
+            prev = cl[-1][1]
+            return q.price, prev, q.price / prev - 1, q.timestamp
+    c1, c0, ch = _move(svc, ticker, day)
+    return c1, c0, ch, None
+
+
 def build(svc: Any, now: datetime) -> dict[str, Any]:
     want = last_completed_session(now)
-    out: dict[str, Any] = {"date_kst": kst_day(now).isoformat(), "ready": is_ready(now), "built_at": now.isoformat(), "notes": []}
+    out: dict[str, Any] = {"date_kst": kst_day(now).isoformat(), "ready": True, "built_at": now.isoformat(), "notes": []}
     # the session summed up: the newest one whose closes are stored (the daily bars of the night may come in later)
     try:
         spy = _closes(svc, "SPY", want)
@@ -71,13 +83,16 @@ def build(svc: Any, now: datetime) -> dict[str, Any]:
 
     # 1. market
     market = []
+    live_at: list[datetime] = []
     for t, name in (("SPY", "S&P 500"), ("QQQ", "나스닥 100")):
         try:
-            c1, _c0, ch = _move(svc, t, d)
+            c1, _c0, ch, lt = _live_move(svc, t, d)
         except Exception as e:  # noqa: BLE001 - one missing index never hides the rest
-            c1 = ch = None
+            c1 = ch = lt = None
             log.info("briefing %s: %s", t, type(e).__name__)
-        market.append({"name": name, "ticker": t, "close": c1, "change": ch})
+        if lt is not None:
+            live_at.append(lt)
+        market.append({"name": name, "ticker": t, "close": c1, "change": ch, "live": lt is not None})
     out["market"] = market
 
     # 2. my account over the session
@@ -100,9 +115,11 @@ def build(svc: Any, now: datetime) -> dict[str, Any]:
     rows, pnl, base = [], 0.0, 0.0
     for h in pf.holdings:
         try:
-            c1, c0, ch = _move(svc, h.ticker, d)
+            c1, c0, ch, lt = _live_move(svc, h.ticker, d)
         except Exception:  # noqa: BLE001
-            c1 = c0 = ch = None
+            c1 = c0 = ch = lt = None
+        if lt is not None:
+            live_at.append(lt)
         if c1 and c0:
             pnl += (c1 - c0) * h.quantity
             base += c0 * h.quantity
@@ -129,6 +146,8 @@ def build(svc: Any, now: datetime) -> dict[str, Any]:
         elif to_target is not None and to_target >= -NEAR:
             watch.append({"ticker": h.ticker, "kind": "TARGET", "price": px, "level": plan.target1, "distance": to_target,
                           "text": f"{h.ticker} 1차 목표 {'도달' if to_target >= 0 else '근처'} (현재 ${px:,.2f} · 목표 ${plan.target1:,.2f})"})
+    out["live"] = bool(live_at)
+    out["live_at"] = max(live_at).isoformat() if live_at else None
     out["watch"] = sorted(watch, key=lambda w: (w["kind"] != "STOP", w["distance"]))
 
     # 4. overnight alerts (the last 24 hours)

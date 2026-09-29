@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-/** 오늘 아침 브리핑 (owner 2026-09-29: "아침 브리핑 (한국시간 오전 7시)", in the app only). */
+/** 오늘의 브리핑 (owner 2026-09-29: live, not a fixed 07:00 card). The first version's "hidden before 07:00" case was
+ * removed with that feature; the live case added. */
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it } from "vitest";
@@ -20,9 +21,9 @@ const B: Briefing = {
 it("shows the session, the market, my account and what to check — each with its data or why not", () => {
   render(<MemoryRouter><BriefingView x={B} /></MemoryRouter>);
   const t = screen.getByTestId("morning-briefing").textContent!;
-  expect(t).toContain("9월 26일 (토) · 미국 9/25 장 기준");
+  expect(t).toContain("9월 26일 (토) · 미국 9/25 종가 기준");
   expect(t).toContain("+0.81%");
-  expect(t).toContain("QQQ 종가 없음");  // a part without data says so
+  expect(t).toContain("QQQ 가격 없음");  // a part without data says so
   expect(t).toContain("−$1,234");
   expect(t).toContain("2/3종목 가격 확인");
   expect(t).toContain("AMD 손절 기준 근처");
@@ -32,14 +33,17 @@ it("shows the session, the market, my account and what to check — each with it
   expect(screen.getByRole("link", { name: /NVDA/ }).getAttribute("href")).toBe("/stocks/NVDA");
 });
 
-it("is not shown before 07:00 KST, and a late night's bars are named", () => {
-  const { container } = render(<MemoryRouter><BriefingView x={{ ...B, ready: false }} /></MemoryRouter>);
-  expect(container.textContent).toBe("");
+it("says when it runs on live prices, and names a close when it does not", () => {
+  render(<MemoryRouter><BriefingView x={{ ...B, live: true, live_at: "2026-09-26T00:05:07Z", market: [{ ...B.market[0]!, live: true }, B.market[1]!] }} /></MemoryRouter>);
+  const t = screen.getByTestId("morning-briefing").textContent!;
+  expect(t).toContain("오늘의 브리핑");
+  expect(t).toContain("실시간 09:05:07 기준");
+  expect(t).toContain("SPY $671.20 · 실시간");
   cleanup();
   render(<MemoryRouter><BriefingView x={{ ...B, session: "2026-09-24", notes: ["9/25 종가가 아직 저장되지 않아 9/24 종가 기준입니다"] }} /></MemoryRouter>);
-  const t = screen.getByTestId("morning-briefing").textContent!;
-  expect(t).toContain("미국 9/24 장 기준");
-  expect(t).toContain("9/25 종가가 아직 저장되지 않아");
+  const t2 = screen.getByTestId("morning-briefing").textContent!;
+  expect(t2).toContain("미국 9/24 종가 기준");
+  expect(t2).toContain("9/25 종가가 아직 저장되지 않아");
 });
 
 it("signs dollars the way the rest of the app does", () => {

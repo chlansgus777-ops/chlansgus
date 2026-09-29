@@ -115,7 +115,6 @@ async def stream(req: Request) -> StreamingResponse:
                 s.live_plans()  # background refresh when older than LIVE_PLAN_AGE (cheap when fresh)
                 s.live_rejudge_tick()  # the list's top names re-judged on the live price (background, every few seconds)
                 s.broker_tick()  # the 토스증권 account, on its own schedule (1 min in a session, 10 min otherwise)
-                await asyncio.to_thread(s.briefing_tick)  # 07:00 KST: the morning briefing's alert, once a day
                 app = await asyncio.to_thread(s.app_state)
                 if app != last_app:
                     last_app = app

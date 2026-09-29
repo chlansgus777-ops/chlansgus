@@ -1,5 +1,6 @@
-"""오늘 아침 브리핑 (owner 2026-09-29: "아침 브리핑 (한국시간 오전 7시)", in the app only): what it says, when it is
-ready, the once-a-day alert, and that a part without data says so instead of disappearing."""
+"""오늘의 브리핑 (owner 2026-09-29: first "아침 브리핑 07:00", then "고정되어 있으면 도움이 안 돼 — 오늘의 브리핑, 실시간"):
+what it says, that it follows the live prices, and that a part without data says so instead of disappearing.
+(The 07:00 readiness and once-a-day alert tests of the first version were removed with those features.)"""
 
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ def test_the_briefing_sums_up_the_session_for_my_account(client):  # noqa: F811
     assert b["scan_as_of"] is not None
     for cand in b["candidates"]:
         assert cand["action_ko"] and cand["score"] > 0 and (cand["max_buy"] is None or cand["max_buy"] > 0)
-    assert b["date_kst"] == "2026-09-26" and b["ready"] is True and b["session_expected"] == "2026-09-25"
+    assert b["date_kst"] == "2026-09-26" and b["session_expected"] == "2026-09-25"
     # the mock world's daily bars end on the 24th (as when the night's bars are not stored yet): said, not blank
     assert b["session"] == "2026-09-24" and any("9/25 종가가 아직" in n for n in b["notes"])
     assert [m["ticker"] for m in b["market"]] == ["SPY", "QQQ"] and all(m["change"] is not None for m in b["market"])
@@ -32,22 +33,22 @@ def test_the_briefing_sums_up_the_session_for_my_account(client):  # noqa: F811
     assert isinstance(b["events"], list) and isinstance(b["candidates"], list) and isinstance(b["watch"], list)
 
 
-def test_before_seven_it_is_not_ready_and_the_alert_goes_out_once_after(client):  # noqa: F811
+def test_the_briefing_follows_the_live_prices(client):  # noqa: F811
     c, svc = client
-    svc._clock["t"] = NOW + timedelta(hours=6)  # Sat 06:00 KST
-    assert c.get("/api/briefing").json()["ready"] is False
-    svc.briefing_tick()
-    assert not [a for a in svc.judge.alerts() if a["kind"] == "BRIEFING"]
+    c.put("/api/portfolio", json={"holdings": [{"ticker": "NVDA", "quantity": 10, "cost_basis": 100}]})
     svc._clock["t"] = MORNING
-    svc.briefing_tick()
-    svc.briefing_tick()
-    got = [a for a in svc.judge.alerts() if a["kind"] == "BRIEFING"]
-    assert len(got) == 1 and got[0]["text"].startswith("오늘 아침 브리핑 · ") and got[0]["ticker"] == ""
-    svc._clock["t"] = MORNING + timedelta(days=1)  # the next Korean day: one more
-    svc.briefing_tick()
-    assert len([a for a in svc.judge.alerts() if a["kind"] == "BRIEFING"]) == 2
-    # the briefing never lists its own alert among the overnight alerts
-    assert all(a["kind"] != "BRIEFING" for a in c.get("/api/briefing?refresh=true").json()["alerts"])
+    before = c.get("/api/briefing?refresh=true").json()
+    assert before["live"] is False  # no live print yet: the stored closes, said so
+    spy_prev = before["market"][0]["close"]
+    now = svc.now()
+    svc.quotes.ingest_poll("SPY", spy_prev * 1.02, now - timedelta(seconds=1), "toss")  # the live feed: SPY +2 %
+    svc.quotes.ingest_poll("NVDA", 500.0, now - timedelta(seconds=1), "toss")
+    b = c.get("/api/briefing?refresh=true").json()
+    spy = b["market"][0]
+    assert b["live"] is True and spy["live"] is True and spy["close"] == spy_prev * 1.02
+    assert abs(spy["change"] - 0.02) < 0.02  # against the last close before the live session
+    nv = next(m for m in b["account"]["movers"] if m["ticker"] == "NVDA")
+    assert nv["close"] == 500.0 and b["live_at"]
 
 
 def test_an_empty_account_says_so(client):  # noqa: F811
@@ -57,16 +58,3 @@ def test_an_empty_account_says_so(client):  # noqa: F811
     b = c.get("/api/briefing").json()
     assert b["account"]["holdings"] == 0 and b["account"]["pnl"] is None and b["account"]["movers"] == []
     assert "내 계좌" not in b["headline"]
-
-
-def test_screens_ticking_at_the_same_moment_announce_once(client):  # noqa: F811
-    import threading
-
-    _c, svc = client
-    svc._clock["t"] = MORNING
-    ts = [threading.Thread(target=svc.briefing_tick) for _ in range(6)]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
-    assert len([a for a in svc.judge.alerts() if a["kind"] == "BRIEFING"]) == 1

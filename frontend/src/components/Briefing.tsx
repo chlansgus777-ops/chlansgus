@@ -4,11 +4,12 @@ import { Change } from "./ui";
 import { useApi, usePoll } from "./useApi";
 import { pct, price } from "../format";
 
-/** 오늘 아침 브리핑 (owner 2026-09-29: "아침 브리핑 (한국시간 오전 7시)" — in the app only): the US session that ended
- * overnight for the owner's account, from 07:00 KST. Every figure carries its session; a part without data says so. */
+/** 오늘의 브리핑 (owner 2026-09-29: "고정되어 있으면 도움이 안 돼 — 오늘의 브리핑으로, 실시간으로"; in the app only): the
+ * market and my account on the live prices, what to check today. A figure without a live price says it is a close. */
 export type Briefing = {
   date_kst: string; ready: boolean; built_at: string; session: string; session_expected: string; notes: string[];
-  market: { name: string; ticker: string; close: number | null; change: number | null }[];
+  live?: boolean; live_at?: string | null;
+  market: { name: string; ticker: string; close: number | null; change: number | null; live?: boolean }[];
   account: { holdings: number; priced: number; pnl: number | null; change: number | null; movers: { ticker: string; change: number | null; pnl: number | null; close: number | null }[] };
   watch: { ticker: string; kind: "STOP" | "TARGET"; price: number; level: number; distance: number; text: string }[];
   alerts: { id: number; at: string; ticker: string; kind: string; level: string; text: string }[];
@@ -30,6 +31,10 @@ function md(d: string): string {
   return `${m}/${dd}`;
 }
 
+function kstTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
 export function signedUsd(v: number | null | undefined): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return "N/A";
   const r = Math.round(v);
@@ -38,25 +43,24 @@ export function signedUsd(v: number | null | undefined): string {
 
 export function MorningBriefing() {
   const b = useApi<Briefing>("/briefing");
-  // the numbers are end-of-session: every 10 minutes is plenty — before 07:00 every minute, so the card appears on time
-  usePoll(b.reload, b.data && !b.data.ready ? 60_000 : 600_000, true);
+  usePoll(b.reload, 3_000, true);  // it follows the live prices
   const refresh = async () => { try { await api.get("/briefing?refresh=true"); } finally { b.reload(); } };
   return b.data ? <BriefingView x={b.data} onRefresh={refresh} /> : null;
 }
 
 export function BriefingView({ x, onRefresh }: { x: Briefing; onRefresh?: () => void }) {
-  if (!x.ready) return null;  // before 07:00 KST the card is not shown (the alert announces it)
+  if (!x.date_kst || !x.market || !x.account) return null;  // an incomplete answer never breaks the home screen
   const acc = x.account;
   const refresh = () => onRefresh?.();
   const tone = (v: number | null | undefined) => (v == null ? "" : v > 0 ? "up" : v < 0 ? "down" : "");
   return (
-    <section className="brief enter" aria-label="오늘 아침 브리핑" data-testid="morning-briefing">
+    <section className="brief enter" aria-label="오늘의 브리핑" data-testid="morning-briefing">
       <div className="brief-head">
         <div className="brief-title">
           <span className="sun" aria-hidden>☀</span>
           <div>
-            <h2>오늘 아침 브리핑</h2>
-            <div className="brief-sub">{kstTitle(x.date_kst)} · 미국 {md(x.session)} 장 기준</div>
+            <h2>오늘의 브리핑</h2>
+            <div className="brief-sub">{kstTitle(x.date_kst)} · {x.live && x.live_at ? <><span className="live-dot" aria-hidden />실시간 {kstTime(x.live_at)} 기준</> : `미국 ${md(x.session)} 종가 기준`}</div>
           </div>
         </div>
         <button type="button" className="ghost sm" onClick={refresh} title="지금 다시 계산">새로 고침</button>
@@ -67,7 +71,7 @@ export function BriefingView({ x, onRefresh }: { x: Briefing; onRefresh?: () => 
           <div key={m.ticker} className={`brief-tile ${tone(m.change)}`}>
             <div className="t">{m.name}</div>
             <div className="v">{m.change == null ? <span className="muted">자료 없음</span> : pct(m.change, 2)}</div>
-            <div className="s">{m.close == null ? `${m.ticker} 종가 없음` : `${m.ticker} ${price(m.close)}`}</div>
+            <div className="s">{m.close == null ? `${m.ticker} 가격 없음` : `${m.ticker} ${price(m.close)}${m.live ? " · 실시간" : " · 종가"}`}</div>
           </div>
         ))}
         <div className={`brief-tile acct ${tone(acc.pnl)}`}>
