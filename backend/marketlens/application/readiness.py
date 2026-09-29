@@ -87,8 +87,6 @@ def categories(reg: Any, stats: dict[str, Any] | None, live_verified: dict[str, 
         DataCategory("거시", lv("macro", "READY" if fred else "BLOCKED_BY_CREDENTIAL"), "fred", "ALFRED 빈티지"),
         DataCategory("공매도 잔고", lv("short_interest", "PARTIAL"), "finra", "대상 종목 범위는 실제 호출로 확인 필요"),
         DataCategory("내부자 거래", lv("insider", "PARTIAL"), "sec-form4", "최근 공시 일부"),
-        DataCategory("옵션(IV·예상 변동폭)", "UNAVAILABLE", "-", "무료 공식 공급원 없음 → 반영 정도(Priced-In)는 Lite 추정"),
-        DataCategory("기관 보유(13F)", "UNAVAILABLE", "-", "무료 구조화 공급원 연결 안 됨"),
     )
 
 

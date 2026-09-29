@@ -488,8 +488,10 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         eb.add("macro.regime", "macro", f"주요 시장 국면 {prim}", prim, "calc", ticker_scoped=False)
 
     # ---------------------------------------------------------------- options / ownership (auxiliary)
+    # options are not part of the analysis any more (no free source): never a "missing" check or data gap. A snapshot
+    # passed in (tests, a stored replay) is still read, so an old analysis replays the same way.
     opt_check = _check_or_missing("options", inp.options is not None, inp.options.as_of if inp.options else None, inp.as_of, rules, "옵션 데이터", missing_reason=miss.get("options"))
-    opt = compute_options_metrics(inp.options) if opt_check.usable else None
+    opt = compute_options_metrics(inp.options) if opt_check.usable else None  # same freshness gate as before (replays match)
     own = inp.ownership
     si_check = _check_or_missing("short_interest", own is not None and (own.short_interest_pct_float is not None or own.short_interest_shares is not None), own.short_interest_settlement if own else None, inp.as_of, rules, "공매도 잔고(FINRA)", missing_reason=miss.get("ownership"))
     si_pct: float | None = None
@@ -560,7 +562,7 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
 
     # ---------------------------------------------------------------- data quality (per-type freshness)
     price_check = _price_check(inp.quote, pq, inp.as_of, cfg)
-    checks = (price_check, bars_check, fund_check, er_check, an_check, macro_check, news_check, opt_check, si_check)
+    checks = (price_check, bars_check, fund_check, er_check, an_check, macro_check, news_check, si_check)
     fact_map: dict[str, Fact | None] = {
         "price": _fact(price_check, price if price is not None else (inp.quote.price if inp.quote else None), inp.quote.source if inp.quote else "none"),
         "price_history": _fact(bars_check, float(len(bars)) if bars else None, src.get("bars", "none")),
@@ -569,7 +571,6 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         "analyst": _fact(an_check, 1.0 if inp.analyst else None, src.get("analyst", "none")),
         "macro": _fact(macro_check, 1.0 if inp.macro and inp.macro.series else None, src.get("macro", "none")),
         "news": _fact(news_check, 1.0 if news_check.usable else None, src.get("news", "news")),
-        "options": _fact(opt_check, 1.0 if inp.options else None, src.get("options", "none")),
         "short_interest": _fact(si_check, si_pct, own.source if own else "none"),
         "sector": Fact(1.0 if sector_known else None, "classification", quality=DataQuality.FRESH if sector_known else DataQuality.MISSING, note=None if sector_known else "업종 분류 불명확"),
     }

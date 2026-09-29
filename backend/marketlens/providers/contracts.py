@@ -130,7 +130,9 @@ class CalendarProvider(Provider, Protocol):
     def get_events(self, start: date, end: date) -> list[CatalystEvent]: ...
 
 
+# options (IV, expected move) and 13F institutional holdings were removed on 2026-09-29: no free source delivers them,
+# and a chain that can only fail showed up as "공급자 중단" and "데이터 없음" on every screen (owner request)
 PROVIDER_KINDS = (
-    "universe", "price", "fundamental", "analyst", "news", "macro", "options",
-    "short_interest", "insider", "institutional", "calendar",
+    "universe", "price", "fundamental", "analyst", "news", "macro",
+    "short_interest", "insider", "calendar",
 )

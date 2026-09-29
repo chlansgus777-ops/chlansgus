@@ -387,8 +387,6 @@ class DataAccess:
     def valuation_history(self, t: str, multiple: str) -> Fetched:
         return self._get("analyst", "analyst", "get_valuation_history", f"{t}:{multiple}", t, multiple)
 
-    def options(self, t: str) -> Fetched:
-        return self._get("options", "options", "get_options", t, t)
 
     def short_interest(self, t: str) -> Fetched:
         return self._get("analyst", "short_interest", "get_short_interest", t, t)

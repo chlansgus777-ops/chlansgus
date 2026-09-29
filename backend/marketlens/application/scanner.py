@@ -219,7 +219,7 @@ class Scanner:
             earnings = attach_guidance(earnings, self.data.store.guidance(t, ctx.as_of), self.data.store.estimate_history(t, day), day)
         model, _ = select_sector_model(sec, self.cfg.sector_models)
         vh = take("valuation_history", self.data.valuation_history(t, model.primary_multiple))
-        options = take("options", self.data.options(t)) if full else None
+        options = None  # no options source (removed 2026-09-29)
         own = take("ownership", self.data.short_interest(t)) if full else None
         insider = take("insider", self.data.insider(t)) if full else None
         if ctx.macro is None:

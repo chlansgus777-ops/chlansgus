@@ -512,7 +512,7 @@ function StockDetail({ ticker }: { ticker: string }) {
             </div>
           </div>
         </Disclosure>
-        <Disclosure title="거시 · 기술적 흐름 · 옵션">
+        <Disclosure title="거시 · 기술적 흐름">
           <div className="g3">
             <div>
               <h3 className="t-card">거시 영향</h3>
@@ -523,11 +523,14 @@ function StockDetail({ ticker }: { ticker: string }) {
               <h3 className="t-card">기술적 흐름 <span className="caption">(진입 타이밍 참고)</span></h3>
               {a.technicals ? <div className="kv">{[["sma50", "50일 이동평균", "sma"], ["sma200", "200일 이동평균", "sma"], ["rsi14", "RSI(14)", "rsi14"], ["atr14", "ATR(14)", "atr14"], ["rs_6m", "6개월 상대강도", "rs_6m"]].map(([k, l, g]) => <Fragment key={k}><span className="k"><Term k={g!}>{l}</Term></span><span>{num(a.technicals?.[k!] as number | null)}</span></Fragment>)}</div> : <Empty>가격 이력 부족</Empty>}
             </div>
-            <div>
-              <h3 className="t-card">옵션 · 공매도</h3>
-              {a.options ? <div className="caption"><Term k="iv_rank">IV 순위</Term> {num(a.options["iv_rank"] ?? null)} · <Term k="expected_move">예상 변동폭</Term> ±{pct(a.options["expected_move"] ?? null, 1, false)}</div> : <div className="caption">옵션 데이터 없음(무료 공급원 없음)</div>}
-              {a.short_interest_pct != null && <div className="caption"><Term k="short_interest" /> {pct(a.short_interest_pct, 1, false)}</div>}
-            </div>
+            {/* options are no longer collected (no free source); an older analysis that has them still shows them */}
+            {(a.options || a.short_interest_pct != null) && (
+              <div>
+                <h3 className="t-card">{a.options ? "옵션 · 공매도" : "공매도"}</h3>
+                {a.options ? <div className="caption"><Term k="iv_rank">IV 순위</Term> {num(a.options["iv_rank"] ?? null)} · <Term k="expected_move">예상 변동폭</Term> ±{pct(a.options["expected_move"] ?? null, 1, false)}</div> : null}
+                {a.short_interest_pct != null && <div className="caption"><Term k="short_interest" /> {pct(a.short_interest_pct, 1, false)}</div>}
+              </div>
+            )}
           </div>
         </Disclosure>
         <Disclosure title="이슈 상세 · 선반영 정도 · 시나리오">

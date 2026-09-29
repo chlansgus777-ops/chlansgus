@@ -333,8 +333,6 @@ def _unknowns(r: Mapping[str, Any]) -> list[dict[str, Any]]:
                         "impact": "이 기간의 추정치 변화는 점수에 넣지 않았습니다", "fix": "매일 분석하면 기록이 쌓여 자동으로 채워집니다", "label": "추정치"})
     if r.get("sector_known") is False:
         out.append({"text": "업종 분류가 불확실합니다", "impact": "업종별 모델 대신 일반 모델을 썼고, 매수는 소량으로 제한됩니다", "fix": FIX_KO["sector"], "label": "업종"})
-    if not r.get("options"):
-        out.append({"text": "옵션 시장의 예상 변동폭이 없습니다", "impact": "실적 발표 전후 변동 위험은 일정만으로 판단합니다", "fix": FIX_KO["options"], "label": "옵션"})
     return out
 
 

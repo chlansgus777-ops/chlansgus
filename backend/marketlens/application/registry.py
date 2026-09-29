@@ -45,10 +45,8 @@ def build_mock_registry(health: HealthRegistry | None = None, now: datetime | No
         "analyst": [m.MockAnalystProvider(w)],
         "news": [m.MockNewsProvider(w)],
         "macro": [m.MockMacroProvider(w)],
-        "options": [m.MockOptionsProvider(w)],
         "short_interest": [own],
         "insider": [own],
-        "institutional": [own],
         "calendar": [m.MockCalendarProvider(w)],
     }
     chains = {k: ProviderChain(k, impl[k], DataMode.MOCK, health, sleep=lambda _s: None) for k in PROVIDER_KINDS}
@@ -80,10 +78,8 @@ def build_live_registry(settings: Settings, health: HealthRegistry | None = None
         "analyst": [fin, AlphaVantageEstimatesProvider(settings.alphavantage_api_key, transport=transport, **fast)],
         "news": [fin],
         "macro": [fred],
-        "options": [U("options", "무료 옵션 데이터 공급원 없음 (MISSING)")],
         "short_interest": [FinraShortInterestProvider(settings.finra_api_key, settings.finra_api_secret, transport=transport, **fast)],
         "insider": [sec],  # SEC Form 4 (free)
-        "institutional": [U("institutional", "13F 기관 보유는 CUSIP 매핑이 필요해 미구현 (MISSING)")],
         "calendar": [fin],
     }
     extra = {"sleep": sleep} if sleep is not None else {}
