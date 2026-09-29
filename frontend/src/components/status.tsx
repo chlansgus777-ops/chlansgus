@@ -4,6 +4,8 @@ import { ago, clockPair, stampEt } from "../format";
 import { HEALTH_KO, QUALITY_INFO, READINESS_KO, SESSION_KO } from "../i18n";
 import type { SystemInfo } from "../types";
 import { QuoteFeedStatus } from "./LivePrice";
+import { AlertCenter } from "./LiveZone";
+import { useAppState } from "../quotes";
 import type { ReadinessInfo, SyncJob } from "./Readiness";
 import { type ApiState, invalidateAfterSync, invalidateApi, useApi, usePoll } from "./useApi";
 
@@ -180,9 +182,23 @@ export function StatusBar() {
       ) : <Item icon="○" to="/settings?tab=status" testId="sb-providers"><span className="k">공급자</span><b>호출 전</b></Item>)}
       <span className="grow" />
       <span className="tools">
+        <AutoScanStatus />
         {sys?.mode !== "MOCK" && <QuoteFeedStatus />}  {/* in MOCK the banner already says every price is simulated */}
+        <AlertCenter />
         {rr &&<Link to="/settings?tab=data" className={`readiness-link ${rr.tone}`} title={rr.help} data-testid="readiness-badge">추천 준비도 · {rr.label}</Link>}
       </span>
     </div>
   );
+}
+
+/** The automatic scan: running now, or when the next one is due and why (the owner never has to press scan). */
+function AutoScanStatus() {
+  const a = useAppState();
+  const st = useStatus();
+  if (!a?.auto_scan) return null;
+  if (a.scan_running) return <span className="quote-feed on" data-testid="auto-scan" title="시장 전체를 다시 분석하는 중입니다 — 끝나면 모든 화면이 저절로 바뀝니다"><i />자동 스캔 중</span>;
+  const due = a.auto_scan.next_due ? Date.parse(a.auto_scan.next_due) : null;
+  const mins = due !== null && st ? Math.max(0, Math.round((due - st.nowMs) / 60000)) : null;
+  const text = mins === null ? a.auto_scan.why : mins <= 1 ? "곧 자동 스캔" : `자동 스캔 ${mins}분 뒤`;
+  return <span className="quote-feed" data-testid="auto-scan" title={`${a.auto_scan.why} · ${a.auto_scan.interval_minutes}분마다 · 가격 판정(매수 구간·손절·목표)은 스캔과 상관없이 체결마다 바뀝니다`}><i />{text}</span>;
 }

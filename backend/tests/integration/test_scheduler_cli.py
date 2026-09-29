@@ -42,7 +42,12 @@ def test_live_schedule_scans_only_when_a_scan_can_give_a_verdict():
     LIVE: interval scans in the regular session, one scan on the final close once the market is fully closed."""
     svc = FakeSvc()
     svc.store = object()  # LIVE
+    svc.ready = "NOT READY"
+    svc.readiness_view = lambda wait=0.0: {"recommendation_readiness": svc.ready}
     s = BackgroundScheduler(svc)
+    s.step(datetime(2026, 9, 25, 14, 0, tzinfo=timezone.utc))  # regular session, but the data is not prepared yet
+    assert svc.scans == 0
+    svc.ready = "LIMITED"
     s.step(datetime(2026, 9, 25, 11, 0, tzinfo=timezone.utc))  # 07:00 ET pre-market
     assert svc.scans == 0
     s.step(datetime(2026, 9, 25, 14, 0, tzinfo=timezone.utc))  # 10:00 ET regular

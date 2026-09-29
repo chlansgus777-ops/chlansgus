@@ -5,6 +5,7 @@ import { RISK_KO, ko } from "../i18n";
 import type { OppRow } from "../types";
 import { useQuote } from "../quotes";
 import { LivePrice } from "./LivePrice";
+import { LiveZone } from "./LiveZone";
 import { Action, Quality, StatusBadge, Vetoes } from "./ui";
 
 type Key = "rank" | "ticker" | "action" | "score" | "price" | "max_buy" | "rr" | "current_status" | "risk";
@@ -97,7 +98,7 @@ export function OppTable({ rows, compact = false, commonStale = false }: { rows:
         <thead>
           <tr>
             {cols.map(([k, l, help, numeric]) => (
-              <th key={k} title={help} className={`sortable${numeric ? " num" : ""}`} aria-sort={sort === k ? (asc ? "ascending" : "descending") : "none"}
+              <th key={k} data-col={k} title={help} className={`sortable${numeric ? " num" : ""}`} aria-sort={sort === k ? (asc ? "ascending" : "descending") : "none"}
                   tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (sort === k) setAsc(!asc); else { setSort(k); setAsc(true); } } }}
                   onClick={() => { if (sort === k) setAsc(!asc); else { setSort(k); setAsc(true); } }}>
                 {l}{sort === k ? <span className="dir">{asc ? "▲" : "▼"}</span> : null}
@@ -108,7 +109,7 @@ export function OppTable({ rows, compact = false, commonStale = false }: { rows:
         <tbody>
           {sorted.map((r) => (
             <tr key={r.id} className={r.actionable_now === false ? "row-expired" : ""} onDoubleClick={() => nav(`/stocks/${r.ticker}`)}>
-              {cols.map(([k, , , numeric]) => <td key={k} className={numeric ? "num" : undefined}>{cell(r, k, commonStale)}</td>)}
+              {cols.map(([k, , , numeric]) => <td key={k} data-col={k} className={numeric ? "num" : undefined}>{cell(r, k, commonStale)}</td>)}
             </tr>
           ))}
         </tbody>
@@ -149,11 +150,18 @@ function cell(r: OppRow, k: Key, commonStale = false) {
     case "rr":
       return r.rr == null ? <span className="muted" title="분석 때 현재가가 없어 계산하지 않음">—</span> : <span className={r.action === "DATA INSUFFICIENT" ? "muted" : r.rr < 2 ? "warn" : undefined}>{num(r.rr, 2)}</span>;
     case "current_status":
-      return <StatusBadge s={r.current_status} reason={r.current_status_reason} action={r.action} />;
+      // the live verdict when this very recommendation is the one judged on the stream; else the stored status
+      return <span className="stack-tight"><LiveZone ticker={r.ticker} recId={r.id} compact /><StatusBadgeUnlessLive r={r} /></span>;
     case "risk":
       return r.catalyst ? <span title={r.catalyst_date ?? ""}><span className={r.risk === "EXTREME" || r.risk === "HIGH" ? "neg" : r.risk === "MEDIUM" ? "warn" : "muted"}>{ko(RISK_KO, r.risk, "N/A")}</span> <span className="caption">· {r.catalyst.length > 22 ? `${r.catalyst.slice(0, 22)}…` : r.catalyst}</span></span>
         : <span className={r.risk === "EXTREME" || r.risk === "HIGH" ? "neg" : r.risk === "MEDIUM" ? "warn" : "muted"}>{ko(RISK_KO, r.risk, "N/A")}</span>;
     default:
       return null;
   }
+}
+
+function StatusBadgeUnlessLive({ r }: { r: OppRow }) {
+  const { row } = useQuote(r.ticker);
+  if (row?.judge && row.judge.rec_id === r.id && row.judge.zone !== "NO_PLAN") return null;
+  return <StatusBadge s={r.current_status} reason={r.current_status_reason} action={r.action} />;
 }

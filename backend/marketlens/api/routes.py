@@ -508,6 +508,7 @@ def set_portfolio(req: Request, body: PortfolioIn) -> dict[str, Any]:
         for h in body.holdings:
             repo.upsert_holding(ss, _ticker(h.ticker), h.quantity, h.cost_basis)
         ss.commit()
+    s.invalidate_live_plans()  # held flags / costs of the live verdicts
     return portfolio(req)
 
 
@@ -515,7 +516,10 @@ def set_portfolio(req: Request, body: PortfolioIn) -> dict[str, Any]:
 def remove_holding(req: Request, ticker: str, trades_only: bool = False, security: str | None = None) -> dict[str, Any]:
     """Removes a stock from the portfolio: its entered line and all its trade records, in one transaction
     (``trades_only``: the trade records only — "delete all records" in the ledger keeps an entered line)."""
-    return svc(req).remove_holding(_ticker(ticker), keep_manual=trades_only, security=security)
+    s = svc(req)
+    out = s.remove_holding(_ticker(ticker), keep_manual=trades_only, security=security)
+    s.invalidate_live_plans()
+    return out
 
 
 class TradeIn(BaseModel):
@@ -567,6 +571,7 @@ def add_transaction(req: Request, body: TradeIn) -> dict[str, Any]:
         tid = s.add_transaction(_ticker(body.ticker), body.day, body.kind, body.quantity, body.price, body.fees, body.amount, body.split_from, body.split_to, body.note)
     except LedgerError as e:
         raise HTTPException(400, str(e)) from None
+    s.invalidate_live_plans()
     return {"added": tid}
 
 
@@ -581,6 +586,7 @@ def delete_transaction(req: Request, tid: int) -> dict[str, Any]:
         raise HTTPException(404, str(e)) from None
     except LedgerError as e:
         raise HTTPException(400, str(e)) from None
+    s.invalidate_live_plans()
     return {"deleted": tid}
 
 
@@ -601,6 +607,8 @@ def add_watch(req: Request, ticker: str) -> dict[str, str]:
     with s.sf() as ss:
         repo.add_watch(ss, _ticker(ticker))
         ss.commit()
+    s.quotes.refresh_pinned()
+    s.invalidate_live_plans()  # the watched flag of the live verdicts and the quote subscription follow at once
     return {"status": "ok"}
 
 
@@ -610,6 +618,8 @@ def del_watch(req: Request, ticker: str) -> dict[str, str]:
     with s.sf() as ss:
         repo.remove_watch(ss, _ticker(ticker))
         ss.commit()
+    s.quotes.refresh_pinned()
+    s.invalidate_live_plans()  # the watched flag of the live verdicts and the quote subscription follow at once
     return {"status": "ok"}
 
 

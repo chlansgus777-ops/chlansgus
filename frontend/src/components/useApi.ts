@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { ApiError, api, onMutation } from "../api";
+import { onAppState } from "../quotes";
 
 export type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -102,6 +103,16 @@ const AFFECTS: [RegExp, string[]][] = [
 onMutation((_method, path) => {
   const hit = AFFECTS.find(([re]) => re.test(path));
   invalidateApi(hit ? hit[1] : undefined); // an unknown change (settings…) outdates everything
+});
+
+// A scan or data preparation that ran in the background (automatic scan, another window) is announced on the live
+// stream: the screens showing its results ask again at once — nobody has to press anything or revisit a menu.
+onAppState((prev, next) => {
+  if (!prev) return;
+  if (prev.scan_id !== next.scan_id || (prev.scan_running && !next.scan_running)) {
+    invalidateApi(["/dashboard", "/opportunities", "/stocks/", "/watchlist", "/performance", "/issues", "/scan", "/readiness"]);
+  }
+  if (prev.sync_running && !next.sync_running) invalidateAfterSync();
 });
 
 /** Data preparation finished (seen by the status poller): prices, readiness and everything computed from them. */

@@ -35,6 +35,32 @@ class BackgroundScheduler:
             except Exception:  # keep the scheduler alive; the failure is logged with traceback
                 log.exception("scheduled job failed")
 
+    def _publish(self, now: datetime, session: TradingSession, live: bool, interval: float) -> None:
+        """When the next automatic scan is due, for the screens (``service.schedule_state``)."""
+        from datetime import timedelta
+
+        nxt: datetime | None = None
+        why = ""
+        if session == TradingSession.REGULAR or (not live and session in (TradingSession.PREMARKET, TradingSession.AFTER_HOURS)):
+            nxt = now if self._last_scan is None else max(now, self._last_scan + timedelta(seconds=interval))
+            why = "정규장 주기 스캔" if session == TradingSession.REGULAR else "주기 스캔"
+        elif live and session == TradingSession.CLOSED:
+            closed_at = session_close_utc(last_completed_session(now))
+            if self._last_scan is None or self._last_scan < closed_at:
+                nxt, why = now, "종가 기준 스캔"
+            else:
+                why = "다음 정규장에 다시 스캔"
+        else:
+            why = "장전·시간외에는 판단용 현재가가 없어 정규장·장 마감 뒤에 스캔"
+        self.svc.schedule_state = {"enabled": True, "interval_minutes": round(interval / 60), "last_auto_scan": self._last_scan.isoformat() if self._last_scan else None,
+                                   "next_due": nxt.isoformat() if nxt else None, "why": why}
+
+    def _data_ready(self) -> bool:
+        try:
+            return self.svc.readiness_view(wait=0.0).get("recommendation_readiness") != "NOT READY"
+        except Exception:  # noqa: BLE001 - unknown readiness: do not scan on it
+            return False
+
     def step(self, now: datetime) -> None:
         session = classify_session(now)
         interval = self.svc.settings.scan_interval_minutes * 60
@@ -51,10 +77,20 @@ class BackgroundScheduler:
         else:  # MOCK prices are generated for any time
             due = session in (TradingSession.PREMARKET, TradingSession.REGULAR, TradingSession.AFTER_HOURS) and (
                 self._last_scan is None or (now - self._last_scan).total_seconds() >= interval)
+        if due and live and not self._data_ready():
+            due = False  # before the data is prepared a scan judges nothing and spends the free request limits
+        self._publish(now, session, live, interval)
         if due:
-            # the AI committee costs money on a paid provider: automatic scans skip it unless the user opted in
-            self.svc.run_scan(run_committee=bool(getattr(self.svc.settings, "ai_committee_on_schedule", False)))
+            from marketlens.application.services import ScanRefused
+
+            try:
+                # the AI committee costs money on a paid provider: automatic scans skip it unless the user opted in
+                self.svc.run_scan(run_committee=bool(getattr(self.svc.settings, "ai_committee_on_schedule", False)))
+            except ScanRefused as e:  # a scan the user started, or data preparation, is running: try at the next tick
+                log.info("scheduled scan skipped: %s", e)
+                return
             self._last_scan = now
+            self._publish(now, session, live, interval)  # the next due time at once, not a minute later
         day = to_ny(now).date()
         if session == TradingSession.AFTER_HOURS and self._last_eval_day != day:
             if getattr(self.svc, "store", None) is not None:

@@ -34,8 +34,17 @@ class ViewIn(BaseModel):
 
 @router.get("/quotes")
 def quotes(req: Request) -> dict[str, Any]:
-    hub = svc(req).quotes
+    s = svc(req)
+    s.live_plans()
+    hub = s.quotes
     return {"version": hub.version, "rows": hub.rows(), "status": hub.status()}
+
+
+@router.get("/alerts")
+def alerts(req: Request, after: int = 0) -> dict[str, Any]:
+    """Zone changes seen on live prices (buy zone entered / left, stop or target hit, automatic re-analysis)."""
+    j = svc(req).judge
+    return {"alerts": j.alerts(after=after), "last_id": j.last_alert_id}
 
 
 @router.post("/quotes/view")
@@ -55,8 +64,10 @@ def view(req: Request, body: ViewIn) -> dict[str, Any]:
 @router.post("/quotes/refresh-subscriptions")
 def refresh_subscriptions(req: Request) -> dict[str, Any]:
     """Called by the UI after a watchlist or holdings change, so the subscription follows at once."""
-    hub = svc(req).quotes
+    s = svc(req)
+    hub = s.quotes
     hub.refresh_pinned()
+    s.invalidate_live_plans()  # held / watched flags of the verdicts follow the change
     subscribed, over = hub.plan()
     return {"subscribed": subscribed, "over_limit": over}
 
@@ -67,13 +78,19 @@ def _sse(event: str, data: Any) -> bytes:
 
 @router.get("/quotes/stream")
 async def stream(req: Request) -> StreamingResponse:
-    hub = svc(req).quotes
+    s = svc(req)
+    hub = s.quotes
+    judge = s.judge
+    s.live_plans()
 
     async def gen() -> AsyncIterator[bytes]:
         v = hub.version
         first = hub.rows()
         sent_state = {r["ticker"]: r["state"] for r in first}
-        yield _sse("hello", {"version": v, "rows": first, "status": hub.status()})
+        last_alert = judge.last_alert_id
+        last_app = await asyncio.to_thread(s.app_state)
+        yield _sse("app", last_app)
+        yield _sse("hello", {"version": v, "rows": first, "status": hub.status(), "alerts": judge.alerts(limit=20), "last_alert": last_alert})
         last_beat = last_status = time.monotonic()
         while True:
             if await req.is_disconnected():
@@ -88,8 +105,18 @@ async def stream(req: Request) -> StreamingResponse:
                 if rows:
                     sent_state.update({r["ticker"]: r["state"] for r in rows})
                     yield _sse("quotes", {"version": v, "rows": rows, "sent_at": time.time()})
+            if judge.last_alert_id != last_alert:
+                new = judge.alerts(after=last_alert)
+                last_alert = judge.last_alert_id
+                if new:
+                    yield _sse("alerts", {"alerts": new})
             if now - last_status >= STATUS_EVERY_S:
                 last_status = now
+                s.live_plans()  # background refresh when older than LIVE_PLAN_AGE (cheap when fresh)
+                app = await asyncio.to_thread(s.app_state)
+                if app != last_app:
+                    last_app = app
+                    yield _sse("app", app)
                 # states that change with the clock alone (실시간 → 최근 체결 없음, the session bell)
                 aged = [r for r in hub.rows() if sent_state.get(r["ticker"]) != r["state"]]
                 if aged:

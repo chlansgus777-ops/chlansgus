@@ -5,6 +5,7 @@ import { api } from "../api";
 import { CommitteeSummary, CommitteeView } from "../components/CommitteeView";
 import { IRefresh, IStar } from "../components/icons";
 import { LivePrice } from "../components/LivePrice";
+import { LivePlanLine, LiveZone, UnlessLive } from "../components/LiveZone";
 import { refreshQuoteSubscriptions, useViewQuotes } from "../quotes";
 import { rememberStock } from "../components/QuickSearch";
 import { PlanChart } from "../components/PlanChart";
@@ -217,7 +218,8 @@ function StockDetail({ ticker }: { ticker: string }) {
           <span><Link to="/stocks">종목</Link> / {a.security.exchange} · {a.sector_known === false ? <span className="warn">업종 분류 불명확</span> : a.security.industry}{a.security.is_adr ? ` · 해외 발행사(${a.security.country_of_incorporation})` : ""}</span>
           <span className="right">
             {a.mode === "MOCK" && <span className="pill tone-danger">모의 데이터</span>}
-            <StatusBadge s={rec.current_status} reason={rec.current_status_reason} action={finalAction} />
+            <LiveZone ticker={a.ticker} />
+            <UnlessLive ticker={a.ticker} recId={rec.id}><StatusBadge s={rec.current_status} reason={rec.current_status_reason} action={finalAction} /></UnlessLive>
           </span>
         </div>
         <div className="ident">
@@ -241,9 +243,9 @@ function StockDetail({ ticker }: { ticker: string }) {
                     {rec.revalidated_price != null && rec.revalidated_price !== priceNow ? <> · 재확인 {price(rec.revalidated_price)}</> : null}
                   </span>} />
           <Metric title={<Term k="max_buy">최대 매수가</Term>} value={e ? price(e.max_buy) : NO_DATA} testId="tile-maxbuy" tone={zoneTone}
-                  sub={<>{zone.text}{distMax !== null && zone.tone !== "neutral" ? ` · 분석 기준가 대비 ${pct(distMax)}` : ""}</>} />
+                  sub={<LivePlanLine ticker={a.ticker} recId={rec.id} level="max" fallback={<>{zone.text}{distMax !== null && zone.tone !== "neutral" ? ` · 분석 기준가 대비 ${pct(distMax)}` : ""}</>} />} />
           <Metric title={<Term k="stop">손절 기준(종가)</Term>} value={e ? price(e.stop) : NO_DATA} testId="tile-stop"
-                  sub={e ? `분석 기준가 대비 ${pct(distStop)} · 논리 철회 조건은 ⑤` : "가격 계획 없음"} />
+                  sub={e ? <LivePlanLine ticker={a.ticker} recId={rec.id} level="stop" fallback={`분석 기준가 대비 ${pct(distStop)} · 논리 철회 조건은 ⑤`} /> : "가격 계획 없음"} />
           <Metric title="가장 큰 위험" text value={cautions[0] ?? "분석이 표시한 부정 요인 없음"} tone={cautions.length ? "warn" : undefined} testId="tile-risk" />
         </div>
         <div className="foot">
@@ -271,11 +273,11 @@ function StockDetail({ ticker }: { ticker: string }) {
       </section>
 
       <StaleData error={d.error} at={d.fetchedAt} retry={d.reload} nowMs={nowMs} />
-      {rec.current_status && rec.current_status !== "CURRENT" && finalAction !== "DATA INSUFFICIENT" && ( /* no plan to execute: the card below says why */
+      {rec.current_status && rec.current_status !== "CURRENT" && finalAction !== "DATA INSUFFICIENT" && <UnlessLive ticker={a.ticker} recId={rec.id}>{/* the live verdict replaces the stored re-check */}{( /* no plan to execute: the card below says why */
         <StatePanel kind={rec.current_status === "PLAN_INVALIDATED" ? "out_of_range" : "stale"} title={`${STATUS_INFO[rec.current_status]?.label ?? rec.current_status} — 지금은 이 계획대로 실행하지 마세요`}
                     what={<>{STATUS_INFO[rec.current_status]?.help ?? ""}{rec.current_status_reason ? <div className="caption" style={{ marginTop: 4 }}>{rec.current_status_reason}</div> : null}</>}
                     actions={<>{live?.newer !== undefined && <button onClick={d.reload}>최신 분석 보기</button>}<button className="primary" disabled={!!busy} onClick={() => setRefreshTick((t) => t + 1)}>분석 다시하기</button></>} />
-      )}
+      )}</UnlessLive>}
       {split !== 1 && a.entry && (
         <Ribbon tone="info" cap="분할 조정" testId="split-adjusted">
           분석 이후 {split > 1 ? `주식분할(1주 → ${num(split, 2)}주)` : `주식병합(${num(1 / split, 2)}주 → 1주)`}이 있어 가격 계획 전체를 현재 주식 수 기준으로 환산해 보여줍니다.

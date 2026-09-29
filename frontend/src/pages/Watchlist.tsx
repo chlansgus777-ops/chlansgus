@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { IPlus, ITrash } from "../components/icons";
+import { LiveZone } from "../components/LiveZone";
 import { LivePrice } from "../components/LivePrice";
 import { refreshQuoteSubscriptions } from "../quotes";
 import { Action, Empty, Err, Loading, StatusBadge } from "../components/ui";
@@ -55,7 +56,7 @@ export default function Watchlist() {
                     </span>
                   </td>
                   <td className="num">{price(x.latest?.max_buy)}</td>
-                  <td><StatusBadge s={x.latest?.current_status} reason={x.latest?.current_status_reason} action={x.latest?.action} /></td>
+                  <td><span className="stack-tight"><LiveZone ticker={x.ticker} compact /><StatusBadge s={x.latest?.current_status} reason={x.latest?.current_status_reason} action={x.latest?.action} /></span></td>
                   <td className="num">
                     <div className="row tight" style={{ justifyContent: "flex-end" }}>
                       {!x.latest && <button className="sm" onClick={() => nav(`/stocks/${x.ticker}`)}>분석하기</button>}

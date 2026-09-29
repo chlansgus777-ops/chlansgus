@@ -765,3 +765,10 @@ button.danger-ghost:hover:not(:disabled) { background: var(--danger-soft); }
 button.danger-solid { background: var(--danger); color: #1a0a0d; border-color: transparent; font-weight: 700; }
 .confirm-inline { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .confirm-inline .q { font-size: 12.5px; color: var(--danger); white-space: normal; max-width: 320px; text-align: right; }
+.stack-tight { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.live-signal { padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,.05); background: rgba(255,255,255,.02); color: var(--text); text-decoration: none; }
+.live-signal:hover { border-color: rgba(255,255,255,.12); }
+.veto-pill { white-space: normal; max-width: 240px; line-height: 1.35; }
+/* narrow windows: the verdict columns stay in view — rank, reward/risk and event risk are in the stock page */
+@media (max-width: 900px) { th[data-col="rank"], td[data-col="rank"], th[data-col="rr"], td[data-col="rr"], th[data-col="risk"], td[data-col="risk"] { display: none; } }
+@media (max-width: 720px) { th[data-col="score"], td[data-col="score"] { display: none; } }

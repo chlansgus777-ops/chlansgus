@@ -28,6 +28,22 @@ export interface QuoteRow {
   previous_close: number | null;
   change_pct: number | null;
   error: string | null;
+  /** the stored plan re-judged at this price (backend application/live_judge) — absent for names without a plan */
+  judge?: Judge | null;
+}
+
+export type Zone = "BUY_ZONE" | "ABOVE_MAX" | "RR_LOW" | "STOP_HIT" | "TARGET_HIT" | "HOLD_RANGE" | "NO_PLAN";
+export interface Judge {
+  rec_id: number; as_of: string; action: string; action_ko: string; bullish: boolean; zone: Zone;
+  rr_now: number | null; min_rr: number; max_buy: number | null; stop: number | null; target: number | null; ideal_entry: number | null;
+  to_max_pct: number | null; to_stop_pct: number | null; to_target_pct: number | null; move_pct: number | null;
+  quote_current: boolean; quote_age_s: number | null; valid_now: boolean; problems: string[];
+  held: boolean; watched: boolean; pnl_pct: number | null; pnl_abs: number | null; needs_reanalysis: boolean;
+}
+export interface LiveAlert { id: number; at: string; ticker: string; kind: string; level: "positive" | "warning" | "danger" | "info"; text: string; price: number | null; rec_id: number | null }
+export interface AppState {
+  scan_id: number | null; scan_as_of: string | null; scan_running: boolean; sync_running: boolean; last_alert: number;
+  auto_scan: { enabled: boolean; interval_minutes: number; last_auto_scan: string | null; next_due: string | null; why: string } | null;
 }
 
 export interface QuoteStatus {
@@ -84,8 +100,29 @@ function setLink(l: Link) {
   globalListeners.forEach((f) => f());
 }
 
+const batchListeners = new Set<() => void>();
+let judgedSnap: QuoteRow[] = [];
+let allSnap = new Map<string, QuoteRow>();
+/** Every held row by ticker (for sums over several names, such as the live portfolio value). */
+export function useAllQuotes(): Map<string, QuoteRow> {
+  useEffect(() => { retain(); return release; }, []);
+  return useSyncExternalStore((f) => { batchListeners.add(f); return () => { batchListeners.delete(f); }; }, () => allSnap);
+}
+/** Every row that carries a live verdict (for lists such as "지금 매수 구간") — refreshed once per batch of rows. */
+export function useJudgedRows(): QuoteRow[] {
+  useEffect(() => { retain(); return release; }, []);
+  return useSyncExternalStore((f) => { batchListeners.add(f); return () => { batchListeners.delete(f); }; }, () => judgedSnap);
+}
+
 /** Apply rows from the server; older versions are ignored (ordering guard). Exported for tests. */
 export function applyRows(list: QuoteRow[], now = Date.now()) {
+  applyRowsInner(list, now);
+  allSnap = new Map(rows);
+  judgedSnap = [...rows.values()].filter((r) => r.judge);
+  batchListeners.forEach((f) => f());
+}
+
+function applyRowsInner(list: QuoteRow[], now: number) {
   for (const r of list) {
     const cur = rows.get(r.ticker);
     if (cur && cur.version >= r.version) continue;
@@ -107,6 +144,66 @@ function setStatus(s: QuoteStatus) {
   globalListeners.forEach((f) => f());
 }
 
+// ------------------------------------------------------------------ alerts and background work (same stream)
+const ALERTS_KEPT = 50;
+let alertList: LiveAlert[] = [];
+let lastSeenAlert = 0;  // the newest alert the owner has looked at (the bell's unread count)
+const alertListeners = new Set<() => void>();
+let appState: AppState | null = null;
+const appListeners = new Set<() => void>();
+
+function readSeen(): number {
+  try { return Number(localStorage.getItem("ml.alerts.seen") ?? 0) || 0; } catch { return 0; }
+}
+
+/** Add alerts (dedup by id, newest last). ``fresh`` marks the ones that arrived live (shown as toasts). */
+export function applyAlerts(list: LiveAlert[], fresh = true) {
+  const have = new Set(alertList.map((a) => a.id));
+  const add = list.filter((a) => !have.has(a.id));
+  if (!add.length) return;
+  alertList = [...alertList, ...add].sort((a, b) => a.id - b.id).slice(-ALERTS_KEPT);
+  if (!lastSeenAlert) lastSeenAlert = readSeen();
+  if (fresh) for (const a of add) toastQueue.push(a);
+  alertListeners.forEach((f) => f());
+}
+
+export const toastQueue: LiveAlert[] = [];
+
+export function markAlertsSeen() {
+  lastSeenAlert = alertList.at(-1)?.id ?? lastSeenAlert;
+  try { localStorage.setItem("ml.alerts.seen", String(lastSeenAlert)); } catch { /* private window: the count resets */ }
+  alertListeners.forEach((f) => f());
+}
+
+let alertSnap = { alerts: alertList, unread: 0 };
+function alertSnapshot() {
+  const unread = alertList.filter((a) => a.id > (lastSeenAlert || readSeen())).length;
+  if (alertSnap.alerts !== alertList || alertSnap.unread !== unread) alertSnap = { alerts: alertList, unread };
+  return alertSnap;
+}
+
+export function useAlerts(): { alerts: LiveAlert[]; unread: number } {
+  useEffect(() => { retain(); return release; }, []);
+  return useSyncExternalStore((f) => { alertListeners.add(f); return () => { alertListeners.delete(f); }; }, alertSnapshot);
+}
+
+type AppHook = (prev: AppState | null, next: AppState) => void;
+const appHooks = new Set<AppHook>();
+/** Screens' cache invalidation hooks: called when a background scan finished or data preparation ended. */
+export function onAppState(f: AppHook): () => void { appHooks.add(f); return () => { appHooks.delete(f); }; }
+
+function setApp(next: AppState) {
+  const prev = appState;
+  appState = next;
+  appHooks.forEach((f) => f(prev, next));
+  appListeners.forEach((f) => f());
+}
+
+export function useAppState(): AppState | null {
+  useEffect(() => { retain(); return release; }, []);
+  return useSyncExternalStore((f) => { appListeners.add(f); return () => { appListeners.delete(f); }; }, () => appState);
+}
+
 /** Parse one SSE block ("event: x\ndata: {...}"). Exported for tests. */
 export function handleEvent(block: string) {
   let ev = "message";
@@ -116,11 +213,16 @@ export function handleEvent(block: string) {
     else if (line.startsWith("data:")) data.push(line.slice(5).trim());
   }
   if (!data.length) return;
-  let j: { rows?: QuoteRow[]; status?: QuoteStatus } & Partial<QuoteStatus>;
+  let j: { rows?: QuoteRow[]; status?: QuoteStatus; alerts?: LiveAlert[] } & Partial<QuoteStatus>;
   try { j = JSON.parse(data.join("\n")); } catch { return; }
   if (ev === "hello") {
     if (j.rows) applyRows(j.rows);
     if (j.status) setStatus(j.status);
+    if (j.alerts) applyAlerts(j.alerts, false);  // the log so far: listed, not popped up again
+  } else if (ev === "alerts") {
+    if (j.alerts) applyAlerts(j.alerts);
+  } else if (ev === "app") {
+    setApp(j as unknown as AppState);
   } else if (ev === "quotes") {
     if (j.rows) applyRows(j.rows);
   } else if (ev === "status") {
@@ -302,6 +404,9 @@ export function stateLabel(row: QuoteRow | undefined, l: Link): string {
 /** Test hook: clear the store. */
 export function _resetQuotes() {
   rows.clear();
+  alertList = [];
+  toastQueue.length = 0;
+  appState = null;
   status = null;
   link = "idle";
   linkSnap = { link, status };

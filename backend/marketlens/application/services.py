@@ -22,16 +22,17 @@ from marketlens.application.graph_seed import GraphSeed
 from marketlens.application.issue_engine import news_for_ticker
 from marketlens.application.market_store import MarketStore
 from marketlens.application.pipeline import AnalysisInputs, AnalysisResult
+from marketlens.application.live_judge import LiveJudge, plans_from_rows
 from marketlens.application.refresher import Refresher, Snapshot
 from marketlens.application.registry import ProviderRegistry, build_registry
 from marketlens.application.replay import ReplayOutcome, config_snapshot, replay
 from marketlens.application.scanner import NEWS_LOOKBACK, ScanContext, ScanResult, Scanner
 from marketlens.application.theses import ThesisBook
 from marketlens.config import AGENT_PROMPT_VERSION, CONFIG_DIR, SCHEMA_VERSION, ModelConfig, Settings, code_version, load_model_config
-from marketlens.domain.enums import BULLISH_ACTIONS, Action, DataMode
+from marketlens.domain.enums import ACTION_KO, BULLISH_ACTIONS, Action, DataMode, TradingSession
 from marketlens.domain.freshness import PlanCheck, RecommendationFreshness, recommendation_freshness
 from marketlens.domain.corporate_actions import ShareBasis, analysis_basis, encoded_split_keys, share_multiplier
-from marketlens.domain.market_calendar import UTC, to_ny
+from marketlens.domain.market_calendar import UTC, classify_session, to_ny
 from marketlens.domain.paper import position_notional
 from marketlens.domain.ledger import LedgerError, LedgerNotFound, Trade, check_delete, check_new, positions
 from marketlens.domain.portfolio import Holding, Portfolio
@@ -58,6 +59,7 @@ class ProviderUnavailableForView(Exception):
     """A screen's background read found no data (the reason is shown; the last good value is kept)."""
 
 
+REANALYZE_WHY = {"STOP_HIT": "손절 기준 도달", "TARGET_HIT": "목표가 도달"}
 PLAN_PRICE_FIELDS = ("ideal_entry", "acceptable_low", "acceptable_high", "max_buy", "add_zone_low", "add_zone_high", "stop", "target1", "target2",
                      "support_used", "resistance_used")
 
@@ -231,6 +233,12 @@ class MarketLensService:
         self.quotes, self._quote_stream = self._build_quotes()
         # screen reads never wait for a provider or a market-wide recount: last good result + one background refresh
         self.refresher = Refresher(workers=3, wall=self.now)
+        # the price-dependent verdict on every quote (buy zone, stop, target, live reward/risk) + alerts
+        self.judge = LiveJudge(now=self.now)
+        self.quotes.annotate = self.judge.annotate
+        self.quotes.on_price = self.judge.observe
+        self.judge.on_reanalyze = self.request_reanalysis
+        self._reanalyzed: dict[str, float] = {}
         self._readiness_lock = threading.Lock()
         self._readiness_cache: tuple[Any, Any, datetime] | None = None  # (data key, coverage counts, counted at)
         self._readiness_started = 0.0
@@ -459,6 +467,77 @@ class MarketLensService:
             check_delete([ledger_trade(r) for r in group["rows"]], tid, group["splits"], today)
             repo.delete_transaction(s, tid)
             s.commit()
+
+    # ------------------------------------------------------------------ real time: live plans, alerts, re-analysis
+    LIVE_PLAN_AGE = 300.0
+    LIVE_CANDIDATES = 15  # top buy calls pinned to the quote stream even when no screen shows them
+    REANALYZE_EVERY = 1800.0  # one automatic re-analysis per name at most every 30 minutes
+    REANALYZE_PER_HOUR = 20  # and at most this many an hour (the free providers' limits are shared with everything else)
+
+    def live_plans(self) -> None:
+        """Keep the judge's plans current (background, at most every ``LIVE_PLAN_AGE``) — called by the quote routes."""
+        self.refresher.get("live-plans", self._load_live_plans, max_age=self.LIVE_PLAN_AGE, retry_after=60)
+
+    def invalidate_live_plans(self) -> None:
+        self.refresher.invalidate("live-plans")
+        self.live_plans()
+
+    def _load_live_plans(self) -> int:
+        with self.sf() as s:
+            pf = self.portfolio(s)
+            held = {h.ticker: (h.cost_basis, h.quantity) for h in pf.holdings}
+            watched = {w.ticker for w in repo.watchlist(s)}
+            rows: list[RecommendationRow] = []
+            scan = repo.latest_scan(s, mode=self.mode.value)
+            if scan is not None:
+                rows.extend(r for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None and r.rank <= 60)
+            for t in sorted(set(held) | watched):
+                r = self.latest_company_recommendation(s, t)
+                if r is not None:
+                    rows.insert(0, r)  # a name's own newest analysis wins over its scan row
+            rows.sort(key=lambda r: r.as_of, reverse=True)
+            plans = plans_from_rows(rows, self.levels_now, self.base_cfg.decision.min_rr, held, watched)
+        self.judge.set_plans(plans)
+        bullish = sorted((p for p in plans if p.bullish and not p.held), key=lambda p: p.as_of, reverse=True)
+        self.quotes.set_pinned("candidates", [p.ticker for p in bullish[: self.LIVE_CANDIDATES]])
+        self.quotes.touch_all()  # every row goes out again with its new verdict
+        return len(plans)
+
+    def app_state(self) -> dict[str, Any]:
+        """What the screens need to follow background work without being asked: the newest scan (a new id → reload),
+        whether a scan or data preparation runs now, and when the next automatic scan is due."""
+        with self.sf() as s:
+            scan = repo.latest_scan(s, mode=self.mode.value)
+        return {"scan_id": scan.id if scan else None, "scan_as_of": scan.as_of.isoformat() if scan else None,
+                "scan_running": self._lock.locked(), "sync_running": self._sync_run.locked(),
+                "auto_scan": getattr(self, "schedule_state", None), "last_alert": self.judge.last_alert_id}
+
+    def request_reanalysis(self, ticker: str, reason: str) -> bool:
+        """A name hit its stop or target, or moved far since its analysis: analyse it again in the background — only
+        when a price can decide (regular session, or the market fully closed), at most every 30 min per name and 20 an
+        hour in all. Returns whether a job was started."""
+        if classify_session(self.now()) not in (TradingSession.REGULAR, TradingSession.CLOSED):
+            return False
+        now = time.monotonic()
+        with self._ledger_lock:
+            if now - self._reanalyzed.get(ticker, -1e9) < self.REANALYZE_EVERY:
+                return False
+            if sum(1 for v in self._reanalyzed.values() if now - v < 3600) >= self.REANALYZE_PER_HOUR:
+                return False
+            self._reanalyzed[ticker] = now
+        before = self.judge.plan(ticker)
+
+        def job() -> str:
+            r, _c, _id = self.analyze(ticker, run_committee=False, persist=True)
+            after = r.decision.action.value
+            was = before.action if before else None
+            text = f"{ticker} 자동 재분석 ({REANALYZE_WHY.get(reason, '가격 변동')}) — " + (
+                f"{ACTION_KO.get(Action(was), was)} → {ACTION_KO.get(Action(after), after)}" if was and was != after else f"판단 유지: {ACTION_KO.get(Action(after), after)}")
+            self.judge.add(ticker, "REANALYZED", "warning" if was and was != after else "info", text, r.price, _id)
+            return after
+
+        self.refresher.get(f"reanalyze:{ticker}", job, max_age=self.REANALYZE_EVERY, retry_after=self.REANALYZE_EVERY)
+        return True
 
     def remove_holding(self, ticker: str, keep_manual: bool = False, security: str | None = None) -> dict[str, Any]:
         """Take a stock out of the portfolio in one step: its entered line and every trade record of the same security
@@ -707,6 +786,7 @@ class MarketLensService:
             return self._run_scan_locked(run_committee, only)
         finally:
             self._lock.release()
+            self.invalidate_live_plans()  # the new recommendations are judged against the next price at once
 
     def _run_scan_locked(self, run_committee: bool, only: list[str] | None) -> ScanSummary:
         with self.sf() as s:
@@ -806,7 +886,9 @@ class MarketLensService:
                 row = self._persist(s, r, inp, cfg, None, None, committee)
                 s.commit()
                 rec_id = row.id
-            return r, committee, rec_id
+        if persist:
+            self.invalidate_live_plans()
+        return r, committee, rec_id
 
     def committee_for_recommendation(self, rec_id: int) -> dict[str, Any]:
         """Run the AI committee on a stored recommendation snapshot.

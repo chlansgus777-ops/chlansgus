@@ -61,7 +61,7 @@ export function ConfirmButton({ label, confirm, onConfirm, busy = false, disable
 
 export function Vetoes({ v }: { v: string[] }) {
   if (!v.length) return null;
-  return <span className="pill tone-danger" title={v.map((x) => VETO_KO[x] ?? x).join(", ")}>거부권 · {v.map((x) => VETO_KO[x] ?? x).join(", ")}</span>;
+  return <span className="pill tone-danger veto-pill" title={v.map((x) => VETO_KO[x] ?? x).join(", ")}>거부권 · {v.map((x) => VETO_KO[x] ?? x).join(", ")}</span>;
 }
 
 export function Card({ title, children, right, icon, tone, explain, className, testId, sub }: { title?: string; children: ReactNode; right?: ReactNode; icon?: ReactNode; tone?: "pos" | "neg" | "warn"; explain?: ReactNode; className?: string; testId?: string; sub?: boolean }) {

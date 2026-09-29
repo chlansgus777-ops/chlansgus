@@ -222,7 +222,7 @@ class Settings:
     mock_universe_size: int = 600
     log_level: str = "INFO"
     scheduler: bool = False
-    scan_interval_minutes: int = 60
+    scan_interval_minutes: int = 30
     data_dir: Path = field(default_factory=default_data_dir)
     llm_budget_usd: float = 0.0  # paid LLM spending cap (estimated, USD); 0 = no paid provider is used without one
     llm_price_in: float = 0.0  # USD per 1M input tokens, entered by the user for a model the app has no price for
@@ -274,8 +274,8 @@ def load_settings() -> Settings:
         enable_ai_committee=_bool(os.environ.get("ENABLE_AI_COMMITTEE"), True),
         mock_universe_size=int(os.environ.get("MOCK_UNIVERSE_SIZE", "600")),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
-        scheduler=_bool(os.environ.get("MARKETLENS_SCHEDULER"), False),
-        scan_interval_minutes=int(os.environ.get("SCAN_INTERVAL_MINUTES", "60")),
+        scheduler=_bool(os.environ.get("MARKETLENS_SCHEDULER"), True),  # on unless turned off: the owner never has to press scan
+        scan_interval_minutes=int(os.environ.get("SCAN_INTERVAL_MINUTES", "30")),
         data_dir=data_dir,
         llm_budget_usd=_float(os.environ.get("LLM_BUDGET_USD"), 0.0),
         llm_price_in=_float(os.environ.get("LLM_PRICE_INPUT_PER_M"), 0.0),

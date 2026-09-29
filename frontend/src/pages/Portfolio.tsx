@@ -4,8 +4,9 @@ import { api } from "../api";
 import { Card, ConfirmButton, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } from "../components/ui";
 import { Ledger } from "../components/Ledger";
 import { LivePrice } from "../components/LivePrice";
+import { LiveZone } from "../components/LiveZone";
 import { ITrash } from "../components/icons";
-import { refreshQuoteSubscriptions } from "../quotes";
+import { refreshQuoteSubscriptions, useAllQuotes, useQuote } from "../quotes";
 import { useApi, usePoll } from "../components/useApi";
 import { day, num, parseAmount, pct, price, shares, usdWithKo } from "../format";
 
@@ -119,7 +120,7 @@ export default function Portfolio() {
           <Card title="총 평가금액" testId="nav-unavailable"><div className="t-key muted">평가 불가</div><div className="caption">보유 종목의 공통 거래일 종가가 없어 합계를 계산하지 않았습니다(현금 {price(x.cash)}만으로 표시하지 않음).</div></Card>
         ) : assumed && empty ? (
           <Card title="총 평가금액"><div className="t-key muted">—</div><div className="caption">현금과 보유 종목을 입력하면 계산합니다</div></Card>
-        ) : <Card title="총 평가금액"><div className="t-key">{price(x.nav)}</div><div className="caption">{Math.abs(x.nav) >= 1e8 ? `${usdWithKo(x.nav)} · ` : ""}{empty ? "현금만" : `기준일 ${day(x.valuation_day)} 종가`}{x.valuation_status === "PARTIAL" ? " · 일부 종목 제외" : ""}{assumed ? ` · 현금은 가정값 ${price(x.cash)}` : ""}</div></Card>}
+        ) : <Card title="총 평가금액"><div className="t-key">{price(x.nav)}</div><div className="caption">{Math.abs(x.nav) >= 1e8 ? `${usdWithKo(x.nav)} · ` : ""}{empty ? "현금만" : `기준일 ${day(x.valuation_day)} 종가`}{x.valuation_status === "PARTIAL" ? " · 일부 종목 제외" : ""}{assumed ? ` · 현금은 가정값 ${price(x.cash)}` : ""}</div>{!empty && <LiveNav x={x} />}</Card>}
         <Card title="평가손익">{unvalued ? <><div className="t-key muted">평가 불가</div><div className="caption">가격을 확인한 뒤 계산합니다</div></> : empty ? <><div className="t-key muted">—</div><div className="caption">보유 종목이 없어 손익이 없습니다</div></>
           : <><div className={`t-key ${x.unrealized_pnl > 0 ? "pos" : x.unrealized_pnl < 0 ? "neg" : ""}`}>{x.unrealized_pnl > 0 ? "▲ " : x.unrealized_pnl < 0 ? "▼ " : ""}{price(x.unrealized_pnl)}</div><div className="caption">매입금액 대비 {pct(pnlPct)}{x.missing_prices.length ? " · 가격 없는 종목 제외" : ""}</div></>}</Card>
         {assumed ? <Card title="현금" testId="cash-not-entered"><div className="t-key muted">미입력</div><div className="caption">매수 수량은 가정 금액 {price(x.cash)} 기준으로 계산합니다 — 아래에서 실제 현금을 입력하세요</div></Card> : <Card title="현금"><div className="t-key">{price(x.cash)}</div><div className="caption">{unvalued ? "전체 대비 비중 계산 불가" : empty ? "전부 현금" : `전체의 ${pct(x.nav > 0 ? x.cash / x.nav : null, 0, false)}`}</div></Card>}
@@ -128,9 +129,10 @@ export default function Portfolio() {
       </div>
       {!empty && (
         <Card title="보유 종목" explain="평가액·손익·비중은 모든 종목을 같은 거래일 종가로 계산합니다. ‘최신 시세’는 표시용입니다." testId="holdings">
-<div className="scroll"><table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th title="표시용 최신 시세 — 평가액·손익은 모든 종목 같은 거래일 종가 기준">최신 시세</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th><th className="row-actions"><span className="sr-only">정리</span></th></tr></thead>
+<div className="scroll"><table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th title="표시용 최신 시세 — 평가액·손익은 모든 종목 같은 거래일 종가 기준">최신 시세</th><th title="최신 시세 기준 손익 — 체결마다 바뀝니다">실시간 손익</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th><th className="row-actions"><span className="sr-only">정리</span></th></tr></thead>
             <tbody>{x.holdings.map((h) => <tr key={h.ticker} className="nowrap-row"><td><Link to={`/stocks/${h.ticker}`}><b>{h.ticker}</b></Link></td><td>{shares(h.quantity)}{h.source === "ledger" ? <div className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}>거래 기록 기준</div> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)}<div className="caption">{day(h.price_day)}</div></>}</td>
-              <td><LivePrice ticker={h.ticker} size="sm" /></td>
+              <td><LivePrice ticker={h.ticker} size="sm" /><div style={{ marginTop: 4 }}><LiveZone ticker={h.ticker} compact /></div></td>
+              <td><LivePnl ticker={h.ticker} qty={h.quantity} cost={h.cost_basis} /></td>
               <td>{h.market_value === null ? "—" : price(h.market_value)}</td><td className={h.unrealized_pnl === null ? "" : h.unrealized_pnl >= 0 ? "pos" : "neg"}>{h.unrealized_pnl === null ? "계산 안 함" : <>{h.unrealized_pnl >= 0 ? "▲" : "▼"} {price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</>}</td><td>{h.weight === null ? "—" : pct(h.weight, 1, false)}</td><td className="wrap" style={{ minWidth: 110 }}>{h.sector}</td>
               <td className="row-actions"><div className="row tight" style={{ flexWrap: "nowrap", justifyContent: "flex-end" }}>
                 {h.source === "ledger"
@@ -182,6 +184,41 @@ export default function Portfolio() {
       </Card>
       <Ledger today={nyToday()} prefill={sellFor ?? params.get("trade")} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
 
+    </div>
+  );
+}
+
+/** Profit on the latest price (moves with every trade); the valuation above stays on one common close. */
+function LivePnl({ ticker, qty, cost }: { ticker: string; qty: number; cost: number }) {
+  const { row } = useQuote(ticker);
+  if (row?.price == null || !(cost > 0)) return <span className="muted">—</span>;
+  const d = (row.price - cost) * qty;
+  const r = row.price / cost - 1;
+  return <span className={d > 0 ? "pos" : d < 0 ? "neg" : ""} data-testid={`live-pnl-${ticker}`}>{d > 0 ? "▲" : d < 0 ? "▼" : ""} {price(Math.abs(d))} ({pct(r)})</span>;
+}
+
+/** Total on the latest prices (a name without one counts at its close) — the live counterpart of 총 평가금액. */
+export function LiveNav({ x }: { x: { cash: number; holdings: { ticker: string; quantity: number; price: number | null; cost_basis: number }[] } }) {
+  const q = useAllQuotes();
+  let live = 0, value = x.cash, cost = 0, fromClose = 0, day = 0, dayN = 0;
+  for (const h of x.holdings) {
+    const qr = q.get(h.ticker);
+    const p = qr?.price ?? null;
+    if (p != null) live += 1;
+    if (p != null && qr?.previous_close) { day += (p - qr.previous_close) * h.quantity; dayN += 1; }
+    const px = p ?? h.price;
+    if (px == null) continue;
+    if (p == null) fromClose += 1;
+    value += px * h.quantity;
+    cost += h.cost_basis * h.quantity;
+  }
+  if (!live) return null;
+  const pnl = value - x.cash - cost;
+  return (
+    <div className="caption" data-testid="live-nav" title="최신 시세로 다시 계산한 값입니다(체결마다 바뀜). 위 금액은 모든 종목을 같은 거래일 종가로 계산한 값입니다.">
+      실시간 {price(value)} · 손익 <span className={pnl > 0 ? "pos" : pnl < 0 ? "neg" : ""}>{pnl > 0 ? "▲" : pnl < 0 ? "▼" : ""}{price(Math.abs(pnl))}</span>
+      {dayN > 0 && <> · 오늘 <span className={day > 0 ? "pos" : day < 0 ? "neg" : ""} data-testid="live-day">{day > 0 ? "▲" : day < 0 ? "▼" : ""}{price(Math.abs(day))}</span>{dayN < live ? ` (${dayN}종목)` : ""}</>}
+      {fromClose ? ` · ${fromClose}종목은 종가` : ""}
     </div>
   );
 }

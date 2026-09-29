@@ -26,3 +26,40 @@
 .quote-feed i { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .quote-feed.on i { background: var(--up); }
 .quote-feed.down i { background: var(--down); }
+
+/* Live zone (real-time verdict 2026-09-29): where the price stands against the plan, re-judged on every quote */
+.lz { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid transparent; white-space: nowrap; line-height: 1.4; }
+.lz i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.lz em { font-style: normal; font-weight: 500; opacity: .85; }
+.lz-buy { color: var(--up); background: var(--up-soft); border-color: rgba(95, 224, 189, .3); }
+.lz-buy i { box-shadow: 0 0 0 3px var(--up-soft); animation: lz-pulse 1.6s ease-in-out infinite; }
+.lz-warn { color: var(--warn); background: var(--warn-soft); border-color: rgba(243, 201, 106, .28); }
+.lz-danger { color: var(--danger); background: var(--danger-soft); border-color: rgba(255, 127, 142, .3); }
+.lz-info { color: var(--buy); background: var(--buy-soft); border-color: rgba(114, 184, 255, .28); }
+.lz-muted { color: var(--muted); background: rgba(143, 148, 168, .1); }
+@keyframes lz-pulse { 50% { box-shadow: 0 0 0 5px transparent; } }
+@media (prefers-reduced-motion: reduce) { .lz-buy i { animation: none; } }
+
+/* Alert bell + toasts */
+.alert-bell { position: relative; display: inline-flex; }
+.alert-bell > button { position: relative; padding: 4px 8px; }
+.alert-bell .badge-count { position: absolute; top: -4px; right: -4px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: var(--danger); color: #1a0a0d; font-size: 10.5px; line-height: 17px; text-align: center; }
+.alert-panel { position: absolute; right: 0; top: calc(100% + 8px); width: min(420px, calc(100vw - 32px)); max-height: 60vh; overflow: auto; z-index: 80;
+  background: var(--surface-2); border: 1px solid var(--line, rgba(255, 255, 255, .08)); border-radius: 14px; padding: 12px; box-shadow: 0 18px 48px rgba(0, 0, 0, .45);
+  display: grid; gap: 6px; }
+.alert-item { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: start; text-align: left; width: 100%;
+  background: transparent; border: 1px solid transparent; border-radius: 10px; padding: 8px; font-size: 13px; font-weight: 500; white-space: normal; }
+.alert-item:hover { background: rgba(255, 255, 255, .04); border-color: rgba(255, 255, 255, .06); }
+.alert-item .ico, .toast .ico { font-weight: 800; text-align: center; }
+.lvl-positive .ico { color: var(--up); } .lvl-warning .ico { color: var(--warn); } .lvl-danger .ico { color: var(--danger); } .lvl-info .ico { color: var(--buy); }
+.toasts { position: fixed; right: 18px; bottom: 18px; z-index: 90; display: grid; gap: 10px; width: min(380px, calc(100vw - 32px)); }
+.toast { display: flex; align-items: stretch; background: var(--surface-2); border: 1px solid rgba(255, 255, 255, .08); border-left: 3px solid var(--buy);
+  border-radius: 12px; box-shadow: 0 16px 40px rgba(0, 0, 0, .5); animation: toast-in .22s ease-out; }
+.toast.lvl-positive { border-left-color: var(--up); } .toast.lvl-warning { border-left-color: var(--warn); } .toast.lvl-danger { border-left-color: var(--danger); }
+.toast-body { flex: 1; display: flex; gap: 10px; align-items: flex-start; text-align: left; background: transparent; border: 0; padding: 12px 6px 12px 14px;
+  font-size: 13.5px; font-weight: 600; white-space: normal; line-height: 1.45; }
+.toast-x { background: transparent; border: 0; color: var(--muted); font-size: 18px; padding: 6px 12px; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }

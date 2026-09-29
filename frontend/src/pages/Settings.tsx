@@ -90,7 +90,8 @@ function AutoRefresh({ d, onSaved }: { d: S; onSaved: () => void }) {
   const on = !!d.scheduler?.enabled;
   return (
     <Card title="자동 갱신 · 모의 매매 기록">
-      <div className="muted">켜면 앱이 열려 있는 동안 {d.scheduler?.interval_minutes ?? 60}분마다 시장을 다시 스캔하고, 매수 신호는 모의 매매(실제 주문 없음)로 기록해 성과 화면의 표본이 쌓입니다. 시세 스트림은 이 설정과 상관없이 항상 켜져 있습니다.</div>
+      <div className="muted">켜 두면(기본) 앱이 열려 있는 동안 정규장에는 {d.scheduler?.interval_minutes ?? 30}분마다, 장이 닫힌 뒤에는 종가 기준으로 한 번 시장 전체를 다시 분석합니다. 프리마켓·시간외에는 판단에 쓸 현재가가 없어 스캔하지 않습니다(직전의 좋은 결과를 덮어쓰지 않도록). 끝나면 모든 화면이 저절로 바뀌고, 매수 신호는 모의 매매(실제 주문 없음)로 기록됩니다.
+        매수 구간·손절·목표 판정은 이 설정과 상관없이 체결이 올 때마다 바뀝니다.</div>
       <div className="row" style={{ marginTop: 12 }}>
         <b>현재: {on ? "켜짐" : "꺼짐"}</b>
         <button disabled={f.busy} onClick={() => void f.save({ MARKETLENS_SCHEDULER: on ? "0" : "1" })}>{on ? "자동 갱신 끄기" : "자동 갱신 켜기"}</button>
@@ -199,7 +200,8 @@ function Quotes() {
           {s.last_error && <><span className="k">최근 오류</span><span className="muted">{s.last_error}</span></>}
         </div>
       ) : <div className="muted" style={{ marginTop: 8 }}>시세 상태를 받는 중…</div>}
-      <div className="caption" style={{ marginTop: 10 }}>보고 있는 종목 → 보유 종목 → 관심 종목 순으로 구독합니다. 화면의 현재가는 참고용이며, 매수 판단·수량은 분석의 신선도 규칙(현재가 20분 이내)을 그대로 따릅니다.</div>
+      <div className="caption" style={{ marginTop: 10 }}>보고 있는 종목 → 보유 종목 → 관심 종목 → 마지막 스캔의 상위 매수 후보 순으로 구독합니다. 체결이 올 때마다 저장된 가격 계획(최대 매수가·손절·목표·손익비)과 비교해 ‘지금 매수 구간’, ‘손절 기준 도달’ 같은 판정을 바로 바꾸고, 경계를 넘으면 알림을 띄웁니다. ‘지금 매수 구간’은 20분 안의 체결가가 있을 때만 나옵니다.</div>
+      <DesktopAlerts />
     </Card>
   );
 }
@@ -246,6 +248,20 @@ export default function Settings() {
           </Card>
         </>
       )}
+    </div>
+  );
+}
+
+/** Pop-up notifications from the operating system for live alerts while the app is in the background. */
+function DesktopAlerts() {
+  const supported = typeof Notification !== "undefined";
+  const [perm, setPerm] = useState(supported ? Notification.permission : "denied");
+  if (!supported) return null;
+  return (
+    <div className="row" style={{ marginTop: 12 }} data-testid="desktop-alerts">
+      <b>바탕화면 알림</b>
+      <span className="caption">{perm === "granted" ? "켜짐 — 앱이 뒤에 있을 때 매수 구간 진입·손절·목표 도달을 알려 드립니다" : perm === "denied" ? "이 창에서 차단됨 — 운영체제·브라우저 설정에서 허용하세요" : "앱이 뒤에 있을 때도 실시간 알림을 받으려면 켜세요"}</span>
+      {perm === "default" && <button type="button" className="sm" onClick={() => void Notification.requestPermission().then(setPerm)}>알림 켜기</button>}
     </div>
   );
 }

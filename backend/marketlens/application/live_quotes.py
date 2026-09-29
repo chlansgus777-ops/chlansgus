@@ -51,6 +51,7 @@ UNAVAILABLE = "UNAVAILABLE"        # 스트림 미설정(키 없음·MOCK)
 LIVE_WINDOW = timedelta(seconds=60)
 VIEW_LEASE = timedelta(seconds=90)
 PINNED_REFRESH = 30.0
+FALLBACK_EVERY = timedelta(seconds=30)  # REST refresh per name while the stream is down in a trading session
 IDLE_WAIT = 30.0  # seconds: the snapshot worker's longest sleep when nothing is due (real changes wake it at once)  # seconds: re-read the watchlist/holdings even without a change notice
 
 
@@ -165,7 +166,7 @@ class QuoteHub:
         self._lock = threading.Lock()
         self._changed = threading.Condition(self._lock)
         self._states: dict[str, TickerState] = {}
-        self._pinned: dict[str, set[str]] = {"holdings": set(), "watchlist": set()}
+        self._pinned: dict[str, set[str]] = {"holdings": set(), "watchlist": set(), "candidates": set()}
         self._views: dict[str, datetime] = {}
         self._version = 0
         self.connected = False
@@ -173,6 +174,9 @@ class QuoteHub:
         self._subs_changed = threading.Event()
         self._snap_queue: list[str] = []
         self._snap_event = threading.Event()
+        # the live verdict (application.live_judge): ``annotate`` adds it to each row, ``on_price`` sees every new price
+        self.annotate: Callable[[str, float | None, datetime | None], dict[str, Any] | None] | None = None
+        self.on_price: Callable[[str, float, datetime | None], None] | None = None
 
     # ------------------------------------------------------------------ subscriptions
     def set_pinned(self, kind: str, tickers: Iterable[str]) -> None:
@@ -219,10 +223,11 @@ class QuoteHub:
         return bool(gone)
 
     def plan(self) -> tuple[list[str], list[str]]:
-        """(subscribed, over the limit) — viewed first, then holdings, then the watchlist; stable order within each."""
+        """(subscribed, over the limit) — viewed first, then holdings, then the watchlist, then the top buy calls of the
+        last scan (watched for alerts even when no screen shows them); stable order within each."""
         with self._lock:
             order: list[str] = []
-            for group in (sorted(self._views), sorted(self._pinned["holdings"]), sorted(self._pinned["watchlist"])):
+            for group in (sorted(self._views), sorted(self._pinned["holdings"]), sorted(self._pinned["watchlist"]), sorted(self._pinned.get("candidates", ()))):
                 for t in group:
                     if t not in order:
                         order.append(t)
@@ -254,7 +259,20 @@ class QuoteHub:
             st.trades += 1
             self._bump(st)
         self.stats.note_latency((rec - ts).total_seconds() * 1000)
+        self._observe(ticker, price, ts)
         return True
+
+    def _observe(self, ticker: str, price: float, ts: datetime | None) -> None:  # outside the lock
+        if self.on_price is not None:
+            try:
+                self.on_price(ticker, price, ts)
+            except Exception as e:  # noqa: BLE001 - a verdict failure never stops the quotes
+                log.warning("live verdict failed for %s: %s", ticker, type(e).__name__)
+
+    def touch_all(self) -> None:
+        """Every row goes out again (the verdicts changed: new plans after a scan or an analysis)."""
+        with self._lock:
+            self._touch(())
 
     def ingest_snapshot(self, ticker: str, quote: Any) -> None:
         price, ts = getattr(quote, "price", None), getattr(quote, "timestamp", None)
@@ -268,6 +286,7 @@ class QuoteHub:
             st.previous_close = getattr(quote, "previous_close", None) or st.previous_close
             st.snapshot_error = None
             self._bump(st)
+        self._observe(ticker, float(price), ts)
 
     def snapshot_failed(self, ticker: str, error: str) -> None:
         with self._lock:
@@ -349,6 +368,11 @@ class QuoteHub:
                         source=shown.source, feed=shown.feed)
             if st.previous_close:
                 base["change_pct"] = shown.price / st.previous_close - 1
+            if self.annotate is not None:
+                try:
+                    base["judge"] = self.annotate(st.ticker, shown.price, shown.trade_ts)
+                except Exception as e:  # noqa: BLE001 - the price is shown without a verdict
+                    log.warning("live verdict failed for %s: %s", st.ticker, type(e).__name__)
         return base
 
     def status(self) -> dict[str, Any]:
@@ -413,7 +437,9 @@ class QuoteHub:
                     if closed_final is not None and st.snapshot.trade_ts >= closed_final:
                         continue
                 last = None if st is None else st.snapshot_checked_at
-                due_at = now if last is None else last + self.snapshot_every
+                # no live stream while the market trades: the REST quote is all there is — refresh it far more often
+                every = self.snapshot_every if (self.streaming and self.connected) or session == TradingSession.CLOSED else min(self.snapshot_every, FALLBACK_EVERY)
+                due_at = now if last is None else last + every
                 wait = (due_at - now).total_seconds()
                 if wait <= 0:
                     out.append(t)

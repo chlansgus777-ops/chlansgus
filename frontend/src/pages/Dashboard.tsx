@@ -8,7 +8,8 @@ import { type ScanStatus, usePageTime, useStatus } from "../components/status";
 import { useApi, usePoll } from "../components/useApi";
 import { LivePrice } from "../components/LivePrice";
 import { StalePriceNote, stalePriceCause } from "../components/OppTable";
-import { useQuote, useViewQuotes } from "../quotes";
+import { useJudgedRows, useQuote, useViewQuotes, type QuoteRow } from "../quotes";
+import { LiveZone } from "../components/LiveZone";
 import { ago, day, num, pct, price, stampEt, errKo } from "../format";
 import { ACTION_PLAIN, BULLISH, HEALTH_KO, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
 import type { OppRow, ScanInfo } from "../types";
@@ -80,7 +81,7 @@ function CandidateCard({ r, lead }: { r: OppRow; lead?: boolean }) {
     <Link to={`/stocks/${r.ticker}`} className={`cand${lead ? " lead" : ""}`} style={{ ["--rail" as string]: `var(--${actionTone(r.action)})` }} data-testid="candidate-card" aria-label={`${r.ticker} 상세 보기`}>
       <div className="top">
         <div style={{ minWidth: 0 }}><div className="tk">{r.ticker}</div><div className="co">{r.company} · {r.sector_known === false ? "업종 불명확" : r.sector}</div></div>
-        <Action a={r.action} status={r.current_status} quality={r.data_quality} />
+        <span className="stack-tight" style={{ alignItems: "flex-end" }}><Action a={r.action} status={r.current_status} quality={r.data_quality} /><LiveZone ticker={r.ticker} recId={r.id} compact /></span>
       </div>
       <div className="why">{plain}</div>
       {r.key_reason ? <div className="why"><b>핵심 이유 · </b>{r.key_reason}</div> : null}
@@ -102,6 +103,36 @@ function CandidateCard({ r, lead }: { r: OppRow; lead?: boolean }) {
 
 /** How much of the market the last scan judged, why the rest was left out, the missing-data rate and the AI
  * cost — and whether the scan finished (an interrupted scan keeps what it saved). */
+/** What the live prices say right now, without a scan: names inside their buy zone with a current price, and held
+ * names at their stop or target. Updates on every quote. */
+export function LiveSignals() {
+  const rows = useJudgedRows();
+  const buy = rows.filter((r) => r.judge?.valid_now).sort((a, b) => (b.judge?.rr_now ?? 0) - (a.judge?.rr_now ?? 0));
+  const held = rows.filter((r) => r.judge?.held && (r.judge.zone === "STOP_HIT" || r.judge.zone === "TARGET_HIT"));
+  const near = rows.filter((r) => r.judge?.bullish && r.judge.zone === "ABOVE_MAX" && (r.judge.to_max_pct ?? -1) > -0.02);
+  return (
+    <Card title="실시간 신호" icon="◉" testId="live-signals" explain="체결이 올 때마다 저장된 가격 계획과 비교합니다 — 스캔을 누르지 않아도 바뀝니다.">
+      {!rows.length ? <Empty hint="스캔 결과·보유·관심 종목의 시세가 들어오면 여기에 바로 나옵니다.">아직 판정할 실시간 시세가 없습니다.</Empty> : (
+        <div className="stack" style={{ gap: 8 }}>
+          {held.map((r) => <LiveSignalRow key={`h-${r.ticker}`} r={r} />)}
+          {buy.map((r) => <LiveSignalRow key={`b-${r.ticker}`} r={r} />)}
+          {near.slice(0, 3).map((r) => <LiveSignalRow key={`n-${r.ticker}`} r={r} />)}
+          {!held.length && !buy.length && !near.length && <div className="caption">지금은 매수 구간에 있거나 손절·목표에 닿은 종목이 없습니다. 바뀌는 순간 여기와 알림으로 알려 드립니다.</div>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function LiveSignalRow({ r }: { r: QuoteRow }) {
+  return (
+    <Link to={`/stocks/${r.ticker}`} className="row spread live-signal" data-testid={`live-signal-${r.ticker}`}>
+      <span className="row tight"><b>{r.ticker}</b><span className="num">{r.price != null ? price(r.price) : "—"}</span></span>
+      <LiveZone ticker={r.ticker} />
+    </Link>
+  );
+}
+
 export function CoverageCard({ s }: { s: ScanStatus | null }) {
   if (!s || !s.state) return <Card title="분석 범위" sub><Empty hint="‘시장 스캔 실행’을 누르면 표시됩니다.">아직 스캔 기록이 없습니다.</Empty></Card>;
   const c = s.coverage;
@@ -264,6 +295,7 @@ export default function Dashboard() {
         </div>
 
         <aside className="home-rail" aria-label="보조 정보">
+          <LiveSignals />
           <div className="rail-card">
             <div className="head"><h2><IEvent />다가오는 일정</h2><Link to="/market?tab=calendar">전체 →</Link></div>
             {x.upcoming_catalysts.length ? x.upcoming_catalysts.slice(0, 5).map((e) => (
