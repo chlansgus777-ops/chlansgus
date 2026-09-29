@@ -21,12 +21,16 @@ const COLS: [Key, string, string, boolean][] = [
 
 /** The latest quote when the app has one for this name; otherwise the analysis-time price, labelled as such — never
  * a bare dash above it. */
-export function PriceCell({ r }: { r: OppRow }) {
+export function PriceCell({ r, quiet = false }: { r: OppRow; quiet?: boolean }) {
   const { row } = useQuote(r.ticker);
-  const basis = <span className="caption" style={{ whiteSpace: "nowrap" }} title={`분석 기준가 · 출처 ${r.price_source ?? "N/A"} · ${stamp(r.price_timestamp)}`}>{row?.price != null ? <>분석 {price(r.price)}</> : "분석 시점"}{r.price_quality !== "FRESH" ? <> <Quality q={r.price_quality} /></> : null}</span>;
+  // ``quiet``: the scan-wide "price not current" reason is explained above the table — not repeated per row
+  const stale = r.price_quality !== "FRESH" && r.price_quality !== "DELAYED";
+  const basis = <span className="caption" style={{ whiteSpace: "nowrap" }} title={`분석 기준가 · 출처 ${r.price_source ?? "N/A"} · ${stamp(r.price_timestamp)}${stale ? " · 분석 때 현재가가 최신이 아니어서 판단에 쓰지 않음" : ""}`}>{r.price != null ? <>분석 {price(r.price)}</> : row?.price != null ? "분석 때 현재가 없음" : "분석 시점"}{r.price_quality !== "FRESH" && !(quiet && stale) ? <> <Quality q={r.price_quality} /></> : null}</span>;
   return (
     <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
-      {row?.price != null ? <LivePrice ticker={r.ticker} size="sm" showState={false} /> : <span style={{ whiteSpace: "nowrap" }}>{price(r.price)}</span>}
+      {row?.price != null ? <LivePrice ticker={r.ticker} size="sm" showState={false} />
+        : r.price != null ? <span style={{ whiteSpace: "nowrap" }}>{price(r.price)}</span>
+        : <span className="muted" title="아직 받은 시세가 없습니다(장이 열리면 실시간으로 표시)">—</span>}
       {basis}
     </span>
   );
@@ -49,7 +53,7 @@ const STALE_WHY: Record<string, string> = {
   REGULAR: "정규장인데도 현재가를 받지 못했습니다 — 시세 공급자(Finnhub) 연결이나 키를 확인하세요.",
 };
 
-export function StalePriceNote({ c }: { c: { n: number; total: number; session: string | null } }) {
+export function StalePriceNote({ c, marketOpen = false, onRescan, busy = false }: { c: { n: number; total: number; session: string | null }; marketOpen?: boolean; onRescan?: () => void; busy?: boolean }) {
   return (
     <div className="ribbon info" role="note" data-testid="stale-price-note">
       <span className="cap">판단 보류 이유</span>
@@ -58,6 +62,7 @@ export function StalePriceNote({ c }: { c: { n: number; total: number; session: 
         {STALE_WHY[c.session ?? ""] ?? "스캔할 때 20분 안의 체결가가 없어 매수 판단을 보류했습니다."}{" "}
         점수·가격 계획은 참고로 볼 수 있고, 정규장(한국 시간 밤 10:30~새벽 5:00, 서머타임이 아니면 11:30~6:00)에 다시 스캔하면 판단이 나옵니다.
         표에서는 이 공통 사유를 줄마다 반복하지 않습니다.
+        {marketOpen && onRescan ? <div style={{ marginTop: 8 }}><button className="primary sm" disabled={busy} onClick={onRescan} data-testid="rescan-now">{busy ? <><span className="spin" />스캔 중…</> : "지금 정규장 — 다시 스캔하기"}</button></div> : null}
       </div>
     </div>
   );
@@ -127,13 +132,14 @@ function cell(r: OppRow, k: Key, commonStale = false) {
     case "score":
       return <span className="score-mini"><b>{num(r.score, 1)}</b><span className="bar"><span style={{ display: "block", height: "100%", width: `${Math.max(0, Math.min(100, r.score))}%`, borderRadius: 99, background: r.score >= 80 ? "var(--buy)" : r.score >= 72 ? "rgba(114,184,255,.6)" : "var(--faint)" }} /></span></span>;
     case "price":
-      return <PriceCell r={r} />;
+      return <PriceCell r={r} quiet={commonStale} />;
     case "max_buy": {
+      if (r.max_buy == null) return <span className="muted" title="분석 때 현재가가 없어 가격 계획을 만들지 않음">—</span>;
       const d = r.price != null && r.max_buy != null ? r.max_buy / r.price - 1 : null;
       return <span>{price(r.max_buy)}{d != null ? <span className={`caption ${d < 0 ? "warn" : ""}`} style={{ display: "block" }}>{d < 0 ? `${pct(-d, 1, false)} 초과` : `여유 ${pct(d, 1, false)}`}</span> : null}</span>;
     }
     case "rr":
-      return <span className={r.rr != null && r.rr < 2 ? "warn" : undefined}>{num(r.rr, 2)}</span>;
+      return r.rr == null ? <span className="muted" title="분석 때 현재가가 없어 계산하지 않음">—</span> : <span className={r.rr < 2 ? "warn" : undefined}>{num(r.rr, 2)}</span>;
     case "current_status":
       return <StatusBadge s={r.current_status} reason={r.current_status_reason} />;
     case "risk":

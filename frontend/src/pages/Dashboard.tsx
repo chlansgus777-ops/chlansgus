@@ -230,7 +230,7 @@ export default function Dashboard() {
           {sysMode === "LIVE" && notReady && !shown.length && <span id="data-prep" />}
           <Card title="지금 검토할 후보" right={<Link to="/stocks?tab=candidates" className="row tight">전체 후보 보기 <IArrow width={15} height={15} /></Link>}
                 explain="매수 조건을 통과하고 지금 다시 확인해도 유효한 종목만, 최대 5개까지 보여줍니다.">
-            {!shown.length && staleCause ? <div style={{ marginBottom: 12 }}><StalePriceNote c={staleCause} /></div> : null}
+            {!shown.length && staleCause ? <div style={{ marginBottom: 12 }}><StalePriceNote c={staleCause} marketOpen={st?.system.data?.market?.session === "REGULAR"} onRescan={() => void scan()} busy={running} /></div> : null}
             {shown.length ? <div className="cands">{shown.map((r, i) => <CandidateCard key={r.id} r={r} lead={i === 0 && shown.length !== 2 && shown.length !== 4} />)}</div>
               : notReady && x.readiness ? <NotReady r={x.readiness} onChange={d.reload} />
               : !x.scan ? <StatePanel kind="not_scanned" actions={<button className="primary" disabled={running} onClick={scan}>시장 스캔 실행</button>} />

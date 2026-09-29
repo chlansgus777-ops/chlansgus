@@ -3,6 +3,9 @@ import { OppTable, StalePriceNote, stalePriceCause } from "../components/OppTabl
 import { Empty, Err, Loading, StaleData } from "../components/ui";
 import { NotReady, ReadinessBanner } from "../components/Readiness";
 import { useApi } from "../components/useApi";
+import { useStatus } from "../components/status";
+import { useViewQuotes } from "../quotes";
+import { api } from "../api";
 import { stamp } from "../format";
 import { ACTION_INFO } from "../i18n";
 import type { Opportunities as Opp } from "../types";
@@ -10,6 +13,17 @@ import type { Opportunities as Opp } from "../types";
 /** The last scan's candidates (buy, wait and watch), searchable and filterable — the "후보" tab of the stock screen. */
 export default function Opportunities() {
   const o = useApi<Opp>("/opportunities");
+  const st = useStatus();
+  const [busy, setBusy] = useState(false);
+  const [scanErr, setScanErr] = useState<string | null>(null);
+  // the top of the list joins the app-wide quote stream, so 현재가 is live even when the scan's price was not
+  useViewQuotes((o.data?.rows ?? []).slice(0, 30).map((r) => r.ticker));
+  const marketOpen = st?.system.data?.market?.session === "REGULAR";
+  const rescan = async () => {
+    if (busy) return;  // never a second scan (and its AI calls) from a double click
+    setBusy(true); st?.setScanning(true); setScanErr(null);
+    try { await api.post("/scan?committee=true"); } catch (e) { setScanErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); st?.setScanning(false); st?.refresh(); o.reload(); }
+  };
   const [filter, setFilter] = useState("");
   const [action, setAction] = useState("ALL");
   const [onlyCurrent, setOnlyCurrent] = useState(false);
@@ -29,7 +43,8 @@ export default function Opportunities() {
     <div className="grid">
       <ReadinessBanner r={o.data.readiness} />
       <StaleData error={o.error} at={o.fetchedAt} retry={o.reload} />
-      {stale && <StalePriceNote c={stale} />}
+      <Err error={scanErr} />
+      {stale && <StalePriceNote c={stale} marketOpen={marketOpen} onRescan={() => void rescan()} busy={busy || st?.scanning} />}
       {o.data.readiness?.scanner_status === "SCANNER_NOT_READY" && !o.data.rows.length && <NotReady r={o.data.readiness} onChange={o.reload} />}
       <section className="card flush">
         <div className="row spread" style={{ padding: "16px 18px 12px", borderBottom: "1px solid var(--line)" }}>
