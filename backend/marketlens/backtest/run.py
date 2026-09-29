@@ -59,6 +59,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
                     help="stop after the week that passes this many minutes, with a checkpoint in --out; the same command "
                          "again (on another machine, with --out copied) goes on from there. 0 = no limit")
     ap.add_argument("--max-weeks", type=int, default=0, help="stop after this many weeks in this process (tests); 0 = no limit")
+    ap.add_argument("--recycle-weeks", type=int, default=0, help="fresh workers every this many weeks (0 = the engine's default; same rows)")
     a = ap.parse_args(argv)
     logging.getLogger("marketlens").setLevel(logging.ERROR)  # provider failures are expected (blocked) — counted below
     os.makedirs(a.out, exist_ok=True)
@@ -92,6 +93,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
                 raise SystemExit(f"{cp_path}: a checkpoint of another run (data, config or window differ) — remove it or use another --out")
         engine = Engine(store, reg, cfg, os.path.join(a.out, "rows.db"), replay=replay, resume=cp is not None)
         engine.blocked = blocked
+        if a.recycle_weeks:
+            engine.RECYCLE_WEEKS = a.recycle_weeks
         done: list[dict[str, Any]] = list(cp["weeks"]) if cp else []
         elapsed0 = cp["elapsed"] if cp else 0.0
         if cp:

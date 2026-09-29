@@ -165,6 +165,7 @@ def final_basis_bars(store: BacktestStore, key: str, upto: date) -> list[Bar]:
 # ------------------------------------------------------------------------------------------------ the loop
 class Engine:
     RECYCLE_WEEKS = 20  # fresh workers this often: a forked worker slowly copies the shared data it touches (copy-on-write)
+    LOW_MEMORY_MB = 1500  # … and at once when the machine has less than this left after a week
 
     def __init__(self, store: BacktestStore, registry: Any, cfg: ModelConfig, results_path: str, replay: Any = None, resume: bool = False) -> None:
         from marketlens.application.graph_seed import GraphSeed
@@ -309,21 +310,32 @@ class Engine:
         """The weeks in order. ``deadline`` (time.monotonic()): stop after the week that passes it (run.py saves a
         checkpoint after every week through ``on_week`` and the next runner goes on from there)."""
         out = []
-        for i, t in enumerate(times):
-            if i and i % self.RECYCLE_WEEKS == 0 and self.pool is not None:
-                n = self._n_workers
-                self.stop_workers()
-                self.start_workers(n)
+        since = 0  # weeks since the workers were last started
+        for t in times:
+            if since >= self.RECYCLE_WEEKS and self.pool is not None:
+                self._recycle()
+                since = 0
             t0 = time.monotonic()
             info = self.step(t)
+            since += 1
             info["seconds"] = round(time.monotonic() - t0, 1)
-            log(json.dumps(info | memory_mb(self.pool)))
+            mem = memory_mb(self.pool)
+            log(json.dumps(info | mem))
+            if self.pool is not None and mem.get("avail_mb", 1 << 30) < self.LOW_MEMORY_MB:
+                self._recycle()  # the machine is running out: fresh workers now (the 2026-09-29 legs swapped to a halt)
+                since = 0
+                log(json.dumps({"recycled_workers": True, **memory_mb(self.pool)}))
             out.append(info)
             if on_week is not None:
                 on_week(info)
             if deadline is not None and time.monotonic() >= deadline:
                 break
         return out
+
+    def _recycle(self) -> None:
+        n = self._n_workers
+        self.stop_workers()
+        self.start_workers(n)
 
     def checkpoint(self) -> dict[str, Any]:
         """What a later process needs to go on exactly where this one stopped (the rows are in the results file)."""

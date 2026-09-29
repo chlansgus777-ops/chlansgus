@@ -12,7 +12,7 @@ on:
         required: true
         default: "probe"
       resume_run_id:
-        description: "collect: continue the database of this earlier run (its backtest-db artifact); empty = start fresh. alpaca: the finished collect (or earlier alpaca) run to extend back to 2016"
+        description: "collect: continue the database of this earlier run (its backtest-db artifact); empty = start fresh. alpaca: the finished collect (or earlier alpaca) run to extend back to 2016. run: go on from the newest leg checkpoints of this earlier run"
         required: false
         default: ""
       data_run_id:
@@ -142,6 +142,14 @@ jobs:
       OUT: bt-out
     steps:
       - uses: actions/checkout@v4
+      - name: Checkpoints of an earlier run (resume_run_id), on the first leg
+        if: matrix.leg == 1 && inputs.resume_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bt-cp-*
+          path: legs
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkpoints of the earlier legs
         if: matrix.leg > 1
         continue-on-error: true
@@ -222,6 +230,14 @@ jobs:
       OUT: bt-out-repro
     steps:
       - uses: actions/checkout@v4
+      - name: Checkpoints of an earlier run (resume_run_id), on the first leg
+        if: matrix.leg == 1 && inputs.resume_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bt-repro-cp-*
+          path: legs
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkpoints of the earlier legs
         if: matrix.leg > 1
         continue-on-error: true

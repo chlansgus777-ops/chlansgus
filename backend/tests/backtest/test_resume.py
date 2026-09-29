@@ -37,3 +37,14 @@ def test_a_checkpoint_of_another_run_is_refused(world, tmp_path):  # noqa: F811
     main(args + ["--start", "2026-03-02", "--end", "2026-06-26", "--max-weeks", "2"])
     with pytest.raises(SystemExit, match="another run"):
         main(args + ["--start", "2026-03-09", "--end", "2026-06-26"])  # another window
+
+
+def test_fresh_workers_every_week_give_the_same_results(world, tmp_path):  # noqa: F811
+    """Workers started again every week (--recycle-weeks, and at once on low memory) change nothing in the results."""
+    from marketlens.backtest.run import main
+
+    path, _eng, _data = world
+    args = ["--db", path, "--start", "2026-03-02", "--end", "2026-06-26", "--min-names", "2", "--leak-checks", "0"]
+    one = main(args + ["--out", str(tmp_path / "one"), "--workers", "1"])
+    many = main(args + ["--out", str(tmp_path / "many"), "--workers", "2", "--recycle-weeks", "1"])
+    assert many["results_sha256"] == one["results_sha256"]
