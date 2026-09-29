@@ -566,6 +566,20 @@ def toss_prefs(req: Request, body: TossPrefsIn) -> dict[str, Any]:
     return s.broker.view()
 
 
+@router.get("/performance/backtest")
+def backtest_results() -> dict[str, Any]:
+    """과거 검증 (PREREGISTRATION §12): the committed summary of the measured 2016+ run (config/backtest_results.json,
+    written by marketlens.backtest.summary from that run's results.json) — or that it does not exist yet."""
+    import json as _json
+
+    from marketlens.config import CONFIG_DIR
+
+    p = CONFIG_DIR / "backtest_results.json"
+    if not p.exists():
+        return {"available": False, "reason": "2016년 이후 자료로 과거 검증을 계산하는 중입니다. 결과가 나오면 이 자리에 표시됩니다."}
+    return _json.loads(p.read_text(encoding="utf-8"))
+
+
 @router.get("/briefing")
 def morning_briefing(req: Request, refresh: bool = False) -> dict[str, Any]:
     """오늘 아침 브리핑 (한국시간 07:00부터) — the overnight US session for the owner's account, in the app only."""

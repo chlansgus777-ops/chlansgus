@@ -914,3 +914,28 @@ a.brief-row:hover .txt { color: var(--text); }
 .brief-row.lvl-warning .txt { color: var(--warn); }
 .brief-notes { color: var(--muted); font-size: 12px; margin-top: 12px; }
 @media (max-width: 900px) { .brief-tiles { grid-template-columns: minmax(0, 1fr); } }
+
+/* ------------------------------------------------------------------ 과거 검증 */
+.bt-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.bt-kpis > div { min-width: 0; padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(148, 160, 200, 0.12); }
+.bt-kpis .t { color: var(--muted); font-size: 12px; font-weight: 560; }
+.bt-kpis .v { font-size: 22px; font-weight: 740; letter-spacing: -0.03em; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.bt-kpis .v.pos { color: var(--pos); } .bt-kpis .v.neg { color: var(--neg); }
+.bt-kpis .s { color: var(--sub); font-size: 12px; margin-top: 2px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.bt-chart, .bt-quint { margin-top: 14px; }
+.bt-quint .qrow { display: grid; grid-template-columns: 56px minmax(0, 1fr) 72px; align-items: center; gap: 10px; padding: 4px 0; font-size: 12.5px; }
+.bt-quint .qk { color: var(--muted); }
+.bt-quint .qbar { height: 10px; border-radius: 999px; background: rgba(148, 160, 200, 0.08); overflow: hidden; }
+.bt-quint .qbar > span { display: block; height: 100%; border-radius: 999px; }
+.bt-quint .qbar > .pos { background: linear-gradient(90deg, rgba(52, 211, 153, 0.35), var(--pos)); }
+.bt-quint .qbar > .neg { background: linear-gradient(90deg, rgba(255, 107, 107, 0.35), var(--neg)); }
+.bt-quint .qv { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
+.bt-els { margin-top: 14px; }
+.bt-els tr.ref td { color: var(--muted); }
+.bt-els .verdict { font-size: 12px; font-weight: 650; padding: 2px 8px; border-radius: 7px; background: rgba(148, 160, 200, 0.1); color: var(--sub); white-space: nowrap; }
+.bt-els .verdict.pos { color: var(--pos); background: rgba(52, 211, 153, 0.12); }
+.bt-els .verdict.warn { color: var(--warn); background: var(--warn-soft); }
+.bt-els .verdict.neg { color: var(--neg); background: rgba(255, 107, 107, 0.12); }
+.bt-apply { margin-top: 14px; display: grid; gap: 4px; font-size: 13px; color: var(--text-2); line-height: 1.5; }
+.bt-src { margin-top: 10px; font-size: 11.5px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+@media (max-width: 900px) { .bt-kpis { grid-template-columns: minmax(0, 1fr); } }

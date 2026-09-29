@@ -1,4 +1,5 @@
 import { Fragment, useState } from "react";
+import { BacktestSection } from "../components/Backtest";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { Card, Disclosure, Empty, Err, LineChart, Loading, Ribbon, StaleData, Tabs } from "../components/ui";
@@ -115,6 +116,7 @@ export default function Performance() {
           <span className="k">비교 기준(벤치마크)</span><span>SPY(S&P 500 ETF)</span>
         </div>
       </Card>
+      <BacktestSection />
       {hasResults ? (
         <>
           <div className="grid g4">
