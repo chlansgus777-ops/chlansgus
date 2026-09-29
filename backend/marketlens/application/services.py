@@ -604,9 +604,10 @@ class MarketLensService:
         if not briefing.is_ready(now):
             return
         day = briefing.kst_day(now).isoformat()
-        if self._briefing_announced == day:
-            return
-        self._briefing_announced = day  # first: a failing build never turns into an alert storm
+        with self._briefing_lock:  # every open screen runs a stream tick: exactly one of them announces
+            if self._briefing_announced == day:
+                return
+            self._briefing_announced = day  # first: a failing build never turns into an alert storm
         try:
             b = self.morning_briefing(refresh=True)
         except Exception as e:  # noqa: BLE001 - the stream keeps going; the card builds again when opened

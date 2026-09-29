@@ -57,3 +57,16 @@ def test_an_empty_account_says_so(client):  # noqa: F811
     b = c.get("/api/briefing").json()
     assert b["account"]["holdings"] == 0 and b["account"]["pnl"] is None and b["account"]["movers"] == []
     assert "내 계좌" not in b["headline"]
+
+
+def test_screens_ticking_at_the_same_moment_announce_once(client):  # noqa: F811
+    import threading
+
+    _c, svc = client
+    svc._clock["t"] = MORNING
+    ts = [threading.Thread(target=svc.briefing_tick) for _ in range(6)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert len([a for a in svc.judge.alerts() if a["kind"] == "BRIEFING"]) == 1

@@ -38,7 +38,8 @@ export function signedUsd(v: number | null | undefined): string {
 
 export function MorningBriefing() {
   const b = useApi<Briefing>("/briefing");
-  usePoll(b.reload, 600_000, true);  // the numbers are end-of-session: every 10 minutes is plenty
+  // the numbers are end-of-session: every 10 minutes is plenty — before 07:00 every minute, so the card appears on time
+  usePoll(b.reload, b.data && !b.data.ready ? 60_000 : 600_000, true);
   const refresh = async () => { try { await api.get("/briefing?refresh=true"); } finally { b.reload(); } };
   return b.data ? <BriefingView x={b.data} onRefresh={refresh} /> : null;
 }
