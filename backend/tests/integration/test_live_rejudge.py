@@ -61,3 +61,22 @@ def test_a_held_name_outside_the_list_and_the_stock_page_are_live_too(client):  
     svc.live_rejudge()
     live = c.get(f"/api/stocks/{other}/live").json()["live"]
     assert live and live["price"] == 123.45 and live["action"] and live["analysed_at"]
+
+
+def test_any_price_change_is_judged_again_and_a_cut_round_resumes_with_the_rest(client):  # noqa: F811
+    """Owner 2026-09-29 ("9800X3D"): the whole pool every second, on any change of the price; on a slower PC a round
+    stops at its time budget and the names it did not reach go first the next second."""
+    c, svc = client
+    assert c.post("/api/scan?committee=false").status_code == 200
+    rows = c.get("/api/opportunities").json()["rows"]
+    now = svc.now()
+    for r in rows:
+        svc.quotes.ingest_poll(r["ticker"], float(r["price"] or 100.0), now - timedelta(seconds=1), "toss")
+    assert svc.live_rejudge() == len(rows)
+    for r in rows:  # one cent moved (well under the old 0.05 % floor)
+        svc.quotes.ingest_poll(r["ticker"], float(r["price"] or 100.0) + 0.01, now, "toss")
+    svc.LIVE_ROUND_BUDGET = 0.0  # a very slow PC: one name, then the budget is spent
+    first = svc.live_rejudge()
+    assert 1 <= first < len(rows)
+    svc.LIVE_ROUND_BUDGET = 60.0
+    assert svc.live_rejudge() == len(rows) - first  # exactly the ones left, none twice

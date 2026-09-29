@@ -646,13 +646,15 @@ class MarketLensService:
         self.quotes.touch_all()  # every row goes out again with its new verdict
         return len(plans)
 
-    LIVE_TOP = 40  # the list's top names: re-judged on the live price every round (every second)
-    LIVE_POOL = 100  # the fully analysed pool: the rest re-judged in rotation, so a name that improves climbs into the top
-    LIVE_ROTATE = 20  # names of the rest per round
-    LIVE_REJUDGE_EVERY = 1.0  # seconds between two rounds over them (owner: "1초마다"); a name whose print did not change is skipped
+    # Owner 2026-09-29 ("9800X3D"): the whole pool every second — ~5 ms a name, so 100 names are a fraction of one core.
+    LIVE_TOP = 100  # the list's top names: re-judged on the live price every round (every second)
+    LIVE_POOL = 100  # the fully analysed pool: a name that improves climbs into the top the same second
+    LIVE_ROTATE = 20  # names of the rest per round (when LIVE_TOP < LIVE_POOL)
+    LIVE_REJUDGE_EVERY = 1.0  # seconds between two rounds over them (owner: "1초마다")
     LIVE_QUOTE_MAX_AGE = 60.0
-    LIVE_MIN_MOVE = 0.0005  # a name is judged again when its price moved 0.05 % since its last judgement …
-    LIVE_MAX_AGE = 15.0  # … or at least every 15 seconds
+    LIVE_MIN_MOVE = 0.0  # a name is judged again on any price change since its last judgement …
+    LIVE_MAX_AGE = 5.0  # … or at least every 5 seconds (the clock alone moves the price-quality and session checks)
+    LIVE_ROUND_BUDGET = 0.6  # seconds of work per round at most: on a slower PC the rest go first next round, the app stays responsive
 
     def _fresh_quote(self, ticker: str) -> Any:
         """The newest real-time price the app holds for ``ticker`` (Toss poll, else the stream in the regular session),
@@ -700,8 +702,11 @@ class MarketLensService:
             inp = self._rejudge_inputs.get(rid)
             if q is not None and inp is not None:
                 todo.append((rid, inp, q))
+        # the names held / watched / on screen first, then the ones waiting longest (a round cut by the budget resumes there)
+        todo.sort(key=lambda x: (x[0] not in self._pool_mine, self._rejudged[x[0]]["at"] if x[0] in self._rejudged else ""))
         cfg = self.model_config()
         now = self.now()
+        started = time.perf_counter()
         done = 0
         changed = False
         for rid, inp, q in todo:
@@ -709,8 +714,10 @@ class MarketLensService:
             if prev is not None and prev["price"]:
                 moved = abs(q.price / prev["price"] - 1)
                 age = (now - datetime.fromisoformat(prev["at"])).total_seconds()
-                if moved < self.LIVE_MIN_MOVE and age < self.LIVE_MAX_AGE:
-                    continue  # the price barely moved since its judgement: the same decision (the PC stays quiet)
+                if moved <= self.LIVE_MIN_MOVE and age < self.LIVE_MAX_AGE:
+                    continue  # the same price since its judgement: the same decision (the PC stays quiet)
+            if done and time.perf_counter() - started > self.LIVE_ROUND_BUDGET:
+                break  # the rest next second, first in line
             try:
                 res = run_analysis(_replace(inp, quote=q, as_of=now), cfg, fingerprint=False)
             except Exception as e:  # noqa: BLE001 - one name never stops the round; its stored row stays shown
