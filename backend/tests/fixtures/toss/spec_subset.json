@@ -1,0 +1,2902 @@
+{
+ "_source": "https://openapi.tossinvest.com/openapi-docs/latest/openapi.json (as published in the npm package tossinvest-openapi-mcp 0.2.0, 2026-09-28)",
+ "_note": "Only the endpoints MarketLens calls (all GET except the token), with every $ref resolved. Used by tests/unit/test_toss_client.py to check the fake server's responses and the client's requests against the spec.",
+ "info": {
+  "title": "토스증권 Open API",
+  "version": "1.2.17"
+ },
+ "servers": [
+  {
+   "url": "https://openapi.tossinvest.com"
+  }
+ ],
+ "paths": {
+  "/oauth2/token": {
+   "post": {
+    "tags": [
+     "Auth"
+    ],
+    "summary": "OAuth2 액세스 토큰 발급",
+    "description": "OAuth 2.0 Client Credentials Grant 로 access token 을 발급합니다.\n\n- 요청 본문은 `application/x-www-form-urlencoded` 으로 전송합니다.\n- 발급된 token 은 다른 모든 API 의 `Authorization: Bearer {access_token}` 헤더에 사용합니다.\n- 응답 형식은 BFF 공통 envelope 이 아닌 OAuth2 표준 형식을 따릅니다.\n- refresh token 은 제공되지 않습니다. 만료 시 동일 엔드포인트로 재발급합니다.\n- client 당 유효한 access token 은 1 개입니다. 재발급 시 이전에 발급된 token 은 즉시 무효화됩니다.\n\n**Rate Limits Group**: `AUTH`\n",
+    "operationId": "issueOAuth2Token",
+    "security": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/x-www-form-urlencoded": {
+       "schema": {
+        "type": "object",
+        "description": "OAuth2 Client Credentials Grant 토큰 발급 요청.\n`application/x-www-form-urlencoded` 으로 전송합니다.\n",
+        "required": [
+         "grant_type",
+         "client_id",
+         "client_secret"
+        ],
+        "properties": {
+         "grant_type": {
+          "type": "string",
+          "enum": [
+           "client_credentials"
+          ],
+          "description": "인증 방식. `client_credentials` 만 지원합니다."
+         },
+         "client_id": {
+          "type": "string",
+          "description": "발급받은 클라이언트 ID",
+          "example": "c_01HXYZABCDEFG123456789"
+         },
+         "client_secret": {
+          "type": "string",
+          "format": "password",
+          "description": "발급받은 클라이언트 시크릿. 노출되지 않도록 서버 측에서만 사용합니다."
+         }
+        }
+       },
+       "example": {
+        "grant_type": "client_credentials",
+        "client_id": "c_01HXYZABCDEFG123456789",
+        "client_secret": "s_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "토큰 발급 성공",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "토큰 발급 성공 응답.\nBFF 의 공통 `ApiResponse` envelope 을 사용하지 않고 OAuth2 표준 형식으로 응답합니다.\n",
+         "required": [
+          "access_token",
+          "token_type",
+          "expires_in"
+         ],
+         "properties": {
+          "access_token": {
+           "type": "string",
+           "description": "JWT 형식의 access token. 모든 API 요청의 `Authorization: Bearer` 헤더에 담습니다.",
+           "example": "eyJraWQiOiIyMDI2LTA0LTAxLWtleSIsImFsZyI6IlJTMjU2In0.eyJzdWIiOiJjXzAxSFhZWiJ9..."
+          },
+          "token_type": {
+           "type": "string",
+           "enum": [
+            "Bearer"
+           ],
+           "description": "토큰 타입. 항상 `Bearer`.",
+           "example": "Bearer"
+          },
+          "expires_in": {
+           "type": "integer",
+           "format": "int64",
+           "description": "토큰 만료까지 남은 초.",
+           "example": 86400
+          }
+         }
+        },
+        "example": {
+         "access_token": "eyJraWQiOiIyMDI2LTA0LTAxLWtleSIsImFsZyI6IlJTMjU2In0.eyJzdWIiOiJjXzAxSFhZWiJ9...",
+         "token_type": "Bearer",
+         "expires_in": 86400
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "잘못된 요청.\n필수 파라미터 누락, 지원하지 않는 grant_type 등.\n",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "OAuth2 토큰 발급 실패 응답.\n`/oauth2/token` 엔드포인트는 BFF 공통 `ErrorResponse` envelope 이 아닌 OAuth2 표준 포맷으로 응답합니다.\n클라이언트는 `code` 가 아닌 `error` 필드로 에러를 식별해야 합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "에러 코드.",
+           "enum": [
+            "invalid_request",
+            "invalid_client",
+            "invalid_grant",
+            "unauthorized_client",
+            "unsupported_grant_type",
+            "access_denied"
+           ]
+          },
+          "error_description": {
+           "type": "string",
+           "description": "에러 상세 설명 (선택). 메시지에 non-ASCII 문자가 포함되는 경우 생략될 수 있습니다.\n",
+           "example": "Client authentication failed."
+          },
+          "error_uri": {
+           "type": "string",
+           "format": "uri",
+           "description": "에러 정보가 게시된 페이지 URI (선택)."
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "클라이언트 인증 실패.\n`client_id` / `client_secret` 가 잘못되었거나 클라이언트가 비활성 상태인 경우.\n",
+      "headers": {
+       "WWW-Authenticate": {
+        "description": "Basic 인증 챌린지. 토큰 엔드포인트는 `Basic realm=\"openapi\"` 로 응답합니다.\n",
+        "schema": {
+         "type": "string"
+        },
+        "example": "Basic realm=\"openapi\""
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "OAuth2 토큰 발급 실패 응답.\n`/oauth2/token` 엔드포인트는 BFF 공통 `ErrorResponse` envelope 이 아닌 OAuth2 표준 포맷으로 응답합니다.\n클라이언트는 `code` 가 아닌 `error` 필드로 에러를 식별해야 합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "에러 코드.",
+           "enum": [
+            "invalid_request",
+            "invalid_client",
+            "invalid_grant",
+            "unauthorized_client",
+            "unsupported_grant_type",
+            "access_denied"
+           ]
+          },
+          "error_description": {
+           "type": "string",
+           "description": "에러 상세 설명 (선택). 메시지에 non-ASCII 문자가 포함되는 경우 생략될 수 있습니다.\n",
+           "example": "Client authentication failed."
+          },
+          "error_uri": {
+           "type": "string",
+           "format": "uri",
+           "description": "에러 정보가 게시된 페이지 URI (선택)."
+          }
+         }
+        },
+        "example": {
+         "error": "invalid_client",
+         "error_description": "Client authentication failed."
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "허용되지 않은 IP 에서의 요청.\n클라이언트에 등록된 허용 IP 목록에 없는 IP 에서 호출한 경우 차단됩니다.\n토스증권 WTS 설정 > Open API > 허용 IP 관리 에서 호출을 허용할 IP 를 등록할 수 있습니다.\n",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "OAuth2 토큰 발급 실패 응답.\n`/oauth2/token` 엔드포인트는 BFF 공통 `ErrorResponse` envelope 이 아닌 OAuth2 표준 포맷으로 응답합니다.\n클라이언트는 `code` 가 아닌 `error` 필드로 에러를 식별해야 합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "에러 코드.",
+           "enum": [
+            "invalid_request",
+            "invalid_client",
+            "invalid_grant",
+            "unauthorized_client",
+            "unsupported_grant_type",
+            "access_denied"
+           ]
+          },
+          "error_description": {
+           "type": "string",
+           "description": "에러 상세 설명 (선택). 메시지에 non-ASCII 문자가 포함되는 경우 생략될 수 있습니다.\n",
+           "example": "Client authentication failed."
+          },
+          "error_uri": {
+           "type": "string",
+           "format": "uri",
+           "description": "에러 정보가 게시된 페이지 URI (선택)."
+          }
+         }
+        },
+        "example": {
+         "error": "access_denied",
+         "error_description": "IP address not allowed"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "요청 한도 초과. 포함 헤더의 의미는 아래 `headers` 정의를 참조합니다.",
+      "headers": {
+       "X-RateLimit-Limit": {
+        "description": "현재 허용된 초당 요청 수 (burst capacity)",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 10
+       },
+       "X-RateLimit-Remaining": {
+        "description": "현재 버킷에 남은 토큰 수. 429 시 0.",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 0
+       },
+       "X-RateLimit-Reset": {
+        "description": "토큰 1 개가 재충전될 때까지 예상 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       },
+       "Retry-After": {
+        "description": "재시도 권장 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "rate-limit-exceeded",
+          "message": "요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/accounts": {
+   "get": {
+    "tags": [
+     "Account"
+    ],
+    "summary": "계좌 목록 조회",
+    "description": "사용자의 계좌 목록을 조회합니다.\n\n- 현재는 **종합매매 (`BROKERAGE`) 계좌만 반환**하며, 계좌가 없으면 빈 배열. 자녀계좌는 사용할 수 없습니다.\n- 응답의 `accountSeq` 는 **다른 모든 사용자 컨텍스트 API** (보유 주식, 주문, 매수가능금액 등) 의 `X-Tossinvest-Account` 헤더에 사용합니다.\n- `accountType` enum 은 `BROKERAGE` / `OVERSEAS_DERIVATIVES` / `PENSION_SAVINGS` / `RESHORING_INVESTMENT` 가 정의되어 있으나 본 API 에서는 현재 `BROKERAGE` 만 노출됩니다. enum 의미는 `Account.accountType` schema 참조.\n\n**Rate Limits Group**: `ACCOUNT`\n",
+    "operationId": "getAccounts",
+    "security": [
+     {
+      "oauth2ClientCredentials": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "성공",
+      "content": {
+       "application/json": {
+        "schema": {
+         "allOf": [
+          {
+           "type": "object",
+           "description": "성공 응답 envelope. 200 응답에 사용됩니다.\n각 엔드포인트의 성공 응답 스키마는 `allOf` 로 본 스키마를 상속하며 `result` 를 구체 타입으로 specialize 합니다.\n실패 응답은 별도의 `ErrorResponse` 스키마를 사용합니다 (4xx/5xx). `result` 와 `error` 는 동시에 나타나지 않습니다.\n",
+           "required": [
+            "result"
+           ],
+           "properties": {
+            "result": {
+             "description": "성공 응답의 페이로드. 엔드포인트별 타입이 다르며, 각 엔드포인트 스펙에서 `allOf` 로 구체 타입을 명시합니다.\n"
+            }
+           }
+          },
+          {
+           "type": "object",
+           "properties": {
+            "result": {
+             "type": "array",
+             "items": {
+              "type": "object",
+              "required": [
+               "accountNo",
+               "accountSeq",
+               "accountType"
+              ],
+              "properties": {
+               "accountNo": {
+                "type": "string",
+                "description": "계좌번호",
+                "example": "12345678901"
+               },
+               "accountSeq": {
+                "type": "integer",
+                "format": "int64",
+                "description": "계좌 식별 키. 주문 등 API 호출 시 이 값을 사용",
+                "example": 1
+               },
+               "accountType": {
+                "type": "string",
+                "enum": [
+                 "BROKERAGE",
+                 "OVERSEAS_DERIVATIVES",
+                 "PENSION_SAVINGS",
+                 "RESHORING_INVESTMENT"
+                ],
+                "description": "계좌 유형. 현재는 BROKERAGE 만 지원합니다.\n- BROKERAGE: 종합매매. 국내·해외 주식 통합 매매 계좌\n- OVERSEAS_DERIVATIVES: 해외파생. 해외 파생상품 거래 계좌\n- PENSION_SAVINGS: 연금저축. 세제혜택 연금저축 계좌\n- RESHORING_INVESTMENT: RIA 계좌\n\n클라이언트는 unknown enum 값을 허용하도록 구현해야 합니다.\n",
+                "example": "BROKERAGE"
+               }
+              }
+             }
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "인증 실패. `WWW-Authenticate: Bearer ...` 헤더가 함께 내려갑니다.\n",
+      "headers": {
+       "WWW-Authenticate": {
+        "description": "OAuth 2.0 Bearer 토큰 챌린지. 메시지에 non-ASCII 문자가 포함되는 경우\n`error_description` 파라미터는 생략됩니다.\n",
+        "schema": {
+         "type": "string"
+        },
+        "example": "Bearer realm=\"openapi\", error=\"invalid_token\", error_description=\"Token has expired\""
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "요청 한도 초과. 포함 헤더의 의미는 아래 `headers` 정의를 참조합니다.",
+      "headers": {
+       "X-RateLimit-Limit": {
+        "description": "현재 허용된 초당 요청 수 (burst capacity)",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 10
+       },
+       "X-RateLimit-Remaining": {
+        "description": "현재 버킷에 남은 토큰 수. 429 시 0.",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 0
+       },
+       "X-RateLimit-Reset": {
+        "description": "토큰 1 개가 재충전될 때까지 예상 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       },
+       "Retry-After": {
+        "description": "재시도 권장 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "rate-limit-exceeded",
+          "message": "요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
+         }
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "서비스 일시 불가",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "internal-error",
+          "message": "처리 중 문제가 생겼어요. 잠시 후 다시 시도해주세요."
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/holdings": {
+   "get": {
+    "tags": [
+     "Asset"
+    ],
+    "summary": "보유 주식 조회",
+    "description": "보유 주식 정보를 조회합니다.\n국내(KR)·미국(US) 주식만 포함하며, 해외 옵션·채권은 제외합니다.\n보유 종목이 없으면 요약 금액은 0이고 items는 빈 배열입니다.\n\n**Rate Limits Group**: `ASSET`\n",
+    "operationId": "getHoldings",
+    "security": [
+     {
+      "oauth2ClientCredentials": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "X-Tossinvest-Account",
+      "in": "header",
+      "required": true,
+      "description": "API 요청 시 사용할 계좌의 accountSeq.\n`GET /api/v1/accounts` 응답의 `accountSeq` 값을 사용합니다.\n",
+      "schema": {
+       "type": "integer",
+       "format": "int64"
+      },
+      "example": 1
+     },
+     {
+      "name": "symbol",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9.\\-]+$"
+      },
+      "description": "종목 심볼. KR: 6자리 종목코드 (숫자 또는 영문·숫자 조합; 예: 005930, 0101N0), US: 티커 (예: AAPL).\n영문 대/소문자, 숫자, '.', '-' 만 허용한다.\n제공 시 해당 종목만 필터링하여 반환하며, 요약 필드도 해당 종목 기준으로 재계산합니다.\n미제공 시 전체 보유 종목을 반환합니다.\n",
+      "example": "005930"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "성공",
+      "content": {
+       "application/json": {
+        "schema": {
+         "allOf": [
+          {
+           "type": "object",
+           "description": "성공 응답 envelope. 200 응답에 사용됩니다.\n각 엔드포인트의 성공 응답 스키마는 `allOf` 로 본 스키마를 상속하며 `result` 를 구체 타입으로 specialize 합니다.\n실패 응답은 별도의 `ErrorResponse` 스키마를 사용합니다 (4xx/5xx). `result` 와 `error` 는 동시에 나타나지 않습니다.\n",
+           "required": [
+            "result"
+           ],
+           "properties": {
+            "result": {
+             "description": "성공 응답의 페이로드. 엔드포인트별 타입이 다르며, 각 엔드포인트 스펙에서 `allOf` 로 구체 타입을 명시합니다.\n"
+            }
+           }
+          },
+          {
+           "type": "object",
+           "properties": {
+            "result": {
+             "type": "object",
+             "required": [
+              "totalPurchaseAmount",
+              "marketValue",
+              "profitLoss",
+              "dailyProfitLoss",
+              "items"
+             ],
+             "properties": {
+              "totalPurchaseAmount": {
+               "description": "투자원금. 전체 보유 종목의 통화별 합산",
+               "allOf": [
+                {
+                 "type": "object",
+                 "description": "통화별 합산 금액. 각 통화 필드는 해당 통화로 거래된 종목의 합만 포함합니다 (환율 환산을 통한 통화 간 합산 미포함).",
+                 "required": [
+                  "krw"
+                 ],
+                 "properties": {
+                  "krw": {
+                   "type": "string",
+                   "format": "decimal",
+                   "maxLength": 30,
+                   "description": "KRW로 거래되는 국내 종목의 합산 금액. 국내 종목이 없으면 0"
+                  },
+                  "usd": {
+                   "type": [
+                    "string",
+                    "null"
+                   ],
+                   "format": "decimal",
+                   "maxLength": 30,
+                   "description": "USD로 거래되는 해외 종목의 합산 금액. 해외 종목이 없으면 null"
+                  }
+                 }
+                }
+               ]
+              },
+              "marketValue": {
+               "type": "object",
+               "description": "시장 평가금액. 전체 보유 종목의 통화별 합산",
+               "required": [
+                "amount",
+                "amountAfterCost"
+               ],
+               "properties": {
+                "amount": {
+                 "description": "시장 평가금액",
+                 "allOf": [
+                  {
+                   "type": "object",
+                   "description": "통화별 합산 금액. 각 통화 필드는 해당 통화로 거래된 종목의 합만 포함합니다 (환율 환산을 통한 통화 간 합산 미포함).",
+                   "required": [
+                    "krw"
+                   ],
+                   "properties": {
+                    "krw": {
+                     "type": "string",
+                     "format": "decimal",
+                     "maxLength": 30,
+                     "description": "KRW로 거래되는 국내 종목의 합산 금액. 국내 종목이 없으면 0"
+                    },
+                    "usd": {
+                     "type": [
+                      "string",
+                      "null"
+                     ],
+                     "format": "decimal",
+                     "maxLength": 30,
+                     "description": "USD로 거래되는 해외 종목의 합산 금액. 해외 종목이 없으면 null"
+                    }
+                   }
+                  }
+                 ]
+                },
+                "amountAfterCost": {
+                 "description": "세금/수수료 공제 후 평가금액",
+                 "allOf": [
+                  {
+                   "type": "object",
+                   "description": "통화별 합산 금액. 각 통화 필드는 해당 통화로 거래된 종목의 합만 포함합니다 (환율 환산을 통한 통화 간 합산 미포함).",
+                   "required": [
+                    "krw"
+                   ],
+                   "properties": {
+                    "krw": {
+                     "type": "string",
+                     "format": "decimal",
+                     "maxLength": 30,
+                     "description": "KRW로 거래되는 국내 종목의 합산 금액. 국내 종목이 없으면 0"
+                    },
+                    "usd": {
+                     "type": [
+                      "string",
+                      "null"
+                     ],
+                     "format": "decimal",
+                     "maxLength": 30,
+                     "description": "USD로 거래되는 해외 종목의 합산 금액. 해외 종목이 없으면 null"
+                    }
+                   }
+                  }
+                 ]
+                }
+               }
+              },
+              "profitLoss": {
+               "type": "object",
+               "description": "손익. 전체 보유 종목의 통화별 합산",
+               "required": [
+                "amount",
+                "amountAfterCost",
+                "rate",
+                "rateAfterCost"
+               ],
+               "properties": {
+                "amount": {
+                 "description": "손익금액",
+                 "allOf": [
+                  {
+                   "type": "object",
+                   "description": "통화별 합산 금액. 각 통화 필드는 해당 통화로 거래된 종목의 합만 포함합니다 (환율 환산을 통한 통화 간 합산 미포함).",
+                   "required": [
+                    "krw"
+                   ],
+                   "properties": {
+                    "krw": {
+                     "type": "string",
+                     "format": "decimal",
+                     "maxLength": 30,
+                     "description": "KRW로 거래되는 국내 종목의 합산 금액. 국내 종목이 없으면 0"
+                    },
+                    "usd": {
+                     "type": [
+                      "string",
+                      "null"
+                     ],
+                     "format": "decimal",
+                     "maxLength": 30,
+                     "description": "USD로 거래되는 해외 종목의 합산 금액. 해외 종목이 없으면 null"
+                    }
+                   }
+                  }
+                 ]
+                },
+                "amountAfterCost": {
+                 "description": "세금/수수료 공제 후 손익금액",
+                 "allOf": [
+                  {
+                   "type": "object",
+                   "description": "통화별 합산 금액. 각 통화 필드는 해당 통화로 거래된 종목의 합만 포함합니다 (환율 환산을 통한 통화 간 합산 미포함).",
+                   "required": [
+                    "krw"
+                   ],
+                   "properties": {
+                    "krw": {
+                     "type": "string",
+                     "format": "decimal",
+                     "maxLength": 30,
+                     "description": "KRW로 거래되는 국내 종목의 합산 금액. 국내 종목이 없으면 0"
+                    },
+                    "usd": {
+                     "type": [
+                      "string",
+                      "null"
+                     ],
+                     "format": "decimal",
+                     "maxLength": 30,
+                     "description": "USD로 거래되는 해외 종목의 합산 금액. 해외 종목이 없으면 null"
+                    }
+                   }
+                  }
+                 ]
+                },
+                "rate": {
+                 "type": "string",
+                 "format": "decimal",
+                 "maxLength": 30,
+                 "description": "손익률 (소수비율). 전체 자산을 현재 환율로 원화 환산한 기준. 0.1516 = 15.16%",
+                 "example": "0.1516"
+                },
+                "rateAfterCost": {
+                 "type": "string",
+                 "format": "decimal",
+                 "maxLength": 30,
+                 "description": "세금/수수료 공제 후 손익률 (소수비율). 전체 자산을 현재 환율로 원화 환산한 기준. 0.1406 = 14.06%",
+                 "example": "0.1406"
+                }
+               }
+              },
+              "dailyProfitLoss": {
+               "type": "object",
+               "description": "일간 손익. 전체 보유 종목의 통화별 합산",
+               "required": [
+                "amount",
+                "rate"
+               ],
+               "properties": {
+                "amount": {
+                 "description": "일간 손익금액",
+                 "allOf": [
+                  {
+                   "type": "object",
+                   "description": "통화별 합산 금액. 각 통화 필드는 해당 통화로 거래된 종목의 합만 포함합니다 (환율 환산을 통한 통화 간 합산 미포함).",
+                   "required": [
+                    "krw"
+                   ],
+                   "properties": {
+                    "krw": {
+                     "type": "string",
+                     "format": "decimal",
+                     "maxLength": 30,
+                     "description": "KRW로 거래되는 국내 종목의 합산 금액. 국내 종목이 없으면 0"
+                    },
+                    "usd": {
+                     "type": [
+                      "string",
+                      "null"
+                     ],
+                     "format": "decimal",
+                     "maxLength": 30,
+                     "description": "USD로 거래되는 해외 종목의 합산 금액. 해외 종목이 없으면 null"
+                    }
+                   }
+                  }
+                 ]
+                },
+                "rate": {
+                 "type": "string",
+                 "format": "decimal",
+                 "maxLength": 30,
+                 "description": "일간 손익률 (소수비율). 전체 자산을 현재 환율로 원화 환산한 기준. 0.0185 = 1.85%",
+                 "example": "0.0185"
+                }
+               }
+              },
+              "items": {
+               "type": "array",
+               "description": "보유 종목 목록. 보유 종목이 없으면 빈 배열",
+               "items": {
+                "type": "object",
+                "required": [
+                 "symbol",
+                 "name",
+                 "marketCountry",
+                 "currency",
+                 "quantity",
+                 "lastPrice",
+                 "averagePurchasePrice",
+                 "marketValue",
+                 "profitLoss",
+                 "dailyProfitLoss",
+                 "cost"
+                ],
+                "properties": {
+                 "symbol": {
+                  "type": "string",
+                  "description": "종목 심볼. KR: 6자리 종목코드 (숫자 또는 영문·숫자 조합), US: 티커",
+                  "example": "005930"
+                 },
+                 "name": {
+                  "type": "string",
+                  "description": "종목명",
+                  "example": "삼성전자"
+                 },
+                 "marketCountry": {
+                  "type": "string",
+                  "enum": [
+                   "KR",
+                   "US"
+                  ],
+                  "description": "시장 국가 구분.\n- KR: 국내 주식 (KRX)\n- US: 미국 주식 (NYSE, NASDAQ 등)\n\n클라이언트는 unknown enum 값을 허용하도록 구현해야 합니다.\n"
+                 },
+                 "currency": {
+                  "type": "string",
+                  "enum": [
+                   "KRW",
+                   "USD"
+                  ],
+                  "description": "통화 코드.\n- KRW: 한국 원화\n- USD: 미국 달러\n\n클라이언트는 unknown enum 값을 허용하도록 구현해야 합니다.\n"
+                 },
+                 "quantity": {
+                  "type": "string",
+                  "format": "decimal",
+                  "maxLength": 30,
+                  "description": "보유 수량",
+                  "example": "100"
+                 },
+                 "lastPrice": {
+                  "type": "string",
+                  "format": "decimal",
+                  "maxLength": 30,
+                  "description": "현재가. 거래 통화(currency) 기준",
+                  "example": "72000"
+                 },
+                 "averagePurchasePrice": {
+                  "type": "string",
+                  "format": "decimal",
+                  "maxLength": 30,
+                  "description": "매수 평균가. 거래 통화(currency) 기준",
+                  "example": "65000"
+                 },
+                 "marketValue": {
+                  "type": "object",
+                  "description": "시장 평가. 거래 통화(currency) 기준",
+                  "required": [
+                   "purchaseAmount",
+                   "amount",
+                   "amountAfterCost"
+                  ],
+                  "properties": {
+                   "purchaseAmount": {
+                    "type": "string",
+                    "format": "decimal",
+                    "maxLength": 30,
+                    "description": "매입금액",
+                    "example": "6500000"
+                   },
+                   "amount": {
+                    "type": "string",
+                    "format": "decimal",
+                    "maxLength": 30,
+                    "description": "시장 평가금액",
+                    "example": "7200000"
+                   },
+                   "amountAfterCost": {
+                    "type": "string",
+                    "format": "decimal",
+                    "maxLength": 30,
+                    "description": "세금/수수료 공제 후 평가금액",
+                    "example": "7050000"
+                   }
+                  }
+                 },
+                 "profitLoss": {
+                  "type": "object",
+                  "description": "손익. 거래 통화(currency) 기준",
+                  "required": [
+                   "amount",
+                   "amountAfterCost",
+                   "rate",
+                   "rateAfterCost"
+                  ],
+                  "properties": {
+                   "amount": {
+                    "type": "string",
+                    "format": "decimal",
+                    "maxLength": 30,
+                    "description": "손익금액",
+                    "example": "700000"
+                   },
+                   "amountAfterCost": {
+                    "type": "string",
+                    "format": "decimal",
+                    "maxLength": 30,
+                    "description": "세금/수수료 공제 후 손익금액",
+                    "example": "550000"
+                   },
+                   "rate": {
+                    "type": "string",
+                    "format": "decimal",
+                    "maxLength": 30,
+                    "description": "손익률. 소수비율 (0.1077 = 10.77%)",
+                    "example": "0.1077"
+                   },
+                   "rateAfterCost": {
+                    "type": "string",
+                    "format": "decimal",
+                    "maxLength": 30,
+                    "description": "세금/수수료 공제 후 손익률. 소수비율 (0.0846 = 8.46%)",
+                    "example": "0.0846"
+                   }
+                  }
+                 },
+                 "dailyProfitLoss": {
+                  "type": "object",
+                  "description": "일간 손익. 거래 통화(currency) 기준",
+                  "required": [
+                   "amount",
+                   "rate"
+                  ],
+                  "properties": {
+                   "amount": {
+                    "type": "string",
+                    "format": "decimal",
+                    "maxLength": 30,
+                    "description": "일간 손익금액",
+                    "example": "100000"
+                   },
+                   "rate": {
+                    "type": "string",
+                    "format": "decimal",
+                    "maxLength": 30,
+                    "description": "일간 손익률. 소수비율 (0.0141 = 1.41%)",
+                    "example": "0.0141"
+                   }
+                  }
+                 },
+                 "cost": {
+                  "type": "object",
+                  "description": "비용. 거래 통화(currency) 기준",
+                  "required": [
+                   "commission"
+                  ],
+                  "properties": {
+                   "commission": {
+                    "type": "string",
+                    "format": "decimal",
+                    "maxLength": 30,
+                    "description": "수수료",
+                    "example": "14400"
+                   },
+                   "tax": {
+                    "type": [
+                     "string",
+                     "null"
+                    ],
+                    "format": "decimal",
+                    "maxLength": 30,
+                    "description": "세금. 세금이 없는 경우 null",
+                    "example": "135600"
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "X-Tossinvest-Account 헤더 누락",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "account-header-required",
+          "message": "x-tossinvest-account 헤더가 필요합니다."
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "인증 실패. `WWW-Authenticate: Bearer ...` 헤더가 함께 내려갑니다.\n",
+      "headers": {
+       "WWW-Authenticate": {
+        "description": "OAuth 2.0 Bearer 토큰 챌린지. 메시지에 non-ASCII 문자가 포함되는 경우\n`error_description` 파라미터는 생략됩니다.\n",
+        "schema": {
+         "type": "string"
+        },
+        "example": "Bearer realm=\"openapi\", error=\"invalid_token\", error_description=\"Token has expired\""
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "종목을 찾을 수 없음",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "stock-not-found",
+          "message": "종목을 찾을 수 없습니다."
+         }
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "요청 한도 초과. 포함 헤더의 의미는 아래 `headers` 정의를 참조합니다.",
+      "headers": {
+       "X-RateLimit-Limit": {
+        "description": "현재 허용된 초당 요청 수 (burst capacity)",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 10
+       },
+       "X-RateLimit-Remaining": {
+        "description": "현재 버킷에 남은 토큰 수. 429 시 0.",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 0
+       },
+       "X-RateLimit-Reset": {
+        "description": "토큰 1 개가 재충전될 때까지 예상 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       },
+       "Retry-After": {
+        "description": "재시도 권장 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "rate-limit-exceeded",
+          "message": "요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
+         }
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "보유 자산 조회 중 일시적 오류",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "internal-error",
+          "message": "처리 중 문제가 생겼어요. 잠시 후 다시 시도해주세요."
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/orders": {
+   "get": {
+    "tags": [
+     "Order History"
+    ],
+    "summary": "주문 목록 조회",
+    "description": "주문 목록을 조회합니다.\nstatus 파라미터로 주문 상태를 필터링합니다.\n\n**지원하는 status 값:**\n- 진행 중 주문: `OPEN` -- PENDING, PARTIAL_FILLED, PENDING_CANCEL, PENDING_REPLACE 상태의 주문을 반환\n- 종료된 주문: `CLOSED` -- FILLED, CANCELED, REJECTED, REPLACED 등 종료 상태 주문을 반환합니다.\n\nsymbol을 지정하면 해당 종목의 주문만 필터링하여 반환합니다.\n\n**조회 범위:**\nOpen API 가 지원하는 호가 유형(지정가 · 시장가 · 장마감지정가)으로 접수된 주문만 반환합니다.\n장후시간외 종가 · 장전시간외 종가 등 Open API 로 주문할 수 없는 호가 유형의 주문은\n`OPEN`·`CLOSED` 목록과 주문 상세 조회 모두에서 조회되지 않습니다.\n\n**페이징 동작:**\n- `status=OPEN`: 모든 대기 중 주문을 전량 반환합니다. `limit`, `cursor` 는 무시되며, `from`/`to` 만 주문 생성일(`orderedAt`, KST 기준) 범위 필터로 적용됩니다 (미지정 시 전체 기간).\n- `status=CLOSED`: `limit` (기본 20, 최대 100), `cursor`, `from`/`to` 파라미터 모두 적용됩니다.\n\n**Rate Limits Group**: `ORDER_HISTORY`\n",
+    "operationId": "getOrders",
+    "security": [
+     {
+      "oauth2ClientCredentials": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "X-Tossinvest-Account",
+      "in": "header",
+      "required": true,
+      "description": "API 요청 시 사용할 계좌의 accountSeq.\n`GET /api/v1/accounts` 응답의 `accountSeq` 값을 사용합니다.\n",
+      "schema": {
+       "type": "integer",
+       "format": "int64"
+      },
+      "example": 1
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "required": true,
+      "description": "주문 라이프사이클 그룹 필터. 이 값은 각 주문의 세부 상태(`orders[].status`)를 **그룹화한 라벨**이며, `orders[].status` 와 값 체계가 다릅니다.\n\n- `OPEN`: 진행 중 주문 그룹 — `orders[].status` ∈ `{PENDING, PARTIAL_FILLED, PENDING_CANCEL, PENDING_REPLACE}`\n- `CLOSED`: 종료된 주문 그룹 — `orders[].status` ∈ `{FILLED, CANCELED, REJECTED, REPLACED, CANCEL_REJECTED, REPLACE_REJECTED, PARTIAL_FILLED}`\n\n예: `status=OPEN` 을 요청하면 응답의 `orders[].status` 는 개별 주문에 따라 `PENDING`, `PARTIAL_FILLED`, `PENDING_CANCEL`, `PENDING_REPLACE` 중 하나로 내려옵니다.\n",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "OPEN",
+        "CLOSED"
+       ]
+      },
+      "example": "OPEN"
+     },
+     {
+      "name": "symbol",
+      "in": "query",
+      "required": false,
+      "description": "종목 심볼. 지정 시 해당 종목의 주문만 조회.\nKRX: 6자리 종목코드 (숫자 또는 영문·숫자 조합; 예: `005930`·`0101N0`), US: 영문 티커 (`AAPL`).\n영문 대/소문자, 숫자, '.', '-' 만 허용한다.\n",
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9.\\-]+$"
+      }
+     },
+     {
+      "name": "from",
+      "in": "query",
+      "required": false,
+      "description": "조회 시작일 (inclusive, KST 기준). 주문 생성 시간(`orderedAt`) 기준. 미지정 시 전체 기간.\n",
+      "schema": {
+       "type": "string",
+       "format": "date"
+      },
+      "example": "2026-03-01"
+     },
+     {
+      "name": "to",
+      "in": "query",
+      "required": false,
+      "description": "조회 종료일 (inclusive, KST 기준). 주문 생성 시간(`orderedAt`) 기준. 미지정 시 전체 기간.\n",
+      "schema": {
+       "type": "string",
+       "format": "date"
+      },
+      "example": "2026-03-31"
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "description": "페이지네이션 커서. `OPEN` 에서는 무시됩니다. `CLOSED` 에서는 다음 페이지 조회에 사용됩니다.\n",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "description": "페이지 크기. `OPEN` 에서는 무시됩니다 (전량 반환). `CLOSED` 에서는 적용됩니다 (기본 20, 최대 100).\n",
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 100,
+       "default": 20
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "성공",
+      "content": {
+       "application/json": {
+        "schema": {
+         "allOf": [
+          {
+           "type": "object",
+           "description": "성공 응답 envelope. 200 응답에 사용됩니다.\n각 엔드포인트의 성공 응답 스키마는 `allOf` 로 본 스키마를 상속하며 `result` 를 구체 타입으로 specialize 합니다.\n실패 응답은 별도의 `ErrorResponse` 스키마를 사용합니다 (4xx/5xx). `result` 와 `error` 는 동시에 나타나지 않습니다.\n",
+           "required": [
+            "result"
+           ],
+           "properties": {
+            "result": {
+             "description": "성공 응답의 페이로드. 엔드포인트별 타입이 다르며, 각 엔드포인트 스펙에서 `allOf` 로 구체 타입을 명시합니다.\n"
+            }
+           }
+          },
+          {
+           "type": "object",
+           "properties": {
+            "result": {
+             "type": "object",
+             "required": [
+              "orders",
+              "nextCursor",
+              "hasNext"
+             ],
+             "description": "주문 목록 페이징 응답.\n- `status=OPEN`: 모든 대기 중 주문을 반환합니다. `nextCursor`는 항상 `null`, `hasNext`는 항상 `false`.\n- `status=CLOSED`: `limit` 단위로 페이징합니다. 다음 페이지가 있으면 `nextCursor`에 커서가, `hasNext`에 `true`가 내려옵니다.\n",
+             "properties": {
+              "orders": {
+               "type": "array",
+               "items": {
+                "type": "object",
+                "required": [
+                 "orderId",
+                 "symbol",
+                 "side",
+                 "orderType",
+                 "timeInForce",
+                 "status",
+                 "quantity",
+                 "currency",
+                 "orderedAt",
+                 "execution"
+                ],
+                "properties": {
+                 "orderId": {
+                  "type": "string",
+                  "description": "주문 식별자",
+                  "example": "bAGzNvMOOTa5Uy0xVzYNbxDJ3Qpobwau4jDF3hyZZGWbpHm7wha8CFZc7aXVOWAl"
+                 },
+                 "symbol": {
+                  "type": "string",
+                  "description": "종목 심볼. KRX: 6자리 종목코드 (숫자 또는 영문·숫자 조합), US: 영문 티커",
+                  "example": "005930"
+                 },
+                 "side": {
+                  "type": "string",
+                  "enum": [
+                   "BUY",
+                   "SELL"
+                  ],
+                  "description": "주문 방향",
+                  "example": "BUY"
+                 },
+                 "orderType": {
+                  "type": "string",
+                  "enum": [
+                   "LIMIT",
+                   "MARKET"
+                  ],
+                  "description": "호가 유형.\n- `LIMIT`: 지정가\n- `MARKET`: 시장가\n\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+                  "example": "LIMIT"
+                 },
+                 "timeInForce": {
+                  "type": "string",
+                  "enum": [
+                   "DAY",
+                   "CLS",
+                   "OPG"
+                  ],
+                  "description": "주문 유효 조건 (Time In Force). `orderType` 과 결합되어 주문 방식이 결정됩니다 (예: `LIMIT` + `CLS` = LOC).\n- `DAY`: 당일 유효 (Day)\n- `CLS`: 장 마감 주문 (At the Close)\n- `OPG`: 장 개시 주문 (At the Opening, 국내 시가단일가)\n\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+                  "example": "DAY"
+                 },
+                 "status": {
+                  "type": "string",
+                  "enum": [
+                   "PENDING",
+                   "PENDING_CANCEL",
+                   "PENDING_REPLACE",
+                   "PARTIAL_FILLED",
+                   "FILLED",
+                   "CANCELED",
+                   "REJECTED",
+                   "CANCEL_REJECTED",
+                   "REPLACE_REJECTED",
+                   "REPLACED"
+                  ],
+                  "description": "주문 상태.\n- `PENDING`: 체결 대기. 주문이 접수되어 체결을 대기 중인 상태\n- `PENDING_CANCEL`: 취소 대기. 취소 요청이 접수되어 브로커 응답을 대기 중인 상태\n- `PENDING_REPLACE`: 정정 대기. 정정 요청이 접수되어 브로커 응답을 대기 중인 상태\n- `PARTIAL_FILLED`: 부분 체결. 주문 수량 중 일부만 체결된 상태\n- `FILLED`: 체결 완료. 주문 수량이 전량 체결된 상태\n- `CANCELED`: 취소 완료. execution.filledQuantity를 통해 부분 체결 여부를 확인할 수 있음\n- `REJECTED`: 거부됨. 브로커가 주문을 거부한 상태. execution.filledQuantity를 통해 부분 체결 여부를 확인할 수 있음\n- `CANCEL_REJECTED`: 취소 거부. 브로커가 취소 요청을 거부한 경우 별도 주문 레코드로 생성됨. 원주문은 이전 상태로 복귀함\n- `REPLACE_REJECTED`: 정정 거부. 브로커가 정정 요청을 거부한 경우 별도 주문 레코드로 생성됨. 원주문은 이전 상태로 복귀함\n- `REPLACED`: 정정됨. 정정 요청이 수락되어 원주문이 대체된 상태. execution.filledQuantity를 통해 부분 체결 여부를 확인할 수 있음\n\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+                  "example": "FILLED"
+                 },
+                 "price": {
+                  "type": [
+                   "string",
+                   "null"
+                  ],
+                  "format": "decimal",
+                  "maxLength": 30,
+                  "description": "주문 가격 (native currency). MARKET 주문 시 null",
+                  "example": "70000"
+                 },
+                 "quantity": {
+                  "type": "string",
+                  "format": "decimal",
+                  "maxLength": 30,
+                  "description": "주문 수량",
+                  "example": "10"
+                 },
+                 "orderAmount": {
+                  "type": [
+                   "string",
+                   "null"
+                  ],
+                  "format": "decimal",
+                  "maxLength": 30,
+                  "description": "주문 금액 (USD). 금액 기반 US 시장가 매수 주문에만 해당. 그 외 null",
+                  "example": null
+                 },
+                 "currency": {
+                  "type": "string",
+                  "enum": [
+                   "KRW",
+                   "USD"
+                  ],
+                  "description": "통화 코드.\n- KRW: 한국 원화\n- USD: 미국 달러\n\n클라이언트는 unknown enum 값을 허용하도록 구현해야 합니다.\n"
+                 },
+                 "orderedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "주문 시간 (ISO 8601, KST)",
+                  "example": "2026-03-29T09:30:00.000+09:00"
+                 },
+                 "canceledAt": {
+                  "type": [
+                   "string",
+                   "null"
+                  ],
+                  "format": "date-time",
+                  "description": "취소 시간 (ISO 8601, KST). 해당 없으면 null",
+                  "example": null
+                 },
+                 "execution": {
+                  "type": "object",
+                  "description": "체결 결과. 체결 내역이 없으면 filledQuantity=0",
+                  "allOf": [
+                   {
+                    "type": "object",
+                    "required": [
+                     "filledQuantity",
+                     "averageFilledPrice",
+                     "filledAmount",
+                     "commission",
+                     "tax",
+                     "filledAt",
+                     "settlementDate"
+                    ],
+                    "properties": {
+                     "filledQuantity": {
+                      "type": "string",
+                      "format": "decimal",
+                      "maxLength": 30,
+                      "description": "체결 수량",
+                      "example": "10"
+                     },
+                     "averageFilledPrice": {
+                      "type": [
+                       "string",
+                       "null"
+                      ],
+                      "format": "decimal",
+                      "maxLength": 30,
+                      "description": "평균 체결 가격 (native currency). 부분 체결 시 체결된 건의 평균, 미체결 시 null",
+                      "example": "70000"
+                     },
+                     "filledAmount": {
+                      "type": [
+                       "string",
+                       "null"
+                      ],
+                      "format": "decimal",
+                      "maxLength": 30,
+                      "description": "총 체결 금액 (native currency)",
+                      "example": "700000"
+                     },
+                     "commission": {
+                      "type": [
+                       "string",
+                       "null"
+                      ],
+                      "format": "decimal",
+                      "maxLength": 30,
+                      "description": "총 체결 수수료 (native currency)",
+                      "example": "1400"
+                     },
+                     "tax": {
+                      "type": [
+                       "string",
+                       "null"
+                      ],
+                      "format": "decimal",
+                      "maxLength": 30,
+                      "description": "총 체결 세금 (native currency)",
+                      "example": "0"
+                     },
+                     "filledAt": {
+                      "type": [
+                       "string",
+                       "null"
+                      ],
+                      "format": "date-time",
+                      "description": "최종 체결 시간 (ISO 8601, KST)",
+                      "example": "2026-03-28T09:31:15.000+09:00"
+                     },
+                     "settlementDate": {
+                      "type": [
+                       "string",
+                       "null"
+                      ],
+                      "format": "date",
+                      "description": "결제 예정일 (YYYY-MM-DD, KST 기준). 미결제 시 null",
+                      "example": "2026-03-30"
+                     }
+                    }
+                   }
+                  ]
+                 }
+                }
+               },
+               "description": "주문 목록"
+              },
+              "nextCursor": {
+               "type": [
+                "string",
+                "null"
+               ],
+               "description": "다음 페이지 커서. 다음 페이지가 없으면 null",
+               "example": null
+              },
+              "hasNext": {
+               "type": "boolean",
+               "description": "다음 페이지 존재 여부",
+               "example": false
+              }
+             }
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "잘못된 요청",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "인증 실패. `WWW-Authenticate: Bearer ...` 헤더가 함께 내려갑니다.\n",
+      "headers": {
+       "WWW-Authenticate": {
+        "description": "OAuth 2.0 Bearer 토큰 챌린지. 메시지에 non-ASCII 문자가 포함되는 경우\n`error_description` 파라미터는 생략됩니다.\n",
+        "schema": {
+         "type": "string"
+        },
+        "example": "Bearer realm=\"openapi\", error=\"invalid_token\", error_description=\"Token has expired\""
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "종목을 찾을 수 없음",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "stock-not-found",
+          "message": "종목을 찾을 수 없습니다."
+         }
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "요청 한도 초과. 포함 헤더의 의미는 아래 `headers` 정의를 참조합니다.",
+      "headers": {
+       "X-RateLimit-Limit": {
+        "description": "현재 허용된 초당 요청 수 (burst capacity)",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 10
+       },
+       "X-RateLimit-Remaining": {
+        "description": "현재 버킷에 남은 토큰 수. 429 시 0.",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 0
+       },
+       "X-RateLimit-Reset": {
+        "description": "토큰 1 개가 재충전될 때까지 예상 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       },
+       "Retry-After": {
+        "description": "재시도 권장 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "rate-limit-exceeded",
+          "message": "요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
+         }
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "주문 조회 중 일시적 오류",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "internal-error",
+          "message": "처리 중 문제가 생겼어요. 잠시 후 다시 시도해주세요."
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/buying-power": {
+   "get": {
+    "tags": [
+     "Order Info"
+    ],
+    "summary": "매수 가능 금액 조회",
+    "description": "매수 주문 시 사용할 수 있는 매수 가능 금액을 조회합니다.\n미수거래를 제외한 현금 기반 매수 가능 금액(미수 미발생 기준)을 반환합니다.\n\n**Rate Limits Group**: `ORDER_INFO`\n",
+    "operationId": "getBuyingPower",
+    "security": [
+     {
+      "oauth2ClientCredentials": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "X-Tossinvest-Account",
+      "in": "header",
+      "required": true,
+      "description": "API 요청 시 사용할 계좌의 accountSeq.\n`GET /api/v1/accounts` 응답의 `accountSeq` 값을 사용합니다.\n",
+      "schema": {
+       "type": "integer",
+       "format": "int64"
+      },
+      "example": 1
+     },
+     {
+      "name": "currency",
+      "in": "query",
+      "required": true,
+      "description": "통화 코드",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "KRW",
+        "USD"
+       ],
+       "description": "통화 코드.\n- KRW: 한국 원화\n- USD: 미국 달러\n\n클라이언트는 unknown enum 값을 허용하도록 구현해야 합니다.\n"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "성공",
+      "content": {
+       "application/json": {
+        "schema": {
+         "allOf": [
+          {
+           "type": "object",
+           "description": "성공 응답 envelope. 200 응답에 사용됩니다.\n각 엔드포인트의 성공 응답 스키마는 `allOf` 로 본 스키마를 상속하며 `result` 를 구체 타입으로 specialize 합니다.\n실패 응답은 별도의 `ErrorResponse` 스키마를 사용합니다 (4xx/5xx). `result` 와 `error` 는 동시에 나타나지 않습니다.\n",
+           "required": [
+            "result"
+           ],
+           "properties": {
+            "result": {
+             "description": "성공 응답의 페이로드. 엔드포인트별 타입이 다르며, 각 엔드포인트 스펙에서 `allOf` 로 구체 타입을 명시합니다.\n"
+            }
+           }
+          },
+          {
+           "type": "object",
+           "properties": {
+            "result": {
+             "type": "object",
+             "required": [
+              "currency",
+              "cashBuyingPower"
+             ],
+             "properties": {
+              "currency": {
+               "type": "string",
+               "enum": [
+                "KRW",
+                "USD"
+               ],
+               "description": "통화 코드.\n- KRW: 한국 원화\n- USD: 미국 달러\n\n클라이언트는 unknown enum 값을 허용하도록 구현해야 합니다.\n"
+              },
+              "cashBuyingPower": {
+               "type": "string",
+               "format": "decimal",
+               "maxLength": 30,
+               "description": "현금 기반 매수 가능 금액 (미수 미발생 기준).\n순수 현금으로 매수할 수 있는 금액.\nKRW: 정수 (원 단위). USD: 소수점 포함 (달러 단위).\n",
+               "example": "5000000"
+              }
+             }
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "잘못된 요청",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "인증 실패. `WWW-Authenticate: Bearer ...` 헤더가 함께 내려갑니다.\n",
+      "headers": {
+       "WWW-Authenticate": {
+        "description": "OAuth 2.0 Bearer 토큰 챌린지. 메시지에 non-ASCII 문자가 포함되는 경우\n`error_description` 파라미터는 생략됩니다.\n",
+        "schema": {
+         "type": "string"
+        },
+        "example": "Bearer realm=\"openapi\", error=\"invalid_token\", error_description=\"Token has expired\""
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "계좌 없음",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "요청 한도 초과. 포함 헤더의 의미는 아래 `headers` 정의를 참조합니다.",
+      "headers": {
+       "X-RateLimit-Limit": {
+        "description": "현재 허용된 초당 요청 수 (burst capacity)",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 10
+       },
+       "X-RateLimit-Remaining": {
+        "description": "현재 버킷에 남은 토큰 수. 429 시 0.",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 0
+       },
+       "X-RateLimit-Reset": {
+        "description": "토큰 1 개가 재충전될 때까지 예상 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       },
+       "Retry-After": {
+        "description": "재시도 권장 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "rate-limit-exceeded",
+          "message": "요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
+         }
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "거래 가능 정보 조회 중 일시적 오류",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "internal-error",
+          "message": "처리 중 문제가 생겼어요. 잠시 후 다시 시도해주세요."
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/exchange-rate": {
+   "get": {
+    "tags": [
+     "Market Info"
+    ],
+    "summary": "환율 조회",
+    "description": "KRW ↔ USD 환율 정보를 조회합니다.\n\n- **갱신 주기 1분**, 참고용 표시 환율. 실제 주문 시 적용되는 거래 환율과 다를 수 있습니다.\n- `dateTime` 미지정 시 **현재 시점의 유효 환율**이 응답됩니다.\n- 응답의 `validFrom` ~ `validUntil` 은 해당 환율의 **유효 시간 윈도** (보통 1분) 입니다.\n\n**Rate Limits Group**: `MARKET_INFO`\n",
+    "operationId": "getExchangeRate",
+    "security": [
+     {
+      "oauth2ClientCredentials": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "dateTime",
+      "in": "query",
+      "required": false,
+      "description": "조회할 환율 시각. 특정 시점의 환율을 조회할 수 있습니다.",
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "example": "2026-03-25T09:30:00+09:00"
+     },
+     {
+      "name": "baseCurrency",
+      "in": "query",
+      "required": true,
+      "description": "기준 통화",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "KRW",
+        "USD"
+       ],
+       "description": "통화 코드.\n- KRW: 한국 원화\n- USD: 미국 달러\n\n클라이언트는 unknown enum 값을 허용하도록 구현해야 합니다.\n"
+      },
+      "example": "USD"
+     },
+     {
+      "name": "quoteCurrency",
+      "in": "query",
+      "required": true,
+      "description": "표시 통화 (quote currency)",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "KRW",
+        "USD"
+       ],
+       "description": "통화 코드.\n- KRW: 한국 원화\n- USD: 미국 달러\n\n클라이언트는 unknown enum 값을 허용하도록 구현해야 합니다.\n"
+      },
+      "example": "KRW"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "성공",
+      "content": {
+       "application/json": {
+        "schema": {
+         "allOf": [
+          {
+           "type": "object",
+           "description": "성공 응답 envelope. 200 응답에 사용됩니다.\n각 엔드포인트의 성공 응답 스키마는 `allOf` 로 본 스키마를 상속하며 `result` 를 구체 타입으로 specialize 합니다.\n실패 응답은 별도의 `ErrorResponse` 스키마를 사용합니다 (4xx/5xx). `result` 와 `error` 는 동시에 나타나지 않습니다.\n",
+           "required": [
+            "result"
+           ],
+           "properties": {
+            "result": {
+             "description": "성공 응답의 페이로드. 엔드포인트별 타입이 다르며, 각 엔드포인트 스펙에서 `allOf` 로 구체 타입을 명시합니다.\n"
+            }
+           }
+          },
+          {
+           "type": "object",
+           "properties": {
+            "result": {
+             "type": "object",
+             "required": [
+              "baseCurrency",
+              "quoteCurrency",
+              "rate",
+              "midRate",
+              "basisPoint",
+              "rateChangeType",
+              "validFrom",
+              "validUntil"
+             ],
+             "properties": {
+              "baseCurrency": {
+               "type": "string",
+               "enum": [
+                "KRW",
+                "USD"
+               ],
+               "description": "통화 코드.\n- KRW: 한국 원화\n- USD: 미국 달러\n\n클라이언트는 unknown enum 값을 허용하도록 구현해야 합니다.\n"
+              },
+              "quoteCurrency": {
+               "type": "string",
+               "enum": [
+                "KRW",
+                "USD"
+               ],
+               "description": "통화 코드.\n- KRW: 한국 원화\n- USD: 미국 달러\n\n클라이언트는 unknown enum 값을 허용하도록 구현해야 합니다.\n"
+              },
+              "rate": {
+               "type": "string",
+               "format": "decimal",
+               "maxLength": 30,
+               "description": "매수 환율 (1 baseCurrency = ? quoteCurrency)",
+               "example": "1380.5"
+              },
+              "midRate": {
+               "type": "string",
+               "format": "decimal",
+               "maxLength": 30,
+               "description": "매매기준율 (은행간 mid rate)",
+               "example": "1375"
+              },
+              "basisPoint": {
+               "type": "string",
+               "format": "decimal",
+               "maxLength": 30,
+               "description": "매매기준율(midRate) 대비 basis points. (rate - midRate) / midRate * 10000",
+               "example": "40"
+              },
+              "rateChangeType": {
+               "type": "string",
+               "description": "등락 구분",
+               "enum": [
+                "UP",
+                "EQUAL",
+                "DOWN"
+               ],
+               "example": "UP"
+              },
+              "validFrom": {
+               "type": "string",
+               "format": "date-time",
+               "description": "환율 유효 시작 시각",
+               "example": "2026-03-25T09:30:00+09:00"
+              },
+              "validUntil": {
+               "type": "string",
+               "format": "date-time",
+               "description": "환율 유효 종료 시각",
+               "example": "2026-03-25T09:31:00+09:00"
+              }
+             }
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "잘못된 요청",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "환율 정보 없음",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "요청 한도 초과. 포함 헤더의 의미는 아래 `headers` 정의를 참조합니다.",
+      "headers": {
+       "X-RateLimit-Limit": {
+        "description": "현재 허용된 초당 요청 수 (burst capacity)",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 10
+       },
+       "X-RateLimit-Remaining": {
+        "description": "현재 버킷에 남은 토큰 수. 429 시 0.",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 0
+       },
+       "X-RateLimit-Reset": {
+        "description": "토큰 1 개가 재충전될 때까지 예상 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       },
+       "Retry-After": {
+        "description": "재시도 권장 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "rate-limit-exceeded",
+          "message": "요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
+         }
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "시장 정보 조회 중 일시적 오류",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "internal-error",
+          "message": "처리 중 문제가 생겼어요. 잠시 후 다시 시도해주세요."
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

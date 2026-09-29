@@ -52,6 +52,8 @@ jobs:
           if (-not $ready) { Get-Content "$env:RUNNER_TEMP\smoke.err"; throw "backend never became ready" }
           $sys = Invoke-RestMethod http://127.0.0.1:8799/api/system
           if ($sys.mode -ne "MOCK") { throw "unexpected mode $($sys.mode)" }
+          # entered keys (API keys, the 토스증권 key) must go to Windows Credential Manager, not to a file
+          if ($sys.keychain -ne "WinVaultKeyring") { throw "OS keychain not available in the build: '$($sys.keychain)'" }
           $want = (Get-Content build_commit.txt).Trim()
           if ($sys.versions.code_version -ne $want) { throw "build commit not baked: '$($sys.versions.code_version)' (expected '$want')" }
           # a second instance on the same data dir must refuse to start (exit 4)

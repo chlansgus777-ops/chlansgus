@@ -44,6 +44,8 @@ export interface LiveAlert { id: number; at: string; ticker: string; kind: strin
 export interface AppState {
   scan_id: number | null; scan_as_of: string | null; scan_running: boolean; sync_running: boolean; last_alert: number;
   auto_scan: { enabled: boolean; interval_minutes: number; last_auto_scan: string | null; next_due: string | null; why: string } | null;
+  /** the 토스증권 account (LIVE only): a new version = its holdings or cash changed, or it was (dis)connected */
+  broker?: { version: number; active: boolean; error: string | null } | null;
 }
 
 export interface QuoteStatus {

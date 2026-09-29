@@ -98,6 +98,7 @@ const AFFECTS: [RegExp, string[]][] = [
   [/^\/recommendations\//, ["/stocks/", "/dashboard", "/opportunities"]],
   [/^\/(evaluation|calibration|paper)/, ["/performance", "/calibration", "/paper", "/dashboard"]],
   [/^\/sync/, ["/readiness", "/sync"]],
+  [/^\/broker\//, ["/portfolio", "/broker/", "/transactions", "/dashboard", "/stocks/", "/opportunities"]],
 ];
 
 onMutation((_method, path) => {
@@ -113,6 +114,10 @@ onAppState((prev, next) => {
     invalidateApi(["/dashboard", "/opportunities", "/stocks/", "/watchlist", "/performance", "/issues", "/scan", "/readiness"]);
   }
   if (prev.sync_running && !next.sync_running) invalidateAfterSync();
+  // the account changed in the background (a trade at Toss, a deposit): holdings, cash and everything sized with them
+  if ((prev.broker?.version ?? 0) !== (next.broker?.version ?? 0) || (prev.broker?.error ?? null) !== (next.broker?.error ?? null)) {
+    invalidateApi(["/portfolio", "/broker/", "/dashboard", "/stocks/", "/opportunities"]);
+  }
 });
 
 /** Data preparation finished (seen by the status poller): prices, readiness and everything computed from them. */

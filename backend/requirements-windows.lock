@@ -16,6 +16,8 @@ anyio==4.15.1
     #   httpx
     #   httpx2
     #   starlette
+backports-tarfile==1.2.0
+    # via jaraco-context
 certifi==2026.7.22
     # via
     #   httpcore
@@ -44,12 +46,26 @@ idna==3.20
     #   anyio
     #   httpx
     #   httpx2
+importlib-metadata==9.0.1
+    # via keyring
+jaraco-classes==3.4.0
+    # via keyring
+jaraco-context==6.1.2
+    # via keyring
+jaraco-functools==4.6.0
+    # via keyring
 jiter==0.17.0
     # via anthropic
+keyring==25.7.0
+    # via marketlens (pyproject.toml)
 mako==1.4.3
     # via alembic
 markupsafe==3.0.3
     # via mako
+more-itertools==11.1.0
+    # via
+    #   jaraco-classes
+    #   jaraco-functools
 numpy==2.4.6
     # via
     #   marketlens (pyproject.toml)
@@ -78,7 +94,9 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.3
     # via marketlens (pyproject.toml)
 pywin32-ctypes==0.2.3
-    # via pyinstaller
+    # via
+    #   keyring
+    #   pyinstaller
 setuptools==84.0.0
     # via pyinstaller
 six==1.17.0
@@ -119,3 +137,5 @@ uvicorn==0.54.0
     # via marketlens (pyproject.toml)
 websockets==15.0.1
     # via marketlens (pyproject.toml)
+zipp==4.1.0
+    # via importlib-metadata

@@ -6,6 +6,7 @@ Secrets are read from the environment (or the OS keyring when installed) and are
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import sys
 import tomllib
@@ -50,6 +51,8 @@ SECRET_ENV_KEYS = (
     "ALPHAVANTAGE_API_KEY",
     "FINRA_API_KEY",
     "FINRA_API_SECRET",
+    "TOSS_CLIENT_ID",  # 토스증권 오픈API (read-only portfolio sync); the id is kept like a secret too
+    "TOSS_CLIENT_SECRET",
 )
 
 SCHEMA_VERSION = "schema-2"
@@ -128,6 +131,9 @@ def validate_setup(values: dict[str, str]) -> dict[str, str]:
         elif k in ("FAST_MODEL", "DEEP_MODEL"):
             if not _re.fullmatch(_MODEL_NAME, v):
                 raise ValueError(f"{k}: 영문·숫자·._:/- 로 된 모델 이름이어야 합니다 (예: qwen2.5:7b)")
+        elif k in ("TOSS_CLIENT_ID", "TOSS_CLIENT_SECRET"):
+            if not _re.fullmatch(r"[\x21-\x7e]{8,200}", v):
+                raise ValueError(f"{k}: 토스증권에서 발급한 값을 공백 없이 그대로 붙여 넣으세요 (영문·숫자·기호 8자 이상)")
         elif k == "SEC_USER_AGENT":
             if not _re.fullmatch(r"[^@\s]+(?: [^@\s]+)* [^@\s]+@[^@\s]+\.[^@\s]+", v):
                 raise ValueError("SEC_USER_AGENT: '이름 이메일' 형식이어야 합니다 (예: Hong Gildong hong@example.com). SEC가 요구합니다")
@@ -135,6 +141,20 @@ def validate_setup(values: dict[str, str]) -> dict[str, str]:
             raise ValueError(f"{k}: API 키에는 공백이 들어갈 수 없습니다")
         out[k] = v
     return out
+
+
+@lru_cache(maxsize=1)
+def keychain_backend() -> str | None:
+    """The OS keychain ``keyring`` would use (e.g. "WinVaultKeyring" — Windows Credential Manager), or None when there
+    is none and secrets go to the private .env file."""
+    try:
+        import keyring  # type: ignore[import-not-found]
+
+        kr = keyring.get_keyring()
+    except Exception:  # noqa: BLE001 - not installed / no backend
+        return None
+    name = type(kr).__name__
+    return None if name in ("FailKeyring", "NullKeyring") or getattr(kr, "priority", 1) <= 0 else name
 
 
 def _keychain_set(name: str, value: str) -> bool:
@@ -187,6 +207,29 @@ def save_setup(values: dict[str, str], env_path: Path | None = None) -> dict[str
     return where
 
 
+def forget_setup(names: tuple[str, ...], env_path: Path | None = None) -> None:
+    """Remove stored settings (keychain entry and .env line) and drop them from this process's environment —
+    the Toss key on "연결 해제" must not come back at the next start."""
+    for k in names:
+        os.environ.pop(k, None)
+        try:
+            import keyring  # type: ignore[import-not-found]
+
+            keyring.delete_password("marketlens", k)
+        except Exception as e:  # noqa: BLE001 - not in the keychain, or no keychain: nothing to remove there
+            logging.getLogger("marketlens.config").debug("keychain entry %s not removed: %s", k, type(e).__name__)
+    path = env_path or env_file_path()
+    if path.exists():
+        lines = path.read_text(encoding="utf-8").splitlines()
+        kept = [ln for ln in lines if ln.split("=", 1)[0].strip().removeprefix("export ").strip() not in names]
+        if kept != lines:
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+            if os.name != "nt":
+                os.chmod(tmp, 0o600)
+            tmp.replace(path)
+
+
 def _secret(name: str) -> str | None:
     v = os.environ.get(name)
     if v:
@@ -213,6 +256,8 @@ class Settings:
     finnhub_realtime: bool = False
     anthropic_api_key: str | None = field(repr=False, default=None)
     openai_api_key: str | None = field(repr=False, default=None)
+    toss_client_id: str | None = field(repr=False, default=None)
+    toss_client_secret: str | None = field(repr=False, default=None)
     openai_base_url: str = "https://api.openai.com/v1"
     llm_provider: str = "none"  # anthropic | openai | openai_compatible | mock | none
     fast_model: str = "claude-haiku-4-5"
@@ -232,7 +277,7 @@ class Settings:
     quote_stream_max_symbols: int = 50  # the stream's concurrent symbol limit (Finnhub free: 50 — verify on the account)
 
     def secrets(self) -> list[str]:
-        return [s for s in (self.finnhub_api_key, self.fred_api_key, self.polygon_api_key, self.alphavantage_api_key, self.finra_api_key, self.finra_api_secret, self.anthropic_api_key, self.openai_api_key) if s]
+        return [s for s in (self.finnhub_api_key, self.fred_api_key, self.polygon_api_key, self.alphavantage_api_key, self.finra_api_key, self.finra_api_secret, self.anthropic_api_key, self.openai_api_key, self.toss_client_id, self.toss_client_secret) if s]
 
 
 def _bool(v: str | None, default: bool) -> bool:
@@ -266,6 +311,8 @@ def load_settings() -> Settings:
         finnhub_realtime=_bool(os.environ.get("FINNHUB_REALTIME"), False),
         anthropic_api_key=_secret("ANTHROPIC_API_KEY"),
         openai_api_key=_secret("OPENAI_API_KEY"),
+        toss_client_id=_secret("TOSS_CLIENT_ID"),
+        toss_client_secret=_secret("TOSS_CLIENT_SECRET"),
         openai_base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
         llm_provider=os.environ.get("LLM_PROVIDER", "mock" if mode == DataMode.MOCK else "none").lower(),
         fast_model=os.environ.get("FAST_MODEL", "claude-haiku-4-5"),

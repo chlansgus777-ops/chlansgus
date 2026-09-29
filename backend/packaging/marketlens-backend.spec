@@ -3,7 +3,7 @@
 # -*- mode: python -*-
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 ROOT = Path(SPECPATH).resolve().parents[1]  # repository root
 
@@ -13,6 +13,7 @@ datas = [
 ]
 if (ROOT / "build_commit.txt").exists():  # written by the build (git rev-parse): config.code_version reads it
     datas.append((str(ROOT / "build_commit.txt"), "."))
+datas += copy_metadata("keyring")  # keyring finds its backends (Windows Credential Manager) through its entry points
 dist = ROOT / "frontend" / "dist"
 if dist.exists():
     datas.append((str(dist), "frontend/dist"))
@@ -21,7 +22,7 @@ a = Analysis(
     [str(ROOT / "backend" / "packaging" / "entry.py")],
     pathex=[str(ROOT / "backend")],
     datas=datas,
-    hiddenimports=collect_submodules("marketlens") + collect_submodules("uvicorn") + collect_submodules("websockets") +["tzdata", "alembic", "sqlalchemy.dialects.sqlite"],
+    hiddenimports=collect_submodules("marketlens") + collect_submodules("uvicorn") + collect_submodules("websockets") + collect_submodules("keyring.backends") + ["tzdata", "alembic", "sqlalchemy.dialects.sqlite"],
     excludes=["tkinter", "matplotlib", "IPython", "cryptography", "playwright", "pytest", "PyInstaller"],
 )
 pyz = PYZ(a.pure)

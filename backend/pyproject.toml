@@ -25,7 +25,7 @@ dependencies = [
 dev = ["pytest>=8", "pytest-cov>=5"]
 keyring = ["keyring>=24"]
 anthropic = ["anthropic>=1.0"]
-windows = ["pyinstaller>=6"]
+windows = ["pyinstaller>=6", "keyring>=24"]  # the OS keychain (Windows Credential Manager) for the API and broker keys
 
 [project.scripts]
 marketlens = "marketlens.workers.cli:main"

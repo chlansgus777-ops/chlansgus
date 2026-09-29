@@ -57,9 +57,12 @@ def system(req: Request) -> dict[str, Any]:
     cfg = s.model_config()
     st = s.settings
     now = s.now()
+    from marketlens.config import keychain_backend
+
     return {
         "mode": s.mode.value,
         "mock_banner": s.mode.value == "MOCK",
+        "keychain": keychain_backend(),  # where entered keys are kept: the OS keychain, or (None) the private .env
         "now": now.isoformat(),
         # display only: the US session right now from the exchange calendar (holidays, early closes) — the UI shows it
         # instead of guessing from the clock
@@ -460,9 +463,12 @@ def portfolio(req: Request) -> dict[str, Any]:
     closes = {h.ticker: {b.day: b.close for b in series.get(h.ticker, []) if b.day <= end} for h in pf.holdings}
     bench = {b.day: b.close for b in series.get("SPY", []) if b.day <= end}
     snap = portfolio_snapshot(pf, closes, bench or None)
+    s.broker_tick()
     return encode(snap) | {"currency": "USD", "note": "MarketLens는 주문을 넣지 않습니다. 평가금액은 모든 종목을 같은 거래일 종가로 계산합니다.",
-                           "cash_entered": cash_entered,  # False: the cash is the sizing assumption, not an entered amount
-                           "history_pending": pending, "unused_manual": [{"ticker": t, "quantity": q} for t, q in pf.unused_manual]}
+                           # False: the cash is the sizing assumption, not an entered amount (the account's cash counts as known)
+                           "cash_entered": cash_entered or pf.cash_source != "manual", "cash_source": pf.cash_source,
+                           "history_pending": pending, "unused_manual": [{"ticker": t, "quantity": q} for t, q in pf.unused_manual],
+                           "broker": s.broker.view() if s.broker.enabled else None}
 
 
 def _view_bars(s: MarketLensService, tickers: list[str], start: date, end: date, wait: float = STORE_FIRST_WAIT) -> tuple[dict[str, list[Any]], list[str]]:
@@ -497,6 +503,71 @@ def _view_bars(s: MarketLensService, tickers: list[str], start: date, end: date,
         if v.refreshing:
             pending.append(t)
     return out, pending
+
+
+# ------------------------------------------------------------------ 토스증권 account (read-only)
+class TossKeyIn(BaseModel):
+    client_id: str = Field(min_length=1, max_length=300)
+    client_secret: str = Field(min_length=1, max_length=300)
+
+
+class TossPrefsIn(BaseModel):
+    cash: Literal["toss_usd", "toss_usd_krw", "manual"]
+
+
+def _toss_call(fn: Any) -> dict[str, Any]:
+    from marketlens.providers.live.toss import TossError
+
+    try:
+        return fn()
+    except TossError as e:
+        # 400 for the key / IP / account (the owner must act), 503 when Toss or the network is down
+        raise HTTPException(status_code=503 if e.kind in ("UNAVAILABLE", "RATE_LIMITED") else 400, detail=e.text) from None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+
+
+@router.get("/broker/toss")
+def toss_status(req: Request) -> dict[str, Any]:
+    s = svc(req)
+    s.broker_tick()
+    return s.broker.view()
+
+
+@router.put("/broker/toss/credentials")
+def toss_connect(req: Request, body: TossKeyIn) -> dict[str, Any]:
+    """Tries the key first (account, holdings, cash); only a key that works is stored — never returned or logged."""
+    s = svc(req)
+    _toss_call(lambda: s.broker.connect(body.client_id, body.client_secret))
+    return s.broker.view()
+
+
+@router.delete("/broker/toss")
+def toss_disconnect(req: Request) -> dict[str, Any]:
+    """Forgets the key (keychain and .env) and the account's data; entered lines and trade records are untouched."""
+    s = svc(req)
+    s.broker.disconnect()
+    return s.broker.view()
+
+
+@router.post("/broker/toss/sync")
+def toss_sync(req: Request) -> dict[str, Any]:
+    s = svc(req)
+    _toss_call(s.broker_sync_now)
+    return s.broker.view()
+
+
+@router.put("/broker/toss/prefs")
+def toss_prefs(req: Request, body: TossPrefsIn) -> dict[str, Any]:
+    s = svc(req)
+    _toss_call(lambda: s.broker.set_prefs(body.cash))
+    return s.broker.view()
+
+
+@router.get("/broker/toss/fills")
+def toss_fills(req: Request, limit: int = 300) -> dict[str, Any]:
+    s = svc(req)
+    return {"fills": s.broker.fills(max(1, min(limit, 2000))), "status": s.broker.status()}
 
 
 @router.put("/portfolio")
@@ -712,6 +783,8 @@ def save_setup(req: Request, body: SetupIn) -> dict[str, Any]:
     from marketlens.config import save_setup as _save
 
     svc(req)  # the service must exist (and the CSRF guard has already checked the client header)
+    if {"TOSS_CLIENT_ID", "TOSS_CLIENT_SECRET"} & set(body.values):
+        raise HTTPException(status_code=422, detail="토스증권 키는 '토스증권 연결'에서 입력하세요 — 저장하기 전에 연결을 확인합니다")
     try:
         where = _save(body.values)
     except ValueError as e:

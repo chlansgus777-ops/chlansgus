@@ -29,6 +29,13 @@ export function price(v: number | null | undefined): string {
   return `${v < 0 ? "-" : ""}$${num(Math.abs(v), 2)}`;
 }
 
+/** Won amount: "₩1,234,567" (whole won); from 1억 on with the Korean-unit reading "₩1억 2,340만". */
+export function won(v: number | null | undefined): string {
+  if (!isNum(v)) return dash;
+  const a = Math.abs(v);
+  return `${v < 0 ? "-" : ""}₩${a >= 1e8 ? koUnits(a) : num(a, 0)}`;
+}
+
 /** Large USD amounts: "$2.55T" / "$812.30B" / "$45.10M". */
 export function big(v: number | null | undefined): string {
   if (!isNum(v)) return dash;

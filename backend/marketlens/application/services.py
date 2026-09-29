@@ -22,6 +22,8 @@ from marketlens.application.graph_seed import GraphSeed
 from marketlens.application.issue_engine import news_for_ticker
 from marketlens.application.market_store import MarketStore
 from marketlens.application.pipeline import AnalysisInputs, AnalysisResult
+from marketlens.application.broker import BrokerSync
+from marketlens.domain.broker import merge_broker
 from marketlens.application.live_judge import LiveJudge, plans_from_rows
 from marketlens.application.refresher import Refresher, Snapshot
 from marketlens.application.registry import ProviderRegistry, build_registry
@@ -239,6 +241,9 @@ class MarketLensService:
         self.quotes.on_price = self.judge.observe
         self.judge.on_reanalyze = self.request_reanalysis
         self._reanalyzed: dict[str, float] = {}
+        # 토스증권 account (read-only): decides the holdings and cash it has; LIVE only (never valued on mock prices)
+        self.attach_broker(BrokerSync(self.sf, self.now, getattr(settings, "toss_client_id", None), getattr(settings, "toss_client_secret", None),
+                                      enabled=settings.mode == DataMode.LIVE))
         self._readiness_lock = threading.Lock()
         self._readiness_cache: tuple[Any, Any, datetime] | None = None  # (data key, coverage counts, counted at)
         self._readiness_started = 0.0
@@ -424,7 +429,19 @@ class MarketLensService:
             sector, themes, rates = profile(g["ticker"])
             hs.append(Holding(g["ticker"], pos.quantity, pos.avg_cost, sector, themes, rates, source="ledger",
                               realized_pnl=pos.realized_pnl, dividends=pos.dividends))
-        return Portfolio(tuple(hs), cash, tuple(notes), tuple(unused))
+        cash_source = "manual"
+        if self.broker.active():  # the connected account decides what it holds (domain.broker) and, if chosen, the cash
+            positions = self.broker.positions()
+            decided = {p.ticker for p in positions if p.market == "US" and p.quantity > 0}
+            unused += [(h.ticker, h.quantity) for h in hs if h.source == "manual" and h.ticker in decided]
+            hs, more = merge_broker(hs, positions, profile)
+            notes += more
+            cash, cash_source, more = self.broker.cash(cash)
+            notes += more
+            age = self.broker.age_s()
+            if age is not None and age > 6 * 3600:
+                notes.append(f"토스증권 보유 현황은 {age / 3600:.0f}시간 전에 받은 것입니다 — 연결 상태를 확인하세요")
+        return Portfolio(tuple(hs), cash, tuple(notes), tuple(unused), cash_source)
 
     def ledger(self, s: Session, today: date | None = None) -> list[dict[str, Any]]:
         """Per security: its trade records, today's ticker, its splits and the holding computed by
@@ -474,6 +491,27 @@ class MarketLensService:
     REANALYZE_EVERY = 1800.0  # one automatic re-analysis per name at most every 30 minutes
     REANALYZE_PER_HOUR = 20  # and at most this many an hour (the free providers' limits are shared with everything else)
 
+    # ------------------------------------------------------------------ broker account (토스증권, read-only)
+    def attach_broker(self, broker: BrokerSync) -> None:
+        self.broker = broker
+        broker.on_change = self._broker_changed
+
+    def _broker_changed(self) -> None:
+        """Holdings or cash in the account changed (or it was connected / disconnected): the live verdicts' held flags,
+        the quote subscriptions and the open screens (app event ``broker``) follow."""
+        self.invalidate_live_plans()
+        self.quotes.refresh_pinned()
+
+    def broker_tick(self) -> None:
+        """Keep the account current in the background — called by the quote stream's status tick and the portfolio
+        routes; the refresher runs at most one sync at a time and backs off after a failure."""
+        if self.broker.due():  # the schedule is the broker's own (wall clock): one sync in flight at most
+            self.refresher.get("broker:toss", self.broker.sync, max_age=0.0, retry_after=0.0)
+
+    def broker_sync_now(self) -> dict[str, Any]:
+        """The "지금 동기화" button: one sync now, whatever the schedule or back-off (raises TossError)."""
+        return self.broker.sync()
+
     def live_plans(self) -> None:
         """Keep the judge's plans current (background, at most every ``LIVE_PLAN_AGE``) — called by the quote routes."""
         self.refresher.get("live-plans", self._load_live_plans, max_age=self.LIVE_PLAN_AGE, retry_after=60)
@@ -512,7 +550,10 @@ class MarketLensService:
             scan = repo.latest_scan(s, mode=self.mode.value)
         return {"scan_id": scan.id if scan else None, "scan_as_of": scan.as_of.isoformat() if scan else None,
                 "scan_running": self._lock.locked(), "sync_running": self._sync_run.locked(),
-                "auto_scan": getattr(self, "schedule_state", None), "last_alert": self.judge.last_alert_id}
+                "auto_scan": getattr(self, "schedule_state", None), "last_alert": self.judge.last_alert_id,
+                # a new version → the portfolio screens reload (the account's holdings or cash changed, or it was (dis)connected)
+                "broker": {"version": self.broker.version, "active": self.broker.active(),
+                           "error": (self.broker.last_error or {}).get("kind")} if self.broker.enabled else None}
 
     def request_reanalysis(self, ticker: str, reason: str) -> bool:
         """A name hit its stop or target, or moved far since its analysis: analyse it again in the background — only

@@ -2,6 +2,7 @@ import { Fragment, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { QuoteFeedStatus } from "../components/LivePrice";
+import { TossCard, type TossView } from "../components/TossConnect";
 import { Card, Err, Loading, Tabs } from "../components/ui";
 import { clientLatency, useQuoteStatus } from "../quotes";
 import Health from "./Health";
@@ -224,6 +225,7 @@ export default function Settings() {
       </div>
       {tab === "data" && (
         <>
+          <TossSettings />
           <SetupCard configured={d.keys_configured} mode={d.mode} onSaved={s.reload} />
           <Card title="모드 · API 키"><div>모드: <b>{d.mode === "MOCK" ? "모의 데이터(MOCK)" : "실데이터(LIVE)"}</b></div>{kv(Object.fromEntries(Object.entries(d.keys_configured).map(([k, v]) => [k, v ? "설정됨" : "없음"])))}<div className="muted">{d.note}</div></Card>
         </>
@@ -264,4 +266,10 @@ function DesktopAlerts() {
       {perm === "default" && <button type="button" className="sm" onClick={() => void Notification.requestPermission().then(setPerm)}>알림 켜기</button>}
     </div>
   );
+}
+
+/** The 토스증권 connection, also reachable from 설정 (the portfolio screen shows the same card compact). */
+function TossSettings() {
+  const t = useApi<TossView>("/broker/toss");
+  return t.data ? <TossCard view={t.data} onChange={t.reload} /> : null;
 }

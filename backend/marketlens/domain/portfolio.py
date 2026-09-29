@@ -19,9 +19,10 @@ class Holding:
     themes: tuple[str, ...] = ()  # e.g. ("AI",)
     rate_sensitivity: float = 0.0
     split_adjusted: float = 1.0  # share multiplier of splits executed after the holding was entered (quantity ×, cost ÷)
-    source: str = "manual"  # "manual" (one entered line) or "ledger" (computed from the trade records, domain.ledger)
+    source: str = "manual"  # "manual" (one entered line), "ledger" (the trade records, domain.ledger) or "toss" (the broker account)
     realized_pnl: float = 0.0  # ledger only: realized result of the sales
     dividends: float = 0.0  # ledger only
+    outside_broker: bool = False  # a broker account is connected and this holding is not in it (another broker, or sold)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +33,7 @@ class Portfolio:
     # entered lines not used because the trade records decide that holding: (ticker, quantity) — the screen offers to
     # remove them (owner report 2026-09-28: the notice stayed forever with no way to act on it)
     unused_manual: tuple[tuple[str, float], ...] = ()
+    cash_source: str = "manual"  # "manual" (entered / the sizing assumption), "toss_usd" or "toss_usd_krw" (the broker account)
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +249,7 @@ class HoldingValuation:
     source: str = "manual"
     realized_pnl: float = 0.0
     dividends: float = 0.0
+    outside_broker: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,7 +304,7 @@ def portfolio_snapshot(pf: Portfolio, closes: Mapping[str, Mapping[date, float]]
             unreal += pnl or 0.0
         rows.append(HoldingValuation(h.ticker, h.quantity, h.cost_basis, px, val_day if px is not None else None, mv, pnl,
                                      (px / h.cost_basis - 1) if px is not None and h.cost_basis > 0 else None, None, h.sector, h.split_adjusted,
-                                     h.source, h.realized_pnl, h.dividends))
+                                     h.source, h.realized_pnl, h.dividends, h.outside_broker))
     nav = pf.cash + invested
     rows = [replace_weight(r, nav) for r in rows]
     sector_w: dict[str, float] = {}

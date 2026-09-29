@@ -772,3 +772,19 @@ button.danger-solid { background: var(--danger); color: #1a0a0d; border-color: t
 /* narrow windows: the verdict columns stay in view — rank, reward/risk and event risk are in the stock page */
 @media (max-width: 900px) { th[data-col="rank"], td[data-col="rank"], th[data-col="rr"], td[data-col="rr"], th[data-col="risk"], td[data-col="risk"] { display: none; } }
 @media (max-width: 720px) { th[data-col="score"], td[data-col="score"] { display: none; } }
+
+/* 토스증권 account (components/TossConnect.tsx) */
+.toss-promo { display: flex; align-items: center; gap: 12px; justify-content: space-between; flex-wrap: wrap; padding: 12px 16px; border: 1px dashed var(--line-strong, var(--line)); border-radius: 12px; background: var(--s2, transparent); font-size: 13.5px; }
+.toss-bar { display: grid; gap: 10px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--s1, var(--bg)); }
+.toss-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.toss-line .spacer { flex: 1 1 auto; }
+.toss-line .caption { min-width: 0; }
+.light { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px var(--s3); }
+.light.pos { background: var(--up); box-shadow: 0 0 0 3px var(--up-soft); }
+.light.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+.toss-settings { display: flex; gap: 10px 18px; flex-wrap: wrap; align-items: center; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13px; }
+.toss-settings select { max-width: 100%; }
+.form-grid.toss { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; margin: 12px 0 8px; }
+@media (max-width: 760px) { .form-grid.toss { grid-template-columns: minmax(0, 1fr); } }
+ol.steps { margin: 0 0 4px; padding-left: 20px; display: grid; gap: 6px; font-size: 13.5px; line-height: 1.55; }
+.src-toss { color: var(--info); font-weight: 600; }

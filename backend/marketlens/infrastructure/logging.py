@@ -122,6 +122,13 @@ NOISY_LOGGERS = ("httpx", "httpcore", "anthropic", "urllib3")
 _PROCESS_REDACTOR = SecretRedactor()
 
 
+def add_secrets(*values: str | None) -> None:
+    """Register secrets learnt after start (a broker key entered on the screen, an access token just issued): from
+    now on they are redacted from every log line and stored error text like the configured keys."""
+    r = _PROCESS_REDACTOR
+    r.secrets = sorted(set(r.secrets) | {x for x in values if x and len(x) >= 6}, key=len, reverse=True)
+
+
 def redact_text(text: str) -> str:
     """Configured secrets and secret-shaped values removed (the same rules as the logs)."""
     return _PROCESS_REDACTOR.redact(text) if text else text

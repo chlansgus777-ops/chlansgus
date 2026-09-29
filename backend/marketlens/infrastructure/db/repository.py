@@ -255,6 +255,12 @@ def get_setting(s: Session, key: str, default: str | None = None) -> str | None:
     return row.value if row else default
 
 
+def delete_setting(s: Session, key: str) -> None:
+    row = s.get(AppSettingRow, key)
+    if row is not None:
+        s.delete(row)
+
+
 def set_setting(s: Session, key: str, value: str) -> None:
     row = s.get(AppSettingRow, key)
     if row is None:
