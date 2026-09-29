@@ -69,3 +69,16 @@ describe("alerts and background work on the stream", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("sizing at the live price", () => {
+  it("re-counts shares on every quote and withholds them outside the plan", async () => {
+    const { LiveSizing } = await import("../pages/StockDetail");
+    render(<MemoryRouter><LiveSizing ticker="NVDA" recId={7} amount={1000} stop={92} /></MemoryRouter>);
+    act(() => applyRows([row(1, J())]));  // price 100
+    expect(screen.getByTestId("live-sizing").textContent).toContain("10주");
+    act(() => applyRows([{ ...row(2, J()), price: 125 }]));
+    expect(screen.getByTestId("live-sizing").textContent).toContain("8주");
+    act(() => applyRows([{ ...row(3, J({ zone: "ABOVE_MAX", valid_now: false })), price: 130 }]));
+    expect(screen.getByTestId("live-sizing").textContent).toContain("다시 계산하지 않습니다");
+  });
+});

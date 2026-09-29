@@ -5,8 +5,8 @@ import { api } from "../api";
 import { CommitteeSummary, CommitteeView } from "../components/CommitteeView";
 import { IRefresh, IStar } from "../components/icons";
 import { LivePrice } from "../components/LivePrice";
-import { LivePlanLine, LiveZone, UnlessLive } from "../components/LiveZone";
-import { refreshQuoteSubscriptions, useViewQuotes } from "../quotes";
+import { LivePlanLine, LiveZone, UnlessLive, zoneView } from "../components/LiveZone";
+import { refreshQuoteSubscriptions, useQuote, useViewQuotes } from "../quotes";
 import { rememberStock } from "../components/QuickSearch";
 import { PlanChart } from "../components/PlanChart";
 import { Action, Bar, Card, Disclosure, Empty, Err, EvidenceChips, FreshnessTable, Loading, Metric, Notice, Quality, Ribbon, ScoreMeter, Section, StaleData, StatePanel, StatusBadge, Stmt, Term, isExpired } from "../components/ui";
@@ -53,7 +53,19 @@ export function missingData(a: Analysis): string[] {
 const usd = (v?: number | null) => (v == null ? "—" : `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`);
 
 /** Dollars and whole shares instead of "소량" — from the entered portfolio value and the configured position sizes. */
-function PositionPlanView({ p, shown, why }: { p?: PositionPlan; shown: boolean; why?: string | null }) {
+/** The same budget at the LIVE price: shares and the loss at the stop move with every quote (the plan above was sized
+ * at the analysis price). Withheld while the live verdict says the price is outside the plan. */
+export function LiveSizing({ ticker, recId, amount, stop }: { ticker: string; recId: number; amount?: number; stop?: number | null }) {
+  const { row } = useQuote(ticker);
+  const j = row?.judge;
+  if (!amount || row?.price == null || !j || j.rec_id !== recId) return null;
+  if (!j.valid_now) return <div className="caption" style={{ marginTop: 6 }} data-testid="live-sizing">현재가 {price(row.price)} — 지금은 매수 구간이 아니어서 수량을 다시 계산하지 않습니다({zoneView(j)?.label ?? "판단 없음"}).</div>;
+  const n = Math.floor(amount / row.price);
+  const loss = stop != null ? (row.price - stop) * n : null;
+  return <div className="caption pos" style={{ marginTop: 6 }} data-testid="live-sizing">현재가 {price(row.price)} 기준: <b>{n}주</b> · 약 {usd(n * row.price)}{loss != null ? ` · 손절 시 약 ${usd(loss)}` : ""} — 체결마다 다시 계산</div>;
+}
+
+function PositionPlanView({ p, shown, why, live }: { p?: PositionPlan; shown: boolean; why?: string | null; live?: { ticker: string; recId: number; stop?: number | null } }) {
   if (!p) return null;
   if (!p.available) return <div className="subtle caption" style={{ marginTop: 14 }}><b style={{ color: "var(--sub)" }}>매수 금액·수량</b> · {p.reason}</div>;
   // the page's own re-check may have expired the plan after the server sized it: never leave an order-sized quantity up
@@ -65,6 +77,7 @@ function PositionPlanView({ p, shown, why }: { p?: PositionPlan; shown: boolean;
         <span className="k">권장 매수</span><span><b style={{ fontSize: 17 }}>{p.shares}주</b> · 약 {usd(p.amount)} <span className="caption">(포트폴리오 {usd(p.nav)}의 {((p.weight ?? 0) * 100).toFixed(2)}%, {sizeKo[p.size_class ?? ""] ?? p.size_class})</span></span>
         <span className="k">손절 시 예상 손실</span><span className="neg">{p.risk_amount != null ? `${usd(p.risk_amount)} (포트폴리오의 ${((p.risk_pct ?? 0) * 100).toFixed(2)}%)` : "계산 불가"}</span>
       </div>
+      {live && <LiveSizing ticker={live.ticker} recId={live.recId} amount={p.amount} stop={live.stop} />}
       {(p.notes ?? []).map((n, i) => <div key={i} className="caption" style={{ marginTop: 6 }}>{n}</div>)}
     </div>
   );
@@ -368,7 +381,7 @@ function StockDetail({ ticker }: { ticker: string }) {
                 {brief.valuation.assumptions.map((t, i) => <div key={i} className="assume"><span className="kind k-ASSUME">가정</span><span>{t}</span></div>)}
               </div>
             )}
-            <PositionPlanView p={d.data.position_plan} shown={quantityShown(rec.current_status, stored.actionable_now)} why={rec.current_status_reason} />
+            <PositionPlanView p={d.data.position_plan} shown={quantityShown(rec.current_status, stored.actionable_now)} why={rec.current_status_reason} live={{ ticker: a.ticker, recId: rec.id, stop: e?.stop }} />
           </div>
           <div>
             <h3 className="t-card" style={{ marginBottom: 10 }}>가격은 어떻게 평가했나</h3>
