@@ -175,7 +175,7 @@ export function StatusBar() {
       <span className="tools">
         {sys?.mode !== "MOCK" && <QuoteFeedStatus />}  {/* in MOCK the banner already says every price is simulated */}
         <AlertCenter />
-        {rr &&<Link to="/settings?tab=data" className={`readiness-link ${rr.tone}`} title={rr.help} data-testid="readiness-badge">추천 준비도 · {rr.label}</Link>}
+        {rr && rd?.recommendation_readiness === "NOT READY" && <Link to="/settings?tab=data" className={`readiness-link ${rr.tone}`} title={rr.help} data-testid="readiness-badge">추천 준비도 · {rr.label}</Link>}
       </span>
     </div>
   );

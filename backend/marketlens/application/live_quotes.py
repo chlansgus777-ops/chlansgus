@@ -218,6 +218,12 @@ class QuoteHub:
             self._subs_changed.set()
             self._snap_event.set()
 
+    def viewed(self) -> set[str]:
+        """The names an open screen shows now."""
+        with self._lock:
+            now = self._now()
+            return {t for t, until in self._views.items() if until > now}
+
     def _expire_views(self) -> bool:
         now = self._now()
         with self._lock:

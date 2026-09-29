@@ -23,7 +23,11 @@ describe("readiness UI", () => {
     expect(screen.getByText(/60거래일/)).toBeTruthy();
   });
   it("shows the gate in plain Korean", () => {
-    render(<MemoryRouter><ReadinessBanner r={{ ...notReady, recommendation_readiness: "LIMITED" }} /></MemoryRouter>);
+    // the data page shows every state; the working screens only NOT READY (owner 2026-09-29: "제한적 참고 — 거슬려")
+    const { container } = render(<MemoryRouter><ReadinessBanner r={{ ...notReady, recommendation_readiness: "LIMITED" }} /></MemoryRouter>);
+    expect(container.textContent).toBe("");
+    cleanup();
+    render(<MemoryRouter><ReadinessBanner r={{ ...notReady, recommendation_readiness: "LIMITED" }} always /></MemoryRouter>);
     expect(screen.getByText(/추천 준비도: 제한적 참고/)).toBeTruthy();
     expect(statusKo("PARTIAL (NOT_LIVE_VERIFIED)")).toBe("부분 · 실제 검증 전");
     expect(statusKo("ACCUMULATING")).toBe("누적 중");

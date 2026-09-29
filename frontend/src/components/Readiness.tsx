@@ -36,8 +36,11 @@ export function firstReason(r: ReadinessInfo): string | undefined {
 }
 
 /** One-line banner: can today's recommendations be relied on — and if not, the first actual reason. */
-export function ReadinessBanner({ r }: { r: ReadinessInfo | undefined | null }) {
+export function ReadinessBanner({ r, always = false }: { r: ReadinessInfo | undefined | null; always?: boolean }) {
   if (!r) return null;
+  // on the working screens only when recommendations cannot be made at all (owner 2026-09-29: "제한적 참고 — 거슬려,
+  // 없애"); the full state stays on the data page (``always``)
+  if (!always && r.recommendation_readiness !== "NOT READY") return null;
   const info = READINESS_KO[r.recommendation_readiness];
   if (!info) return null;
   const tone: "info" | "warn" | "danger" = info.tone === "neg" ? "danger" : info.tone === "warn" ? "warn" : "info";

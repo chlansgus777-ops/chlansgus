@@ -28,7 +28,7 @@ export default function Health() {
       {r.data && r.data.recommendation_readiness == null && <StatePanel kind="analyzing" what="데이터 준비 상태를 처음 계산하고 있습니다(저장된 전체 종목을 셉니다). 끝나면 여기에 표시됩니다." />}
       {r.data && r.data.recommendation_readiness != null && (
         <>
-          <ReadinessBanner r={r.data} />
+          <ReadinessBanner r={r.data} always />
           <div className="g2">
             <Card title="추천을 믿어도 되는 상태인가요?" icon="◉" explain="데이터 종류별 준비 상태(무료 공급원 기준)">
               {r.data.categories.length > 0 && <table className="matrix"><thead><tr><th>데이터</th><th>상태</th><th>공급원</th><th>설명</th></tr></thead>

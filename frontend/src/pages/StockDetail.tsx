@@ -12,7 +12,8 @@ import { rememberStock } from "../components/QuickSearch";
 import { PlanChart } from "../components/PlanChart";
 import { Action, Bar, Card, Disclosure, Empty, Err, EvidenceChips, FreshnessTable, Loading, Metric, Notice, Quality, Ribbon, ScoreMeter, Section, StaleData, StatePanel, StatusBadge, Stmt, Term, isExpired } from "../components/ui";
 import { usePageTime, useStatus } from "../components/status";
-import { useApi } from "../components/useApi";
+import { usePoll, useApi } from "../components/useApi";
+import type { LiveJudgement } from "../components/liveBoard";
 import { ago, day, krwAux, num, pct, price, stamp, stampEt, usdWithKo } from "../format";
 import { GLOSSARY } from "../glossary";
 import { COMPONENT_KO, DATA_TYPE_KO, REGIME_KO, RISK_KO, SESSION_KO, SIZE_KO, STATUS_INFO, VERDICT_KO, VETO_KO, actionTone, ko } from "../i18n";
@@ -140,6 +141,10 @@ function StmtList({ items, index, empty }: { items: BriefItem[]; index: Map<stri
 
 /** Page order (owner's brief): 1 conclusion · 2 reasons · 3 price plan · 4 risks · 5 invalidation · 6 news, issues
  * and events · 7 my portfolio · 8 detailed data. Every number is the backend's; a missing one reads "자료 부족". */
+function liveTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
 function StockDetail({ ticker }: { ticker: string }) {
   const [refreshTick, setRefreshTick] = useState(0);
   const d = useApi<SD>(`/stocks/${ticker}${refreshTick ? "?refresh=true" : ""}`, [refreshTick]);
@@ -151,6 +156,9 @@ function StockDetail({ ticker }: { ticker: string }) {
   const evIndex = useMemo(() => new Map<string, Evidence>((d.data?.analysis.evidence ?? []).map((e) => [e.evidence_id, e])), [d.data]);
   const live = useLiveStatus(ticker, d.data?.recommendation.id, 60_000, d.data?.recommendation.quote_pending ? 3_000 : null);
   useViewQuotes([ticker]);  // the viewed stock joins the app-wide quote subscription while this page is open
+  // the stored analysis judged again on the live price, every second (owner 2026-09-29: "모든 정보를 실시간으로")
+  const lvj = useApi<{ live: (LiveJudgement & { rec_id: number; analysed_at: string }) | null }>(`/stocks/${ticker}/live`, [ticker]);
+  usePoll(lvj.reload, 1_000, true);
   const wl = useApi<{ ticker: string }[]>("/watchlist");
   const watched = Array.isArray(wl.data) && wl.data.some((w) => w?.ticker === ticker);  // an odd answer never breaks the page
   const mine = d.data && d.data.analysis.ticker === ticker ? d.data : null;
@@ -180,17 +188,21 @@ function StockDetail({ ticker }: { ticker: string }) {
   const unavailableComps = comps.filter((c) => !c.available);
   // one price basis for the whole page: today's shares (review 2026-09-28 F03); the snapshot's own prices are the record
   const split = typeof stored.split_factor_since === "number" && stored.split_factor_since > 0 ? stored.split_factor_since : 1;
-  const priceNow = typeof stored.price === "number" ? stored.price : a.price === null ? null : a.price / split;
+  const lj = lvj.data?.live && lvj.data.live.rec_id === rec.id ? lvj.data.live : null;
+  const priceNow = lj?.price ?? (typeof stored.price === "number" ? stored.price : a.price === null ? null : a.price / split);
   // a stale quote is not a decision input, but it is still the last known price — never blanked (real-time quotes)
   const rawEv = a.evidence.find((x) => x.metric === "price.current" && typeof x.value === "number");
   const rawQuote = rawEv ? (rawEv.value as number) : null;
-  const e = planNow(a.entry, stored, a.price);
-  const finalAction = com && !["UNAVAILABLE", "SKIPPED"].includes(com.status) ? com.final_action : rec.action;
-  const adv = advise({ action: finalAction, price: priceNow, maxBuy: e?.max_buy, idealEntry: e?.ideal_entry, stop: e?.stop, rr: e?.rr_at_current, eventRisk: a.event_risk.level, vetoes: a.decision.vetoes, sizeLimit: a.decision.size_limit, status: rec.current_status, sectorKnown: a.sector_known });
+  const e0 = planNow(a.entry, stored, a.price);
+  const e = lj && e0 ? { ...e0, max_buy: lj.max_buy ?? e0.max_buy, stop: lj.stop ?? e0.stop, target1: lj.target1 ?? e0.target1, target2: lj.target2 ?? e0.target2,
+                         ideal_entry: lj.ideal_entry ?? e0.ideal_entry, rr_at_current: lj.rr ?? e0.rr_at_current } : e0;
+  const finalAction = lj ? lj.action : com && !["UNAVAILABLE", "SKIPPED"].includes(com.status) ? com.final_action : rec.action;
+  const recStatus = lj ? "CURRENT" : rec.current_status;
+  const adv = advise({ action: finalAction, price: priceNow, maxBuy: e?.max_buy, idealEntry: e?.ideal_entry, stop: e?.stop, rr: e?.rr_at_current, eventRisk: a.event_risk.level, vetoes: lj ? lj.vetoes : a.decision.vetoes, sizeLimit: a.decision.size_limit, status: recStatus, sectorKnown: a.sector_known });
   const zone0 = priceZone({ action: finalAction, price: priceNow, maxBuy: e?.max_buy, stop: e?.stop });
   // the zone is computed from the analysis-time price: once the stored plan is no longer current, say so
-  const zone = rec.current_status && rec.current_status !== "CURRENT" && zone0.tone !== "neutral"
-    ? { text: `분석 당시 가격 기준 ${zone0.text} — 지금은 ${STATUS_INFO[rec.current_status]?.label ?? "재확인 필요"}`, tone: "warn" as const } : zone0;
+  const zone = recStatus && recStatus !== "CURRENT" && zone0.tone !== "neutral"
+    ? { text: `분석 당시 가격 기준 ${zone0.text} — 지금은 ${STATUS_INFO[recStatus]?.label ?? "재확인 필요"}`, tone: "warn" as const } : zone0;
   const cautions: string[] = [
     // missing / stale data is shown as the reason for holding the call (below), not as a risk of the company
     ...a.decision.vetoes.filter((v) => !DATA_STATE_VETOES.has(v)).map((v) => `거부권(hard veto): ${VETO_KO[v] ?? v}`),
@@ -199,7 +211,7 @@ function StockDetail({ ticker }: { ticker: string }) {
     ...(a.portfolio_review?.warnings ?? []),
     ...(missing.length ? [`데이터 주의: ${missing.map((c) => DATA_TYPE_KO[c.data_type] ?? c.data_type).join(", ")}`] : []),
   ].filter((v, i, arr) => arr.indexOf(v) === i).slice(0, 6);
-  const expired = isExpired(finalAction, rec.current_status, rec.data_quality);
+  const expired = isExpired(finalAction, recStatus, lj ? lj.data_quality : rec.data_quality);
   const tone = actionTone(finalAction, expired);
   const run = async (label: string, f: () => Promise<void>) => {
     if (busy) return;  // one action at a time: a second click never starts the same work twice
@@ -241,8 +253,9 @@ function StockDetail({ ticker }: { ticker: string }) {
         </div>
         <div className="verdict-row">
           <span className="verdict" data-testid="verdict">{expired ? "지금은 유효하지 않은 매수 신호" : VERDICT_KO[finalAction] ?? finalAction}</span>
-          <Action a={finalAction} status={rec.current_status} quality={rec.data_quality} lg />
+          <Action a={finalAction} status={recStatus} quality={lj ? lj.data_quality : rec.data_quality} lg />
         </div>
+        {lj && <div className="live-line" data-testid="live-judgement"><span className="live-dot" aria-hidden />실시간 판정 {liveTime(lj.at)} · 점수 {lj.score.toFixed(1)} · 저장된 분석({stamp(lj.analysed_at)})에 현재가 {price(lj.price)}를 넣어 1초마다 다시 계산</div>}
         <p className="headline">{adv.headline}</p>
         {adv.details.length > 0 && <div className="details">{adv.details.map((t, i) => <div key={i}>· {t}</div>)}</div>}
         <div className="metrics">

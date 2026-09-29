@@ -43,3 +43,21 @@ def test_no_fresh_price_keeps_the_stored_row(client):  # noqa: F811
     _scan_without_prices(c, svc)
     assert svc.live_rejudge() == 0
     assert all(not r.get("live_at") for r in c.get("/api/opportunities").json()["rows"])
+
+
+def test_a_held_name_outside_the_list_and_the_stock_page_are_live_too(client):  # noqa: F811
+    """Owner 2026-09-29: "모든 정보를 실시간으로" — the names held, watched or on screen are re-judged every round, and the
+    stock page reads its own live judgement."""
+    c, svc = client
+    assert c.post("/api/scan?committee=false").status_code == 200
+    listed = {r["ticker"] for r in c.get("/api/opportunities").json()["rows"]}
+    other = next(sec.ticker for sec in svc.data.securities().value if sec.ticker not in listed and not sec.is_etf)
+    h = {"X-MarketLens-Client": "test"}
+    assert c.get(f"/api/stocks/{other}?refresh=true", headers=h).status_code == 200  # its own analysis
+    c.put("/api/portfolio", json={"holdings": [{"ticker": other, "quantity": 5, "cost_basis": 50}]})
+    assert c.get(f"/api/stocks/{other}/live").json()["live"] is None  # no live price yet
+    svc.quotes.ingest_poll(other, 123.45, svc.now() - timedelta(seconds=1), "toss")
+    svc._pool_cache = None  # the holding just changed (the pool is rebuilt every 30 s in the app)
+    svc.live_rejudge()
+    live = c.get(f"/api/stocks/{other}/live").json()["live"]
+    assert live and live["price"] == 123.45 and live["action"] and live["analysed_at"]

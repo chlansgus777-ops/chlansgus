@@ -249,7 +249,8 @@ class MarketLensService:
         self._rejudge_inputs: dict[int, Any] = {}  # rec id -> decoded stored inputs (they never change)
         self._rejudged: dict[int, dict[str, Any]] = {}  # rec id -> the live re-judgement shown over the stored row
         self._rotate = 0
-        self._pool_cache: tuple[int, float, list[tuple[int, str, float]]] | None = None
+        self._pool_cache: tuple[Any, float, list[tuple[int, str, float]]] | None = None
+        self._pool_mine: set[int] = set()
         # 토스증권 account (read-only): decides the holdings and cash it has; LIVE only (never valued on mock prices)
         # its prices are the app's real-time feed in every session Toss quotes (application/toss_quotes.py)
         self.toss_feed = TossQuoteFeed(self.quotes, None)
@@ -615,6 +616,7 @@ class MarketLensService:
         never from the request that changed the data — a background read racing its commit on a shared connection
         (in-memory SQLite) lost the record, and a burst of changes reloads once instead of once per change."""
         self.refresher.invalidate("live-plans")
+        self._pool_cache = None  # holdings / watchlist changed: the live pool follows at the next round
 
     def _load_live_plans(self) -> int:
         with self.sf() as s:
@@ -680,8 +682,9 @@ class MarketLensService:
             lj = self._rejudged.get(p[0])
             return lj["score"] if lj else p[2]
 
-        order = sorted(pool, key=lambda p: -live_score(p))
-        head, rest = order[: self.LIVE_TOP], order[self.LIVE_TOP:]
+        mine = [p for p in pool if p[0] in self._pool_mine]  # viewed / held / watched: every round
+        order = sorted((p for p in pool if p[0] not in self._pool_mine), key=lambda p: -live_score(p))
+        head, rest = mine + order[: self.LIVE_TOP], order[self.LIVE_TOP:]
         if rest:
             k = self._rotate % len(rest)
             rest = (rest[k:] + rest[:k])[: self.LIVE_ROTATE]
@@ -749,22 +752,36 @@ class MarketLensService:
         """(rec id, ticker, stored score) of the pooled analyses — each name's newest (a re-analysis after the selection
         wins) — without a split since the analysis (its stored bars would be on another share basis). Rebuilt when the
         shown selection changes or every LIVE_POOL_AGE; reading ~100 stored analyses every second cost half a round."""
+        views = frozenset(self.quotes.viewed())
         with self.sf() as s:
             scan = self.shown_scan(s)
-            if scan is None:
-                return []
             c = self._pool_cache
-            if c is not None and c[0] == scan.id and time.monotonic() - c[1] < self.LIVE_POOL_AGE:
+            sid = scan.id if scan is not None else None
+            if c is not None and c[0] == (sid, views) and time.monotonic() - c[1] < self.LIVE_POOL_AGE:
                 return c[2]
-            recs = [r for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None and r.rank <= self.LIVE_POOL]
-            newer = repo.newer_single_analyses(s, [r.ticker for r in recs], scan.as_of, self.mode.value)
-            pool = []
-            for r in recs:
-                use = newer.get(r.ticker) or r
-                if abs((self.levels_now(use).get("split_factor") or 1.0) - 1.0) > 1e-9:
+            pool: list[tuple[int, str, float]] = []
+            seen: set[str] = set()
+            uses: list[Any] = []
+            if scan is not None:
+                recs = [r for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None and r.rank <= self.LIVE_POOL]
+                newer = repo.newer_single_analyses(s, [r.ticker for r in recs], scan.as_of, self.mode.value)
+                uses = [newer.get(r.ticker) or r for r in recs]
+            # the names on screen, held and watched (owner: "모든 정보를 실시간으로") — each one's newest analysis
+            extra: list[Any] = []
+            mine = sorted(set(views) | {h.ticker for h in self.portfolio(s).holdings} | {w.ticker for w in repo.watchlist(s)})
+            in_pool = {u.ticker for u in uses}
+            for t in mine:
+                if t not in in_pool:
+                    r = self.latest_company_recommendation(s, t)
+                    if r is not None:
+                        extra.append(r)
+            for use in extra + uses:  # the names the owner looks at first: judged every round
+                if use.ticker in seen or abs((self.levels_now(use).get("split_factor") or 1.0) - 1.0) > 1e-9:
                     continue
+                seen.add(use.ticker)
                 pool.append((use.id, use.ticker, float(use.score)))
-        self._pool_cache = (scan.id, time.monotonic(), pool)
+            self._pool_mine = {u.id for u in extra}
+        self._pool_cache = ((sid, views), time.monotonic(), pool)
         return pool
 
     def live_rejudge_tick(self) -> None:
@@ -773,6 +790,17 @@ class MarketLensService:
 
     def rejudged(self, rec_id: int) -> dict[str, Any] | None:
         return self._rejudged.get(rec_id)
+
+    def live_for(self, ticker: str) -> dict[str, Any] | None:
+        """The live re-judgement of ``ticker``'s newest analysis (the stock page, every second) — starts a round when due."""
+        self.live_rejudge_tick()
+        with self.sf() as s:
+            row = self.latest_company_recommendation(s, ticker.upper())
+            rid, as_of = (row.id, row.as_of) if row is not None else (None, None)
+        if rid is None:
+            return None
+        lj = self._rejudged.get(rid)
+        return None if lj is None else lj | {"rec_id": rid, "analysed_at": as_of.isoformat()}
 
     def live_board(self) -> dict[str, Any]:
         """The live re-judgements of the list (for the screens' 1-second refresh): rec id → decision, score, price and

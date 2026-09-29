@@ -180,6 +180,12 @@ def opportunities(req: Request) -> dict[str, Any]:
     return {"scan": _scan_head(scan), "rows": rows, "readiness": ready}
 
 
+@router.get("/stocks/{ticker}/live")
+def stock_live(req: Request, ticker: str) -> dict[str, Any]:
+    """The stock page's live re-judgement (its stored analysis with the current price), polled every second."""
+    return {"live": svc(req).live_for(_ticker(ticker))}
+
+
 @router.get("/opportunities/live")
 def opportunities_live(req: Request) -> dict[str, Any]:
     """The list's live re-judgements only (memory, no database) — the screens poll this every second."""
