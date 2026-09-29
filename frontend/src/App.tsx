@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ModeBanner, StatePanel } from "./components/ui";
 import { QuickSearch } from "./components/QuickSearch";
+import { PhoneGate } from "./components/Phone";
 import { StatusBar, StatusProvider, useStatus } from "./components/status";
 import { BrandMark, IHelp, IHome, IMarket, IPerf, IPortfolio, ISettings, IStocks } from "./components/icons";
 import type { SystemInfo } from "./types";
@@ -28,9 +29,11 @@ export function versionLabel(sys: SystemInfo): string {
 
 export default function App() {
   return (
-    <StatusProvider>
-      <Shell />
-    </StatusProvider>
+    <PhoneGate>
+      <StatusProvider>
+        <Shell />
+      </StatusProvider>
+    </PhoneGate>
   );
 }
 

@@ -955,3 +955,17 @@ a.brief-row:hover .txt { color: var(--text); }
 .acct-figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .acct-fig .t-key small { font-size: 13px; font-weight: 600; margin-left: 4px; }
 @media (max-width: 720px) { .acct-figs { grid-template-columns: 1fr; } }
+
+/* the phone (components/Phone.tsx) */
+.phone-ribbon { position: sticky; top: 0; z-index: 30; padding: 6px 16px; font-size: 12px; text-align: center; background: var(--accent-soft); color: var(--muted); border-bottom: 1px solid var(--line); }
+.pair-screen { max-width: 420px; margin: 0 auto; padding: 48px 16px; display: grid; gap: 16px; }
+.pair-screen h1 { margin: 0; font-size: 28px; }
+.pair-screen form { display: grid; gap: 12px; }
+.pair-screen label { display: grid; gap: 4px; }
+.pair-code { font-size: 32px; letter-spacing: 0.3em; text-align: center; font-variant-numeric: tabular-nums; padding: 12px; }
+.phone-steps { display: grid; gap: 14px; }
+.phone-steps .n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; margin-right: 8px; }
+.phone-addr { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.phone-addr code { font-size: 18px; padding: 6px 10px; border-radius: 8px; background: var(--accent-soft); }
+.phone-code { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+.phone-code b { font-size: 30px; letter-spacing: 0.12em; font-variant-numeric: tabular-nums; }

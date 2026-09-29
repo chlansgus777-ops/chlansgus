@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Plain HTTP is needed for the PC on the home network. MainActivity only ever loads a private (RFC 1918) address
+     the user typed, and refuses to navigate anywhere else inside the app. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

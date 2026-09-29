@@ -8,6 +8,9 @@ Local-only API protection (the API has no user accounts; it must only serve the 
 - Optional per-launch token (``MARKETLENS_API_TOKEN``): when set, every /api request needs it.
 - Static files: the requested path is resolved and must stay inside ``frontend/dist``; everything else is
   refused. The SPA fallback only ever returns ``index.html``.
+- The phone (application/phone.py, only while switched on): a client that is not this PC must come from a
+  private home-network address, name the PC by its IP address, carry a paired device's cookie for the API, and can
+  only read (GET) — the per-launch token and every change stay with the PC's own screens.
 """
 
 from __future__ import annotations
@@ -23,11 +26,15 @@ from typing import Any, AsyncIterator, Awaitable, Callable
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
-from starlette.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import PlainTextResponse
 
 from marketlens import __version__
+from marketlens.api.phone_routes import PUBLIC as PHONE_PUBLIC
+from marketlens.api.phone_routes import router as phone_router
 from marketlens.api.quotes import router as quotes_router
 from marketlens.api.routes import router
+from marketlens.application.phone import COOKIE as PHONE_COOKIE
+from marketlens.application.phone import is_private
 from marketlens.application.services import MarketLensService
 from marketlens.config import REPO_ROOT, Settings, load_settings
 from marketlens.infrastructure.db.session import make_engine, make_session_factory, migrate
@@ -40,6 +47,7 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", "tauri.localhost", "testserver"]
 CLIENT_HEADER = "x-marketlens-client"
 TOKEN_HEADER = "x-marketlens-token"
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+LOCAL_CLIENTS = {"127.0.0.1", "::1", "testclient"}  # this PC (and the test client)
 _BAD_PATH = re.compile(r"(^|[\\/])\.\.([\\/]|$)|\\|\x00|^[A-Za-z]:|^/|^~")
 
 
@@ -73,6 +81,7 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
                 migrate(settings.database_url)
             sf = make_session_factory(make_engine(settings.database_url))
             app.state.service = MarketLensService(settings, sf)
+        _start_phone(app)
         sched = None
         if getattr(settings, "scheduler", False):
             from marketlens.workers.scheduler import BackgroundScheduler
@@ -89,6 +98,8 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
             threading.Thread(target=_warm, args=(app.state.service,), daemon=True, name="readiness-warmup").start()
         yield
         app.state.ready = False
+        if getattr(app.state, "phone", None) is not None and app.state.phone.server is not None:
+            app.state.phone.server.stop()
         stop_quotes = getattr(app.state.service, "stop_quotes", None)
         if stop_quotes is not None:
             stop_quotes()
@@ -108,10 +119,26 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
     app.state.service = service
     app.state.ready = service is not None
 
+    app.state.phone = None
+
     @app.middleware("http")
     async def local_guard(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         origin = request.headers.get("origin")
         host = request.headers.get("host", "")
+        ip = request.client.host if request.client else ""
+        remote = ip not in LOCAL_CLIENTS  # the phone listener: anything that is not this PC
+        request.state.remote = remote
+        hostname = host.rsplit(":", 1)[0] if host.count(":") <= 1 else host
+        if remote:
+            phone = app.state.phone
+            if phone is None or not phone.enabled:
+                return JSONResponse({"detail": "PC에서 폰 연결이 꺼져 있습니다."}, status_code=403)
+            if not is_private(ip):
+                return JSONResponse({"detail": "집 네트워크(같은 와이파이)에서만 연결할 수 있습니다."}, status_code=403)
+            if not is_private(hostname):  # the phone names the PC by its home-network IP (never a DNS name: no rebinding)
+                return PlainTextResponse("Invalid host header", status_code=400)
+        elif hostname not in ALLOWED_HOSTS:
+            return PlainTextResponse("Invalid host header", status_code=400)
         # same-origin requests (e.g. the UI served by this backend on any port — Vite module scripts are
         # loaded with ``crossorigin`` and carry an Origin header) are allowed; the Host header itself is
         # already restricted to localhost by TrustedHostMiddleware, so this cannot be abused via DNS rebinding
@@ -124,7 +151,17 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
         site = request.headers.get("sec-fetch-site")
         if path.startswith("/api/") and site in ("cross-site", "same-site") and not same_origin and origin not in ALLOWED_ORIGINS:
             return JSONResponse({"detail": "다른 사이트에서 시작된 요청은 허용되지 않습니다."}, status_code=403)
-        if path.startswith("/api/"):
+        if remote and path.startswith("/api/"):
+            public = (request.method, path) in PHONE_PUBLIC
+            if not public:
+                dev = app.state.phone.check(request.cookies.get(PHONE_COOKIE))
+                if dev is None:
+                    return JSONResponse({"detail": "PC에 표시된 연결 코드로 이 폰을 먼저 연결하세요.", "pair": True}, status_code=401)
+                if request.method not in ("GET", "HEAD"):
+                    return JSONResponse({"detail": "폰에서는 보기만 할 수 있습니다. 바꾸는 것은 PC에서 하세요.", "read_only": True}, status_code=403)
+            elif request.method in UNSAFE_METHODS and request.headers.get(CLIENT_HEADER) is None:
+                return JSONResponse({"detail": f"상태 변경 요청에는 {CLIENT_HEADER} 헤더가 필요합니다."}, status_code=403)
+        elif path.startswith("/api/"):
             if request.method in UNSAFE_METHODS and request.headers.get(CLIENT_HEADER) is None:
                 return JSONResponse({"detail": f"상태 변경 요청에는 {CLIENT_HEADER} 헤더가 필요합니다."}, status_code=403)
             if api_token and path not in ("/api/health/live", "/api/health/ready"):
@@ -134,10 +171,12 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers.setdefault("X-Frame-Options", "DENY")
         resp.headers.setdefault("Referrer-Policy", "no-referrer")
+        if remote and path.startswith("/api/"):
+            resp.headers.setdefault("Cache-Control", "no-store")  # account figures are never kept by the phone's browser
         return resp
 
     app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["content-type", CLIENT_HEADER, TOKEN_HEADER])
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+    app.include_router(phone_router, prefix="/api")
     app.include_router(router, prefix="/api")
     app.include_router(quotes_router, prefix="/api")
 
@@ -176,6 +215,23 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
             return JSONResponse({"detail": "찾을 수 없음"}, status_code=404)
 
     return app
+
+
+def _start_phone(app: FastAPI) -> None:
+    """The phone link over the running service; its home-network listener starts when it is switched on."""
+    from marketlens.api.phone_server import PhoneServer
+    from marketlens.application.phone import PhoneLink
+
+    svc = app.state.service
+    try:
+        link = PhoneLink(svc.sf, svc.now)
+    except Exception as e:  # noqa: BLE001 - no settings table yet (a first start before migrations): no phone link
+        log.info("phone link unavailable: %s", type(e).__name__)
+        return
+    link.server = PhoneServer(app, link.port)
+    app.state.phone = link
+    if link.enabled and not os.environ.get("MARKETLENS_NO_PHONE_LISTENER"):
+        link.server.start()
 
 
 def _warm(svc: Any) -> None:

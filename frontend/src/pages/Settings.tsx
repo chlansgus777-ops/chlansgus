@@ -7,6 +7,7 @@ import { Card, Err, Loading, Tabs } from "../components/ui";
 import { clientLatency, useQuoteStatus } from "../quotes";
 import Health from "./Health";
 import { useApi } from "../components/useApi";
+import { PhoneSettings } from "../components/Phone";
 
 /** First-run setup without editing files: values are sent once, stored by the backend (OS keychain or the
  * private .env of this installation) and never shown again. */
@@ -66,7 +67,7 @@ interface S { mode: string; keys_configured: Record<string, boolean>; weights: R
   llm?: { provider: string; available: boolean; base_url: string | null; fast_model: string; deep_model: string; openai_key?: boolean; budget_usd?: number | null; spent_usd?: number | null; reason?: string | null; price_in?: number | null; price_out?: number | null };
   scheduler?: { enabled: boolean; interval_minutes: number; ai_committee?: boolean } }
 
-type Tab = "data" | "quotes" | "auto" | "ai" | "status" | "model";
+type Tab = "data" | "quotes" | "auto" | "ai" | "phone" | "status" | "model";
 
 /** Saves a few non-secret values through the same setup endpoint (restart applies them). */
 function useSave(onSaved: () => void) {
@@ -211,7 +212,7 @@ export default function Settings() {
   const s = useApi<S>("/settings");
   const [params, setParams] = useSearchParams();
   const t = params.get("tab");
-  const tab: Tab = t === "quotes" || t === "auto" || t === "ai" || t === "status" || t === "model" ? t : "data";
+  const tab: Tab = t === "quotes" || t === "auto" || t === "ai" || t === "status" || t === "model" || t === "phone" ? t : "data";
   if (s.state === "loading") return <Loading what="설정" />;
   if (!s.data) return <Err error={s.error} retry={s.reload} />;
   const d = s.data;
@@ -221,7 +222,7 @@ export default function Settings() {
       <div className="page-head enter"><div><h1>설정</h1><div className="t-sub">데이터 연결, 실시간 시세, 자동 갱신, AI 검토, 연결 상태를 한곳에서 봅니다. 저장한 키는 다시 표시하지 않습니다.</div></div></div>
       <div className="row spread">
         <Tabs<Tab> label="설정 항목" value={tab} onChange={(v) => setParams(v === "data" ? {} : { tab: v }, { replace: true })}
-              items={[["data", "데이터 연결"], ["quotes", "실시간 시세"], ["auto", "자동 갱신"], ["ai", "AI 검토"], ["status", "연결 상태·데이터 준비"], ["model", "모델 설정"]]} />
+              items={[["data", "데이터 연결"], ["quotes", "실시간 시세"], ["auto", "자동 갱신"], ["ai", "AI 검토"], ["phone", "폰 연결"], ["status", "연결 상태·데이터 준비"], ["model", "모델 설정"]]} />
       </div>
       {tab === "data" && (
         <>
@@ -231,6 +232,7 @@ export default function Settings() {
         </>
       )}
       {tab === "quotes" && <Quotes />}
+      {tab === "phone" && <PhoneSettings />}
       {tab === "auto" && <AutoRefresh d={d} onSaved={s.reload} />}
       {tab === "ai" && <AiReview d={d} onSaved={s.reload} />}
       {tab === "status" && <Health />}
