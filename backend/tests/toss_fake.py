@@ -95,6 +95,7 @@ class FakeToss:
         self.cash = {"USD": "1234.56", "KRW": "500000"}
         self.orders: list[dict[str, Any]] = [order(i, "NVDA", "BUY", "1", "100.00", "2026-09-%02d" % (1 + i % 20)) for i in range(1, 131)]
         self.rate = {"rate": "1385.50", "midRate": "1380.00"}
+        self.prices: dict[str, tuple[str, str | None]] = {}  # symbol -> (lastPrice, timestamp) for /api/v1/prices
         self.faults: list[httpx.Response | Exception] = []  # served first, in order (429, 500, a network error…)
         self.requests: list[httpx.Request] = []
         self.errors: list[str] = []  # spec violations seen (requests or our own responses)
@@ -152,6 +153,12 @@ class FakeToss:
         if not self.token or auth != f"Bearer {self.token}":
             return self._error(path, method, 401, "unauthorized", headers={"WWW-Authenticate": 'Bearer error="invalid_token"'})
         acct = req.headers.get("x-tossinvest-account")
+        if path == "/api/v1/prices":
+            syms = [x for x in q.get("symbols", "").split(",") if x]
+            if len(syms) > 200:
+                self.errors.append(f"/api/v1/prices with {len(syms)} symbols (spec: at most 200)")
+            rows = [{"symbol": x, "timestamp": self.prices[x][1], "lastPrice": self.prices[x][0], "currency": "USD"} for x in syms if x in self.prices]
+            return self._resp(path, method, 200, {"result": rows})
         if path == "/api/v1/accounts":
             return self._resp(path, method, 200, {"result": self.accounts})
         if acct is not None and int(acct) not in {a["accountSeq"] for a in self.accounts}:

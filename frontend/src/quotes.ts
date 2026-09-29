@@ -71,6 +71,8 @@ export interface QuoteStatus {
   provider_latency_ms: { n: number; p50: number | null; p95: number | null; p99?: number | null; max: number | null; mean?: number | null };
   out_of_order_late_by_ms?: { n: number; p50: number | null; p95: number | null; max: number | null };
   duplicates?: number;
+  /** the broker's 1-second price feed (토스증권): null in MOCK */
+  poll?: { active: boolean; live: boolean; last_ok: string | null; error: { kind: string; text: string } | null; capacity: number; every_s: number; calls: number; prints: number } | null;
 }
 
 export type Link = "idle" | "connecting" | "open" | "retrying";

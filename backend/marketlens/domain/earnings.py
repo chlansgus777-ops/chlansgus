@@ -233,6 +233,8 @@ class AnalystSnapshot:
     revision_basis: Mapping[str, str] = field(default_factory=dict)  # {"7d": "PROVIDER", "30d": "SELF", ...}
     estimate_range_pct: float | None = None  # (high − low) / |mean| of FY1 EPS estimates (not a standard deviation)
     cross_check: str | None = None  # CONSISTENT | DATA_CONFLICT | SEVERE_DATA_CONFLICT | SINGLE_SOURCE (+ detail)
+    eps_up_30d: int | None = None  # analysts who raised / lowered their FY1 EPS estimate in the last 30 days (Alpha Vantage)
+    eps_down_30d: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +244,12 @@ class RevisionAssessment:
     breadth_score: float | None  # 0..1 combining magnitude and consistency
     low_coverage: bool
     high_dispersion: bool
+    agreement: float | None = None  # (up − down) ÷ (up + down) over 30 days, Zacks-style (§13); None below MIN_REVISERS
+    up_30d: int | None = None
+    down_30d: int | None = None
+
+
+MIN_REVISERS = 3  # fewer revisions than this say little about agreement
 
 
 def assess_revisions(
@@ -269,12 +277,19 @@ def assess_revisions(
         mag = a.eps_revision_30d if a.eps_revision_30d is not None else eps_vals[-1]
         mag_score = max(0.0, min(1.0, 0.5 + mag * 10))  # +5% 30d revision → 1.0
         breadth = round(0.5 * consistency + 0.5 * mag_score, 4)
+    up, down = a.eps_up_30d, a.eps_down_30d
+    agreement = (up - down) / (up + down) if up is not None and down is not None and up + down >= MIN_REVISERS else None
+    if agreement is not None:  # how many analysts moved together, not only how far the average moved (Zacks)
+        agree_score = 0.5 + 0.5 * agreement
+        breadth = round(agree_score if breadth is None else 0.7 * breadth + 0.3 * agree_score, 4)
     return RevisionAssessment(
         eps_direction=direction(a.eps_revision_7d, a.eps_revision_30d, a.eps_revision_90d),
         revenue_direction=direction(a.revenue_revision_30d, a.revenue_revision_90d),
         breadth_score=breadth,
         low_coverage=(a.analyst_count or 0) < min_analysts,
         high_dispersion=(a.estimate_dispersion or 0) > high_dispersion,
+        agreement=round(agreement, 4) if agreement is not None else None,
+        up_30d=up, down_30d=down,
     )
 
 

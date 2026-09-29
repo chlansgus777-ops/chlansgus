@@ -20,16 +20,18 @@ from marketlens.domain.entry import EntryPlan
 from marketlens.domain.indicators import TechnicalSnapshot
 from marketlens.domain.macro import MacroImpact
 from marketlens.domain.sector_models import RuleScore
+from marketlens.domain.signals import ReturnSignals
 from marketlens.domain.valuation import RelativeValuation
 
 MULTIPLE_KO = {"forward_pe": "선행 PER", "trailing_pe": "PER", "ev_sales": "EV/매출", "ev_ebitda": "EV/EBITDA", "p_tbv": "P/TBV", "p_ffo": "P/FFO", "p_b": "PBR", "price_sales": "PSR", "price_fcf": "P/FCF"}
 
-COMPONENTS = ("fundamental", "valuation", "earnings_revision", "catalyst", "macro", "technical", "risk", "entry_rr")
+COMPONENTS = ("fundamental", "valuation", "earnings_revision", "catalyst", "macro", "technical", "risk", "entry_rr", "return_signals")
 COMPONENT_KO = {
     "fundamental": "펀더멘털", "valuation": "밸류에이션", "earnings_revision": "실적·추정치", "catalyst": "촉매·이슈",
-    "macro": "거시", "technical": "기술적 위치", "risk": "위험", "entry_rr": "진입 손익비",
+    "macro": "거시", "technical": "기술적 위치", "risk": "위험", "entry_rr": "진입 손익비", "return_signals": "수익 신호",
 }
 MIN_COMPONENT_COVERAGE = 0.5
+ADDED_LATER = ("return_signals",)  # components a stored model may not name yet (weight 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +41,9 @@ class ScoringModel:
     missing_component_subscore: float = 0.35
 
     def __post_init__(self) -> None:
+        # a model stored before a component existed gives it weight 0 (return_signals, §13: 0 until validated)
+        if set(self.weights) < set(COMPONENTS) and set(COMPONENTS) - set(self.weights) <= set(ADDED_LATER):
+            object.__setattr__(self, "weights", {**{k: 0.0 for k in ADDED_LATER}, **dict(self.weights)})
         if set(self.weights) != set(COMPONENTS):
             raise ValueError(f"weights must define exactly {COMPONENTS}")
         if any(w < 0 for w in self.weights.values()):
@@ -141,6 +146,7 @@ class ScoringInputs:
     short_interest_pct: float | None
     data_completeness: float
     reference_facts: Mapping[str, float | None] = field(default_factory=dict)
+    return_signals: ReturnSignals | None = None  # domain.signals (§13); weight 0 until the 2016+ validation adopts it
 
 
 def lin(x: float, bad: float, good: float) -> float:
@@ -241,6 +247,9 @@ def _earnings(inp: ScoringInputs) -> Calc:
         word = {1: "상향", 0: "변화 없음", -1: "하향"}
         reasons.append(Reason(f"EPS 추정치 {word[rev.eps_direction]}", rev.eps_direction, ("analyst.eps_revision_30d", "analyst.eps_revision_90d")))
         reasons.append(Reason(f"매출 추정치 {word[rev.revenue_direction]}", rev.revenue_direction, ("analyst.revenue_revision_30d",)))
+        if rev.agreement is not None:
+            reasons.append(Reason(f"최근 30일 EPS 추정치 상향 {rev.up_30d}명·하향 {rev.down_30d}명", 1 if rev.agreement >= 0.34 else -1 if rev.agreement <= -0.34 else 0,
+                                  ("analyst.eps_up_30d", "analyst.eps_down_30d")))
         if rev.low_coverage:
             reasons.append(Reason("애널리스트 커버리지 적음", -1, ("analyst.analyst_count",)))
         if rev.high_dispersion:
@@ -356,6 +365,18 @@ def _entry(inp: ScoringInputs) -> Calc:
     return sub, 1.0, reasons, []
 
 
+SIGNAL_REFS = {"high52": "signal.high52", "rs_rank": "signal.rs_rank", "fscore": "signal.fscore", "ear": "signal.ear"}
+
+
+def _return_signals(inp: ScoringInputs) -> Calc:
+    rs = inp.return_signals
+    if rs is None:
+        return None, 0.0, [], ["return_signals"]
+    reasons = [Reason(s.text, 1 if (s.sub or 0) >= 0.65 else -1 if (s.sub or 0) <= 0.35 else 0, (SIGNAL_REFS[s.key],)) for s in rs.available]
+    missing = [f"signal.{s.key}" for s in rs.signals if s.sub is None]
+    return rs.subscore, rs.coverage, reasons, missing
+
+
 _CALC = {
     "fundamental": _fundamental,
     "valuation": _valuation,
@@ -365,6 +386,7 @@ _CALC = {
     "technical": _technical,
     "risk": _risk,
     "entry_rr": _entry,
+    "return_signals": _return_signals,
 }
 
 

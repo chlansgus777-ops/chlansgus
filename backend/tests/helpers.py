@@ -8,7 +8,7 @@ from marketlens.domain.enums import Action, DataQuality
 from marketlens.domain.facts import DataQualityReport
 from marketlens.domain.scoring import COMPONENTS, ComponentScore, ScoreCard
 
-DEFAULT_WEIGHTS = {"fundamental": 25, "valuation": 15, "earnings_revision": 15, "catalyst": 10, "macro": 10, "technical": 10, "risk": 10, "entry_rr": 15}
+DEFAULT_WEIGHTS = {"fundamental": 25, "valuation": 15, "earnings_revision": 15, "catalyst": 10, "macro": 10, "technical": 10, "risk": 10, "entry_rr": 15, "return_signals": 0}  # as config/scoring_model.toml
 
 
 def card(total: float, available: bool = True) -> ScoreCard:

@@ -49,6 +49,7 @@ OVER_LIMIT = "OVER_LIMIT"          # 구독 한도 초과 — not streamed
 UNAVAILABLE = "UNAVAILABLE"        # 스트림 미설정(키 없음·MOCK)
 
 LIVE_WINDOW = timedelta(seconds=60)
+POLL_COVERS = timedelta(seconds=60)  # a name the poll feed answered this recently skips the REST snapshot
 VIEW_LEASE = timedelta(seconds=90)
 PINNED_REFRESH = 30.0
 FALLBACK_EVERY = timedelta(seconds=30)  # REST refresh per name while the stream is down in a trading session
@@ -68,7 +69,7 @@ class Trade:
     received_ts: datetime     # when the backend received it
     volume: float | None
     source: str
-    feed: str                 # "stream" or "snapshot" — never mixed
+    feed: str                 # "stream", "snapshot" or "poll" (a 1-second REST feed, e.g. 토스증권) — never mixed
 
 
 @dataclass(slots=True)
@@ -76,6 +77,7 @@ class TickerState:
     ticker: str
     stream: Trade | None = None
     snapshot: Trade | None = None
+    poll: Trade | None = None  # the broker's price feed (every second, all US sessions it trades)
     previous_close: float | None = None
     version: int = 0
     trades: int = 0
@@ -152,7 +154,8 @@ class QuoteHub:
                  snapshot_every: timedelta = timedelta(minutes=5), snapshot_gap: float = 1.1) -> None:
         self.source = source
         self.snapshot_source = snapshot_source or source
-        self.max_symbols = max_symbols
+        self.max_symbols = max_symbols  # the stream's own limit (Finnhub free: 50)
+        self.poll_capacity = 0  # names a poll feed covers (토스: 200 per call); 0 = no poll feed
         self.coverage_ko = coverage_ko
         self.streaming = streaming
         self.snapshot_every = snapshot_every
@@ -177,6 +180,7 @@ class QuoteHub:
         # the live verdict (application.live_judge): ``annotate`` adds it to each row, ``on_price`` sees every new price
         self.annotate: Callable[[str, float | None, datetime | None], dict[str, Any] | None] | None = None
         self.on_price: Callable[[str, float, datetime | None], None] | None = None
+        self.poll_status: Callable[[], dict[str, Any]] | None = None  # the poll feed's own status (토스)
 
     # ------------------------------------------------------------------ subscriptions
     def set_pinned(self, kind: str, tickers: Iterable[str]) -> None:
@@ -231,7 +235,8 @@ class QuoteHub:
                 for t in group:
                     if t not in order:
                         order.append(t)
-        return order[: self.max_symbols], order[self.max_symbols:]
+        cap = max(self.max_symbols, self.poll_capacity)
+        return order[:cap], order[cap:]
 
     # ------------------------------------------------------------------ ingest
     def ingest_trade(self, ticker: str, price: float, trade_ms: int, volume: float | None, received: datetime | None = None) -> bool:
@@ -261,6 +266,28 @@ class QuoteHub:
         self.stats.note_latency((rec - ts).total_seconds() * 1000)
         self._observe(ticker, price, ts)
         return True
+
+    def ingest_poll(self, ticker: str, price: float, ts: datetime, source: str) -> bool:
+        """One price from a poll feed (the broker's current price, asked every second). A price whose data time did
+        not move is not a new print. Returns True when the held state changed."""
+        if not (price > 0):
+            return False
+        rec = self._now()
+        with self._lock:
+            st = self._states.setdefault(ticker, TickerState(ticker))
+            cur = st.poll
+            if cur is not None and (ts < cur.trade_ts or (ts == cur.trade_ts and price == cur.price)):
+                return False
+            st.poll = Trade(price, ts, rec, None, source, "poll")
+            self._bump(st)
+        self.stats.note_latency((rec - ts).total_seconds() * 1000)
+        self._observe(ticker, price, ts)
+        return True
+
+    def poll_age(self, ticker: str) -> float | None:
+        with self._lock:
+            st = self._states.get(ticker.upper())
+            return None if st is None or st.poll is None else (self._now() - st.poll.received_ts).total_seconds()
 
     def _observe(self, ticker: str, price: float, ts: datetime | None) -> None:  # outside the lock
         if self.on_price is not None:
@@ -332,7 +359,7 @@ class QuoteHub:
             st = self._states.get(ticker.upper())
             if st is None:
                 return None
-            c = [x for x in (st.stream, st.snapshot) if x is not None]
+            c = [x for x in (st.stream, st.snapshot, st.poll) if x is not None]
             return max(c, key=lambda x: x.trade_ts) if c else None
 
     def rows(self, since: int = 0, tickers: Iterable[str] | None = None) -> list[dict[str, Any]]:
@@ -354,9 +381,8 @@ class QuoteHub:
 
     def _row(self, st: TickerState, now: datetime, subscribed: bool, over: bool) -> dict[str, Any]:
         session = classify_session(now)
-        shown = st.stream
-        if shown is None or (st.snapshot is not None and st.snapshot.trade_ts > shown.trade_ts):
-            shown = st.snapshot if st.snapshot is not None else shown
+        feeds = [x for x in (st.stream, st.snapshot, st.poll) if x is not None]
+        shown = max(feeds, key=lambda x: (x.trade_ts, x.feed != "snapshot")) if feeds else None
         state = display_state(shown, now, session, self.streaming, self.connected, subscribed, over)
         base = {
             "ticker": st.ticker, "state": state, "session": session.value, "subscribed": subscribed, "version": st.version,
@@ -386,6 +412,7 @@ class QuoteHub:
             "last_error": s.last_error, "connected_since": s.connected_since.isoformat() if s.connected_since else None,
             "last_message_at": s.last_message_at.isoformat() if s.last_message_at else None,
             "provider_latency_ms": s.latency.summary(), "out_of_order_late_by_ms": s.late_by.summary(),
+            "poll": self.poll_status() if self.poll_status is not None else None,
         }
 
     # ------------------------------------------------------------------ pinned sets (watchlist, holdings)
@@ -431,6 +458,8 @@ class QuoteHub:
         with self._lock:
             for t in planned:
                 st = self._states.get(t)
+                if st is not None and st.poll is not None and (now - st.poll.received_ts) <= POLL_COVERS:
+                    continue  # the poll feed answered within the minute: a REST snapshot adds nothing
                 if st is not None and st.snapshot is not None:
                     if self.streaming and self.connected and st.stream is not None and st.stream.trade_ts >= seg:
                         continue
@@ -509,9 +538,16 @@ def display_state(shown: Trade | None, now: datetime, session: TradingSession, s
         if streaming and subscribed and not connected:
             return RECONNECTING
         return NO_DATA if streaming else UNAVAILABLE
+    fresh_poll = shown.feed == "poll" and now - shown.trade_ts <= LIVE_WINDOW and shown.trade_ts >= _session_start(now, session)
+    if fresh_poll:  # the broker prints outside the exchange sessions too (overnight trading): a fresh print is live
+        return LIVE
     if session == TradingSession.CLOSED:
         return CLOSED_LAST
     in_session = shown.trade_ts >= _session_start(now, session)
+    if shown.feed == "poll":  # the broker's own feed: live whenever it prints in this session, independent of the stream
+        if in_session and now - shown.trade_ts <= LIVE_WINDOW:
+            return LIVE
+        return QUIET if in_session else EXTENDED_NO_TRADE
     if shown.feed == "stream":
         if not connected:
             return RECONNECTING
@@ -614,7 +650,7 @@ class FinnhubStream:
         if time.monotonic() - self.hub._last_pinned >= PINNED_REFRESH:
             self.hub.refresh_pinned()
         want, _over = self.hub.plan()
-        wanted = set(want)
+        wanted = set(want[: self.hub.max_symbols])  # the stream's own limit; the poll feed covers the rest
         for t in sorted(self._subscribed - wanted):
             conn.send(json.dumps({"type": "unsubscribe", "symbol": t}))
             self.hub.stats.unsubscribe_msgs += 1

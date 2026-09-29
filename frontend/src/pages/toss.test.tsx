@@ -147,11 +147,27 @@ describe("the portfolio with the account", () => {
     portfolio = PF(OFF, { cash_source: "manual", holdings: [H("MSFT", "manual", 4)] });
     render(<MemoryRouter><Portfolio /></MemoryRouter>);
     await screen.findByTestId("holdings");
-    expect(screen.getByTestId("toss-card").textContent).toContain("토스증권 계좌 연결");
+    expect(screen.getByTestId("toss-card").textContent).toContain("1초 실시간 시세");  // the promise of connecting, in one line
     expect(screen.queryByLabelText("토스 client_secret")).toBeNull();
     fireEvent.click(screen.getByText("연결하기"));
     expect(screen.getByLabelText("토스 client_secret")).toBeTruthy();
     expect(screen.getByLabelText("현금(USD)")).toBeTruthy();
     expect(screen.queryByTestId("domestic-holdings")).toBeNull();
+  });
+});
+
+describe("the status bar with the Toss feed", () => {
+  it("says the prices come from Toss every second, and says so when they stop", async () => {
+    const { QuoteFeedStatus } = await import("../components/LivePrice");
+    const q = await import("../quotes");
+    const base = { source: "finnhub", streaming: true, connected: false, coverage: "", max_symbols: 50, subscribed: ["NVDA", "AMD"], over_limit: [], session: "PREMARKET",
+      connects: 0, disconnects: 0, messages: 0, trades: 0, out_of_order: 0, subscribe_msgs: 0, unsubscribe_msgs: 0, snapshot_calls: 0, last_error: null, connected_since: null,
+      last_message_at: null, provider_latency_ms: { n: 0, p50: null, p95: null, max: null } };
+    act(() => { q.handleEvent(`event: status\ndata: ${JSON.stringify({ ...base, poll: { active: true, live: true, last_ok: null, error: null, capacity: 200, every_s: 1, calls: 5, prints: 9 } })}`); });
+    render(<MemoryRouter><QuoteFeedStatus /></MemoryRouter>);
+    expect(screen.getByTestId("quote-feed").textContent).toContain("실시간 · 토스 1초");
+    expect(screen.getByTestId("quote-feed").textContent).toContain("2/200");
+    act(() => { q.handleEvent(`event: status\ndata: ${JSON.stringify({ ...base, poll: { active: true, live: false, last_ok: null, error: { kind: "IP_NOT_ALLOWED", text: "허용 IP" }, capacity: 200, every_s: 1, calls: 5, prints: 9 } })}`); });
+    expect(screen.getByTestId("quote-feed").textContent).toContain("토스 시세 끊김");
   });
 });

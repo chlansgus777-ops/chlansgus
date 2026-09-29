@@ -63,6 +63,10 @@ def on_price_basis(history: Sequence[EstimateObservation], splits: Sequence[Any]
     return out
 
 
+def _count(v: float | None) -> int | None:
+    return int(v) if v is not None and v >= 0 else None
+
+
 def build(ticker: str, history: Sequence[EstimateObservation], as_of: date, splits: Sequence[Any] = ()) -> EstimateReport:
     hist = on_price_basis([h for h in history if h.observed_on <= as_of], splits, as_of)  # point in time: never a later snapshot
     notes: list[str] = []
@@ -128,6 +132,8 @@ def build(ticker: str, history: Sequence[EstimateObservation], as_of: date, spli
         revision_basis={k: v.basis for k, v in revs.items()},
         estimate_range_pct=round(rng, 6) if rng is not None else None,
         cross_check=f"{cc.status}: {cc.detail}",
+        eps_up_30d=_count(fy1.provider_revisions.get("up_30d")) if fy1 else None,
+        eps_down_30d=_count(fy1.provider_revisions.get("down_30d")) if fy1 else None,
     )
     return EstimateReport(snap, revs, cc, sources, tuple(notes))
 

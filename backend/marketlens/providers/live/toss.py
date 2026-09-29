@@ -44,7 +44,8 @@ MAX_429_WAIT_S = 5.0
 MIN_GAP_S = 0.12  # our own pacing per rate-limit group (the server's bucket allows ~10/s; we never need that)
 
 GROUP = {"/oauth2/token": "AUTH", "/api/v1/accounts": "ACCOUNT", "/api/v1/holdings": "ASSET", "/api/v1/orders": "ORDER_HISTORY",
-         "/api/v1/buying-power": "ORDER_INFO", "/api/v1/exchange-rate": "MARKET_INFO"}
+         "/api/v1/buying-power": "ORDER_INFO", "/api/v1/exchange-rate": "MARKET_INFO", "/api/v1/prices": "MARKET_DATA"}
+PRICES_MAX = 200  # symbols per /api/v1/prices call (the spec)
 
 
 class TossError(Exception):
@@ -378,6 +379,23 @@ class TossClient:
         if not isinstance(res, dict):
             raise _err("BAD_DATA", extra="환율 형식")
         return dec(res.get("rate"), "환율"), dec(res.get("midRate"), "매매기준율"), _ts(res.get("validFrom"))  # type: ignore[return-value]
+
+    def prices(self, symbols: list[str]) -> list[tuple[str, Decimal, datetime | None]]:
+        """Current prices (symbol, last price, data time) for up to ``PRICES_MAX`` symbols per call — the market data
+        group, no account header. A symbol Toss does not know is left out of the answer (never guessed)."""
+        out: list[tuple[str, Decimal, datetime | None]] = []
+        for i in range(0, len(symbols), PRICES_MAX):
+            res = self._get("/api/v1/prices", {"symbols": ",".join(symbols[i:i + PRICES_MAX])})
+            if not isinstance(res, list):
+                raise _err("BAD_DATA", extra="현재가 형식")
+            for r in res:
+                if not isinstance(r, dict) or not r.get("symbol"):
+                    raise _err("BAD_DATA", extra="현재가 항목 형식")
+                p = dec(r.get("lastPrice"), "현재가")
+                if p is None or p <= 0:
+                    continue
+                out.append((symbol_of(r["symbol"], "US" if r.get("currency") == "USD" else "KR"), p, _ts(r.get("timestamp"))))
+        return out
 
     def fills(self, account: int, since: date, until: date, max_pages: int = 30) -> tuple[list[TossFill], bool]:
         """Executions of closed orders ordered from ``since`` to ``until`` (KST days, inclusive), newest pages first.

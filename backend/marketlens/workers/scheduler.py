@@ -35,15 +35,24 @@ class BackgroundScheduler:
             except Exception:  # keep the scheduler alive; the failure is logged with traceback
                 log.exception("scheduled job failed")
 
+    def _toss_live(self) -> bool:
+        """The 토스 price feed is answering: pre-market and after-hours prices are real, so those sessions can scan."""
+        feed = getattr(self.svc, "toss_feed", None)
+        try:
+            return bool(feed is not None and feed.status().get("live"))
+        except Exception:  # noqa: BLE001 - unknown: the free-quote rules apply
+            return False
+
     def _publish(self, now: datetime, session: TradingSession, live: bool, interval: float) -> None:
         """When the next automatic scan is due, for the screens (``service.schedule_state``)."""
         from datetime import timedelta
 
         nxt: datetime | None = None
         why = ""
-        if session == TradingSession.REGULAR or (not live and session in (TradingSession.PREMARKET, TradingSession.AFTER_HOURS)):
+        extended = session in (TradingSession.PREMARKET, TradingSession.AFTER_HOURS)
+        if session == TradingSession.REGULAR or (extended and (not live or self._toss_live())):
             nxt = now if self._last_scan is None else max(now, self._last_scan + timedelta(seconds=interval))
-            why = "정규장 주기 스캔" if session == TradingSession.REGULAR else "주기 스캔"
+            why = "정규장 주기 스캔" if session == TradingSession.REGULAR else "토스 실시간 시세로 장전·시간외 주기 스캔" if live else "주기 스캔"
         elif live and session == TradingSession.CLOSED:
             closed_at = session_close_utc(last_completed_session(now))
             if self._last_scan is None or self._last_scan < closed_at:
@@ -51,7 +60,7 @@ class BackgroundScheduler:
             else:
                 why = "다음 정규장에 다시 스캔"
         else:
-            why = "장전·시간외에는 판단용 현재가가 없어 정규장·장 마감 뒤에 스캔"
+            why = "장전·시간외에는 판단용 현재가가 없어 정규장·장 마감 뒤에 스캔 (토스증권을 연결하면 장전·시간외에도 스캔)"
         self.svc.schedule_state = {"enabled": True, "interval_minutes": round(interval / 60), "last_auto_scan": self._last_scan.isoformat() if self._last_scan else None,
                                    "next_due": nxt.isoformat() if nxt else None, "why": why}
 
@@ -70,7 +79,9 @@ class BackgroundScheduler:
             # market is fully closed (the last close is then the current price). A pre-market / after-hours scan
             # holds every name for a stale quote AND replaces the last good scan (owner report 2026-09-29: the home
             # screen showed a 07:00 ET scan, every row "data insufficient", all day long).
-            due = session == TradingSession.REGULAR and (self._last_scan is None or (now - self._last_scan).total_seconds() >= interval)
+            # with the 토스 feed, pre-market and after-hours prices are real (owner 2026-09-29): scan there too
+            priced = session == TradingSession.REGULAR or (session in (TradingSession.PREMARKET, TradingSession.AFTER_HOURS) and self._toss_live())
+            due = priced and (self._last_scan is None or (now - self._last_scan).total_seconds() >= interval)
             if session == TradingSession.CLOSED:
                 closed_at = session_close_utc(last_completed_session(now))
                 due = self._last_scan is None or self._last_scan < closed_at  # one scan on the final close per session

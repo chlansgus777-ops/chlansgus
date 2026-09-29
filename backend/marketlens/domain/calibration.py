@@ -88,6 +88,8 @@ def composite(sample: OutcomeSample, weights: Mapping[str, float]) -> float | No
         return None
     acc = 0.0
     for f, w in weights.items():
+        if w <= 0:
+            continue  # a weight-0 factor (e.g. return_signals before its validation) is not required of older samples
         v = sample.factors.get(f)
         if v is None:
             return None

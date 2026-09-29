@@ -78,6 +78,7 @@ class DataAccess:
         self.cache = cache or TTLCache()
         self.store = store
         self.now_fn = now_fn or (lambda: datetime.now(timezone.utc))
+        self.live_quote: Callable[[str], Any] | None = None  # set by the service: the real-time feed's price, when fresh
 
     def _get(self, kind: str, chain: str, method: str, key: str, *args: Any, cross_check: Any = None) -> Fetched:
         ttl = self.ttl.get(kind, timedelta(minutes=5))
@@ -104,6 +105,10 @@ class DataAccess:
         return self.cache.get("price.get_quote", t, self.ttl.get("price", timedelta(minutes=5)))
 
     def quote(self, t: str) -> Fetched:
+        if self.live_quote is not None:  # the broker's real-time price (토스증권), when it answered this name just now
+            q = self.live_quote(t)
+            if q is not None:
+                return Fetched(q, "toss")
         return self._get("price", "price", "get_quote", t, t, cross_check=relative_conflicts(("price",), 0.02))
 
     def bars(self, t: str, start: date, end: date, fill_gaps: bool = True) -> Fetched:

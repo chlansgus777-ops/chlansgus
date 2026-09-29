@@ -34,6 +34,7 @@ from marketlens.domain.facts import DataQualityReport, Fact, build_quality_repor
 from marketlens.domain.freshness import FreshnessCheck, check_age, missing as fresh_missing, rules_from_config
 from marketlens.domain.annual import AnnualFinancials, annual_features
 from marketlens.domain.banks import bank_features
+from marketlens.domain.signals import return_signals
 from marketlens.domain.corporate_actions import SplitEvent, analysis_basis, normalize_quarters, share_multiplier, split_key
 from marketlens.domain.fundamentals import FundamentalMetrics, QuarterlyFinancials, as_of, compute_metrics
 from marketlens.domain.indicators import TechnicalSnapshot, aligned_closes, compute_technicals
@@ -93,6 +94,8 @@ class AnalysisInputs:
     insider: OwnershipSnapshot | None = None  # SEC Form 4 aggregate (separate from short interest)
     splits: tuple[SplitEvent, ...] = ()  # stock splits known at analysis time (per-share basis normalisation)
     annuals: tuple[AnnualFinancials, ...] = ()  # 20-F IFRS annual statements (foreign issuers without quarterly XBRL)
+    rs_percentile: float | None = None  # IBD-style relative strength vs the same session's stage-1 universe (0..1, §13)
+    rs_universe: int = 0  # how many names that percentile was taken over
 
     def fingerprint(self) -> str:
         enc = encode(self)
@@ -115,8 +118,8 @@ class AnalysisInputs:
         return hashlib.sha256(json.dumps(_canonical(enc), sort_keys=True).encode()).hexdigest()
 
 
-_ADDED_LATER = ("splits", "annuals")
-_ADDED_LATER_NESTED = {"previous": ("splits_applied",), "analyst": ("eps_revision_60d", "forward_eps_basis", "revision_status", "revision_basis", "estimate_range_pct", "cross_check")}
+_ADDED_LATER = ("splits", "annuals", "rs_percentile", "rs_universe")
+_ADDED_LATER_NESTED = {"previous": ("splits_applied",), "analyst": ("eps_revision_60d", "forward_eps_basis", "revision_status", "revision_basis", "estimate_range_pct", "cross_check", "eps_up_30d", "eps_down_30d")}
 
 
 def _canonical(x: object) -> object:
@@ -436,6 +439,9 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
     if analyst is not None:
         for k in ("eps_revision_7d", "eps_revision_30d", "eps_revision_90d", "revenue_revision_30d", "revenue_revision_90d", "analyst_count", "estimate_dispersion", "forward_eps", "forward_revenue", "target_price_consensus"):
             eb.add(f"analyst.{k}", "analyst", k, getattr(analyst, k), analyst.source, quality=an_check.quality.value)
+        for k in ("eps_up_30d", "eps_down_30d"):  # added later: only when the source reported them (stored evidence unchanged)
+            if getattr(analyst, k) is not None:
+                eb.add(f"analyst.{k}", "analyst", k, float(getattr(analyst, k)), analyst.source, quality=an_check.quality.value, unit="count")
     if earnings is not None and last_er is not None:
         eb.add("earnings.last", "earnings", f"{last_er.fiscal_label} 실적: {RESULT_KO.get(earnings.result_quality, earnings.result_quality.value)}", earnings.eps_surprise, last_er.source, period=last_er.fiscal_label)
         eb.add("earnings.revenue_surprise", "earnings", "매출 서프라이즈", earnings.revenue_surprise, last_er.source, period=last_er.fiscal_label)
@@ -605,7 +611,14 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
         avg_dollar_volume=tech.avg_dollar_volume_20d if tech else None,
         short_interest_pct=si_pct,
         data_completeness=dq.completeness,
+        # §13 return signals on what was public at as_of: split-adjusted closes up to the last session, point-in-time
+        # quarters, releases visible at as_of
+        return_signals=return_signals(bars, bench, pit_quarters, er_hist, inp.rs_percentile, inp.rs_universe),
     )
+    for sig in si.return_signals.signals if si.return_signals else ():
+        if sig.value is not None:  # the numbers behind the 수익 신호 reasons (refs signal.*)
+            eb.add(f"signal.{sig.key}", "technical" if sig.key in ("high52", "rs_rank", "ear") else "fundamental", sig.text, sig.value, "calc",
+                   unit={"high52": "fraction", "rs_rank": "points", "fscore": "count", "ear": "fraction"}[sig.key])
     card = score(si, cfg.scoring_model)
     # the sector model must be able to judge the business and its price; a gap here is "unknown", not "bad"
     # the backtest configuration (backtest/engine.backtest_config) may narrow this list — only for components whose inputs

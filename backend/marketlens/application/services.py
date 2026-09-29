@@ -23,6 +23,7 @@ from marketlens.application.issue_engine import news_for_ticker
 from marketlens.application.market_store import MarketStore
 from marketlens.application.pipeline import AnalysisInputs, AnalysisResult
 from marketlens.application.broker import BrokerSync
+from marketlens.application.toss_quotes import TossQuoteFeed, live_quote
 from marketlens.domain.broker import merge_broker
 from marketlens.application.live_judge import LiveJudge, plans_from_rows
 from marketlens.application.refresher import Refresher, Snapshot
@@ -242,8 +243,12 @@ class MarketLensService:
         self.judge.on_reanalyze = self.request_reanalysis
         self._reanalyzed: dict[str, float] = {}
         # 토스증권 account (read-only): decides the holdings and cash it has; LIVE only (never valued on mock prices)
+        # its prices are the app's real-time feed in every session Toss quotes (application/toss_quotes.py)
+        self.toss_feed = TossQuoteFeed(self.quotes, None)
+        self.quotes.poll_status = self.toss_feed.status
         self.attach_broker(BrokerSync(self.sf, self.now, getattr(settings, "toss_client_id", None), getattr(settings, "toss_client_secret", None),
                                       enabled=settings.mode == DataMode.LIVE))
+        self.data.live_quote = self._live_quote  # an analysis prices at the same second the screens show
         self._readiness_lock = threading.Lock()
         self._readiness_cache: tuple[Any, Any, datetime] | None = None  # (data key, coverage counts, counted at)
         self._readiness_started = 0.0
@@ -285,8 +290,11 @@ class MarketLensService:
         self.quotes.start()
         if self._quote_stream is not None:
             self._quote_stream.start()
+        if self.broker.enabled:
+            self.toss_feed.start()
 
     def stop_quotes(self) -> None:
+        self.toss_feed.stop()
         if self._quote_stream is not None:
             self._quote_stream.stop()
         self.quotes.stop()
@@ -495,12 +503,22 @@ class MarketLensService:
     def attach_broker(self, broker: BrokerSync) -> None:
         self.broker = broker
         broker.on_change = self._broker_changed
+        self.toss_feed.broker = broker  # one client id, one token: the feed uses the broker's own client
 
     def _broker_changed(self) -> None:
         """Holdings or cash in the account changed (or it was connected / disconnected): the live verdicts' held flags,
         the quote subscriptions and the open screens (app event ``broker``) follow."""
         self.invalidate_live_plans()
         self.quotes.refresh_pinned()
+
+    def _live_quote(self, ticker: str) -> Any:
+        """The Toss price of ``ticker`` for an analysis: the feed's if fresh, else one direct request (a name no screen
+        shows). None without a Toss connection — the analysis then asks its providers as before."""
+        q = live_quote(self.quotes, ticker)
+        if q is None and self.toss_feed.active:
+            self.toss_feed.fetch([ticker])
+            q = live_quote(self.quotes, ticker)
+        return q
 
     def broker_tick(self) -> None:
         """Keep the account current in the background — called by the quote stream's status tick and the portfolio
@@ -919,6 +937,9 @@ class MarketLensService:
             cfg = self.model_config()
             sc = self.scanner(cfg, s)
             ctx = sc.build_context(self.now())
+            last = self.last_scan_context
+            if getattr(last, "rs_universe", None):  # the relative-strength rank needs the universe of a scan (§13)
+                ctx.rs_universe, ctx.rs_session = last.rs_universe, getattr(last, "rs_session", None)
             r, inp = sc.analyze_single(ticker, ctx.as_of, self.portfolio(s), ctx)
             # the newer market context replaces the shared one once the analysis succeeded (review 2026-09-28 F06: it was
             # kept only when none existed, so the issues screen and new-issue checks stayed on a days-old context)

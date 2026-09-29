@@ -40,6 +40,7 @@ from marketlens.domain.market import Bar, Security
 from marketlens.domain.market_calendar import last_completed_session, to_ny
 from marketlens.domain.portfolio import common_valuation, CandidateProfile, Portfolio, review_candidate
 from marketlens.domain.sector_models import select_sector_model
+from marketlens.domain.signals import percentile, rs_raw
 from marketlens.domain.valuation import compute_multiples
 from marketlens.domain.what_changed import AnalysisDigest
 from marketlens.infrastructure.logging import Event, log_event
@@ -47,6 +48,7 @@ from marketlens.infrastructure.logging import Event, log_event
 log = logging.getLogger("marketlens.scanner")
 BENCHMARK = "SPY"
 HISTORY_CALENDAR_DAYS = 420
+RS_MIN_UNIVERSE = 30  # a percentile of fewer names says little
 NEWS_LOOKBACK = timedelta(days=5)
 ISSUE_RANK_POINTS = 10.0  # stage 4: max ± points an issue swing of ±100 adds to the deep score
 
@@ -77,6 +79,9 @@ class ScanContext:
     estimate_fetch: dict[str, str] = field(default_factory=dict)  # Alpha Vantage prefetch outcome per ticker
     guidance_fetch: dict[str, str] = field(default_factory=dict)  # SEC 8-K guidance extraction outcome per ticker
     company_issues: IssueBuildResult | None = None  # the per-company news part of ``issues`` (carried into a newer context)
+    # IBD-style weighted 12-month returns of the stage-1 universe, sorted (domain.signals.rs_raw) — the relative-strength rank
+    rs_universe: tuple[float, ...] = ()
+    rs_session: date | None = None  # the session those returns end on
 
 
 @dataclass
@@ -255,6 +260,10 @@ class Scanner:
             review = review_candidate(portfolio, prices, CandidateProfile(t, sec.sector, themes, exp.rates, _returns_by_date(bars)), hold_rets, self.cfg.portfolio, valuation_day=val_day)
 
         prev_digest, prev_action = self.previous_lookup(t, ctx.as_of)
+        # the relative-strength rank against the universe of the same session (§13); unknown without one
+        own_rs = rs_raw([b.close for b in bars if b.day <= last_completed_session(ctx.as_of)])
+        same_day = ctx.rs_session == last_completed_session(ctx.as_of)
+        rs_pct = percentile(ctx.rs_universe, own_rs) if own_rs is not None and same_day and len(ctx.rs_universe) >= RS_MIN_UNIVERSE else None
         return AnalysisInputs(
             ticker=t,
             as_of=ctx.as_of,
@@ -289,6 +298,8 @@ class Scanner:
             insider=insider,
             splits=tuple(self.data.splits(t)),
             annuals=tuple(annuals),
+            rs_percentile=None if rs_pct is None else round(rs_pct, 4),
+            rs_universe=len(ctx.rs_universe) if rs_pct is not None else 0,
         )
 
     # ------------------------------------------------------------------ stages
@@ -375,6 +386,9 @@ class Scanner:
         sc = self.cfg.scanner
 
         eligible = self.stage1(ctx, excluded, only)
+        if not only:  # the rank needs the whole universe; a partial run keeps what it has
+            ctx.rs_universe = tuple(sorted(v for v in (rs_raw([b.close for b in bars]) for bars in eligible.values()) if v is not None))
+            ctx.rs_session = last_completed_session(ctx.as_of)
         reasons = Counter(excluded.values())
         top = ", ".join(f"{k} {v}" for k, v in reasons.most_common(4))
         stages.append(StageStats("1-eligibility", len(only) if only else len(ctx.securities), len(eligible), f"주가≥{sc.min_price}, 시총≥{sc.min_market_cap:.0e}, 거래대금≥{sc.min_avg_dollar_volume:.0e}; 제외: {top or '없음'}"))

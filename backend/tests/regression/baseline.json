@@ -10,6 +10,7 @@
    "entry_rr": 0.7046,
    "fundamental": 0.2191,
    "macro": 0.4359,
+   "return_signals": 0.3568,
    "risk": 0.5548,
    "technical": 0.9148,
    "valuation": 0.35
@@ -24,7 +25,7 @@
    "ISSUE_EXPORT_CONTROL_eb52d2cd": -2.59
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-2.0.1",
+  "scoring_model_version": "scoring-2.1.0",
   "total": 43.11,
   "vetoes": [
    "INSUFFICIENT_MODEL_COVERAGE"
@@ -41,6 +42,7 @@
    "entry_rr": 0.2326,
    "fundamental": 0.4161,
    "macro": 0.5761,
+   "return_signals": 0.6568,
    "risk": 0.7949,
    "technical": 0.927,
    "valuation": 0.758
@@ -55,7 +57,7 @@
    "ISSUE_INFLATION_e80d95bf": 3.97
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-2.0.1",
+  "scoring_model_version": "scoring-2.1.0",
   "total": 51.36,
   "vetoes": [
    "THESIS_INVALIDATED"
@@ -72,6 +74,7 @@
    "entry_rr": 0.6273,
    "fundamental": 0.8101,
    "macro": 0.6504,
+   "return_signals": 0.6321,
    "risk": 0.7736,
    "technical": 0.7726,
    "valuation": 0.9
@@ -87,7 +90,7 @@
    "ISSUE_EXPORT_CONTROL_eb52d2cd": -30.39
   },
   "raw_action": "WAIT",
-  "scoring_model_version": "scoring-2.0.1",
+  "scoring_model_version": "scoring-2.1.0",
   "total": 73.36,
   "vetoes": []
  },
@@ -102,6 +105,7 @@
    "entry_rr": 0.481,
    "fundamental": 0.3544,
    "macro": 0.5897,
+   "return_signals": 0.2946,
    "risk": 0.7976,
    "technical": 0.3669,
    "valuation": 0.9025
@@ -117,7 +121,7 @@
    "ISSUE_EXPORT_CONTROL_eb52d2cd": -17.4
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-2.0.1",
+  "scoring_model_version": "scoring-2.1.0",
   "total": 51.05,
   "vetoes": []
  },
@@ -132,6 +136,7 @@
    "entry_rr": 0.7928,
    "fundamental": 0.7888,
    "macro": 0.6766,
+   "return_signals": 0.4906,
    "risk": 0.9236,
    "technical": 0.4714,
    "valuation": 0.4675
@@ -146,7 +151,7 @@
    "ISSUE_OIL_b0d427e2": 9.68
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-2.0.1",
+  "scoring_model_version": "scoring-2.1.0",
   "total": 65.06,
   "vetoes": []
  }

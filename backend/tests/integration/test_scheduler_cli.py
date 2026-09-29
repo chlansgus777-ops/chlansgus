@@ -61,3 +61,19 @@ def test_live_schedule_scans_only_when_a_scan_can_give_a_verdict():
     s.step(datetime(2026, 9, 26, 2, 30, tzinfo=timezone.utc))  # still closed: not again
     s.step(datetime(2026, 9, 26, 15, 0, tzinfo=timezone.utc))  # Saturday: the same close — not again
     assert svc.scans == 3
+
+
+def test_with_the_toss_feed_pre_market_and_after_hours_scan_too():
+    """Owner 2026-09-29 "정규장에서만 실시간으로 보인다는거야?": with 토스 prices every second the extended sessions have
+    a real current price, so the automatic scan runs there as well; without the feed the free-quote rule stays."""
+    svc = FakeSvc()
+    svc.store = object()  # LIVE
+    svc.readiness_view = lambda wait=0.0: {"recommendation_readiness": "LIMITED"}
+    feed = {"live": True}
+    svc.toss_feed = type("F", (), {"status": lambda self: dict(feed)})()
+    s = BackgroundScheduler(svc)
+    s.step(datetime(2026, 9, 25, 11, 0, tzinfo=timezone.utc))  # 07:00 ET pre-market
+    assert svc.scans == 1 and "토스" in svc.schedule_state["why"]
+    feed["live"] = False  # the feed stopped: back to the free-quote rule
+    s.step(datetime(2026, 9, 25, 12, 5, tzinfo=timezone.utc))
+    assert svc.scans == 1 and "토스증권을 연결하면" in svc.schedule_state["why"]

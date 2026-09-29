@@ -59,13 +59,13 @@ export function TossCard({ view, onChange, compact = false }: { view: TossView |
     if (compact && !open) {
       return (
         <div className="toss-promo" data-testid="toss-card">
-          <span><b>토스증권 계좌 연결</b> — 보유 종목·평단·예수금을 직접 입력하지 않아도 자동으로 맞춥니다(조회만, 주문 없음).</span>
+          <span><b>토스증권 연결</b> — 프리마켓·정규장·애프터마켓·야간 모두 <b>1초 실시간 시세</b>, 보유 종목·평단·예수금 자동 반영(조회만, 주문 없음).</span>
           <button className="sm primary" onClick={() => setOpen(true)}>연결하기</button>
         </div>
       );
     }
     return (
-      <Card title="토스증권 계좌 연결" testId="toss-card" explain="MarketLens는 계좌를 조회만 합니다. 주문·정정·취소 기능은 코드에 없습니다.">
+      <Card title="토스증권 계좌 연결" testId="toss-card" explain="연결하면 모든 시간대의 미국 주식 시세를 1초마다 받고, 보유·예수금이 자동으로 맞춰집니다. MarketLens는 조회만 합니다 — 주문·정정·취소 기능은 코드에 없습니다.">
         <ol className="steps">
           <li>토스증권 <b>PC 웹(WTS)</b>에 로그인 → <b>설정 &gt; Open API</b>에서 <b>client_id</b>와 <b>client_secret</b>을 발급받습니다. 권한을 고를 수 있으면 <b>조회만</b> 고르세요.</li>
           <li>같은 화면의 <b>허용 IP 관리</b>에 <b>이 PC의 공인 IP</b>를 등록합니다. (집 인터넷 IP가 바뀌면 다시 등록)</li>
