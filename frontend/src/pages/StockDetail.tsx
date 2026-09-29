@@ -250,10 +250,11 @@ function StockDetail({ ticker }: { ticker: string }) {
                   value={<LivePrice ticker={a.ticker} size="lg" showTime />}
                   sub={<span className="lp-basis" data-testid="analysis-basis"
                              title={`분석에 쓴 가격 · ${stamp(a.price_timestamp)} · ${ko(SESSION_KO, a.session, "세션 정보 없음")} · 데이터 ${a.price_quality}${split !== 1 ? ` · 분할 조정(분석 당시 ${price(a.price)})` : ""}${usdkrw && priceNow !== null ? ` · 원화 참고 ${krwAux(priceNow, usdkrw)}` : ""}`}>
-                    분석 기준가 {priceNow !== null ? price(priceNow) : rawQuote !== null ? <>{price(rawQuote / split)} <span className="warn">(오래된 시세 — 판단에 미사용)</span></> : NO_DATA} · {stampEt(a.price_timestamp)}
-                    {a.price_quality !== "FRESH" ? <> · <Quality q={a.price_quality} /></> : null}
-                    {split !== 1 ? <> · 분할 조정(분석 당시 {price(a.price)})</> : null}
-                    {rec.revalidated_price != null && rec.revalidated_price !== priceNow ? <> · 재확인 {price(rec.revalidated_price)}</> : null}
+                    <span className="b">분석 기준가 <b>{priceNow !== null ? price(priceNow) : rawQuote !== null ? <>{price(rawQuote / split)} <span className="warn">(오래된 시세 — 판단에 미사용)</span></> : NO_DATA}</b></span>
+                    <span className="m">{stampEt(a.price_timestamp)}
+                      {a.price_quality !== "FRESH" ? <> · <Quality q={a.price_quality} /></> : null}
+                      {split !== 1 ? <> · 분할 조정(분석 당시 {price(a.price)})</> : null}
+                      {rec.revalidated_price != null && rec.revalidated_price !== priceNow ? <> · 재확인 {price(rec.revalidated_price)}</> : null}</span>
                   </span>} />
           <Metric title={<Term k="max_buy">최대 매수가</Term>} value={e ? price(e.max_buy) : NO_DATA} testId="tile-maxbuy" tone={zoneTone}
                   sub={<LivePlanLine ticker={a.ticker} recId={rec.id} level="max" fallback={<>{zone.text}{distMax !== null && zone.tone !== "neutral" ? ` · 분석 기준가 대비 ${pct(distMax)}` : ""}</>} />} />
