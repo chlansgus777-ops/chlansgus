@@ -87,7 +87,7 @@ def test_gaps_say_their_impact_and_how_to_fix_them(scanned):
     gap = next(u for u in b["unknowns"] if u["label"] == "애널리스트 추정치")
     assert gap["impact"] and "키" in gap["fix"]
     assert any("보수적" in u["impact"] for u in b["unknowns"] if u["label"] == "점수")
-    assert any(u["label"] == "옵션" for u in b["unknowns"])
+    assert not any(u["label"] == "옵션" for u in b["unknowns"])  # options removed 2026-09-29: never a gap to show
 
 
 @pytest.mark.parametrize("action", ["BUY", "BUY SMALL", "WAIT", "WATCH", "HOLD"])

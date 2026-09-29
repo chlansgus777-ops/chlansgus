@@ -70,7 +70,7 @@ def test_live_recommendation_uses_real_data_states(live):
     assert nvda.mode == "LIVE" and nvda.price_source == "finnhub"
     assert checks["price"] == DataQuality.DELAYED.value  # free Finnhub quotes are not guaranteed real-time
     assert checks["fundamentals"] == "FRESH" and checks["price_history"] == "FRESH" and checks["macro"] == "FRESH"
-    assert checks["options"] == "MISSING"  # no free options source → honestly missing
+    assert "options" not in checks  # options removed 2026-09-29 (no free source): not a data check at all
     assert checks["short_interest"] == "FRESH" and res["short_interest_pct"] == pytest.approx(0.012, rel=1e-3)  # FINRA ÷ SEC shares
     # free consensus: Alpha Vantage FY1/FY2 (final candidate) + Finnhub calendar snapshot
     an = res["analyst"]
