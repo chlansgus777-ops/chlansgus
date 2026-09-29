@@ -836,3 +836,20 @@ main > .grid > *:nth-child(4) { animation-delay: 90ms; } main > .grid > *:nth-ch
 /* thinner, quieter scrollbars */
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-thumb { background: #232b42; border: 2px solid transparent; background-clip: padding-box; }
+
+/* return signals (components/ReturnSignals.tsx) */
+.sig-list { display: grid; gap: 2px; }
+.sig { display: grid; grid-template-columns: 10px minmax(120px, 170px) minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 8px 2px; border-bottom: 1px solid rgba(38, 47, 71, 0.5); font-size: 13.5px; }
+.sig:last-child { border-bottom: 0; }
+.sig .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); align-self: center; }
+.sig.up .dot { background: var(--up); box-shadow: 0 0 0 3px var(--up-soft); }
+.sig.down .dot { background: var(--down); box-shadow: 0 0 0 3px var(--down-soft); }
+.sig.flat .dot { background: var(--wait); }
+.sig .n { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+.sig .t { color: var(--text-2); min-width: 0; }
+.grade { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; font-weight: 800; font-size: 17px; letter-spacing: -0.02em; border: 1px solid var(--line-2); background: var(--s3); }
+.grade-A { color: var(--up); background: var(--up-soft); border-color: rgba(95, 224, 189, 0.35); }
+.grade-B { color: #9fe8d2; background: rgba(95, 224, 189, 0.07); }
+.grade-C { color: var(--wait); background: var(--wait-soft); }
+.grade-D, .grade-F { color: var(--down); background: var(--down-soft); border-color: rgba(255, 122, 152, 0.3); }
+@media (max-width: 760px) { .sig { grid-template-columns: 10px minmax(0, 1fr); } .sig .t { grid-column: 2; } }

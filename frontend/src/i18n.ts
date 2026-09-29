@@ -38,7 +38,7 @@ export const STATUS_INFO: Record<string, Info> = {
 
 export const COMPONENT_KO: Record<string, string> = {
   fundamental: "펀더멘털", valuation: "밸류에이션", earnings_revision: "실적·추정치 리비전", catalyst: "촉매·이슈",
-  macro: "거시", technical: "기술적 흐름", risk: "위험", entry_rr: "진입 손익비",
+  macro: "거시", technical: "기술적 흐름", risk: "위험", entry_rr: "진입 손익비", return_signals: "수익 신호(검증 중)",
 };
 
 export const HORIZON_KO: [string, string][] = [["IMMEDIATE", "당일"], ["SHORT", "1~5일"], ["SWING", "2~6주"], ["FUNDAMENTAL", "1~4분기"]];

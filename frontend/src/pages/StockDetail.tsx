@@ -5,6 +5,7 @@ import { api } from "../api";
 import { CommitteeSummary, CommitteeView } from "../components/CommitteeView";
 import { IRefresh, IStar } from "../components/icons";
 import { LivePrice } from "../components/LivePrice";
+import { ReturnSignalsCard } from "../components/ReturnSignals";
 import { LivePlanLine, LiveZone, UnlessLive, zoneView } from "../components/LiveZone";
 import { refreshQuoteSubscriptions, useQuote, useViewQuotes } from "../quotes";
 import { rememberStock } from "../components/QuickSearch";
@@ -342,6 +343,7 @@ function StockDetail({ ticker }: { ticker: string }) {
         <ul className="list">{a.decision.reasons.map((r, i) => <li key={i}><span className="dot info">{i + 1}</span><span>{r}</span></li>)}</ul>
         {a.decision.notes.length > 0 && <ul className="list" style={{ marginTop: 10 }}>{a.decision.notes.map((n, i) => <li key={i}><span className="dot warn">!</span><span>{n}</span></li>)}</ul>}
       </Disclosure>
+      <ReturnSignalsCard c={comps.find((x) => x.name === "return_signals")} />
       <Card title="AI 검토" sub explain="뉴스 원문을 읽은 AI의 추가 의견입니다. 규칙 판단을 올릴 수는 없고, 매수를 낮추거나 규모를 줄이는 것만 할 수 있습니다."
             right={<button className="sm" disabled={!!busy} onClick={() => run("com", async () => { await api.post<CommitteeResult>(`/recommendations/${rec.id}/committee`); d.reload(); })}>{busy === "com" ? <><span className="spin" />AI 검토 중…</> : com ? "다시 검토" : "AI 검토 실행"}</button>}>
         {busy === "com" && <Loading what="AI 검토" steps={["뉴스 원문 읽기", "위험 검토(하향만 가능)", "비중 조언", "근거 수치 대조"]} rows={0} />}
@@ -488,7 +490,7 @@ function StockDetail({ ticker }: { ticker: string }) {
             <tbody>{comps.map((c) => (
               <tr key={c.name}>
                 <td>{COMPONENT_KO[c.name] ?? c.name}{!c.available && <span className="warn"> (데이터 부족 → 보수적)</span>}</td>
-                <td className="num">{(c.subscore * c.weight).toFixed(1)} / {c.weight}</td>
+                <td className="num">{c.weight > 0 ? <>{(c.subscore * c.weight).toFixed(1)} / {c.weight}</> : <span className="caption">검증 중 · 반영 0</span>}</td>
                 <td><Bar value={c.subscore} /></td>
                 <td style={{ whiteSpace: "normal" }}>{c.reasons.map((r) => r.text).join(" · ") || "—"}</td>
               </tr>))}</tbody></table></div>
