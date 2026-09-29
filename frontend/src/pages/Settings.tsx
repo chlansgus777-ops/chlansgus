@@ -35,20 +35,26 @@ export function SetupCard({ configured, mode, onSaved }: { configured: Record<st
   return (
     <Card title="초기 설정 · API 키 (파일을 직접 고칠 필요 없음)">
       <div className="muted">빈 칸은 바꾸지 않습니다. 저장한 키는 화면에 다시 표시되지 않으며, 앱을 다시 시작하면 적용됩니다.</div>
-      <label htmlFor="setup-mode">데이터 모드</label>
-      <select id="setup-mode" value={newMode} onChange={(e) => setNewMode(e.target.value)}>
-        <option value="MOCK">모의 데이터(MOCK) — 키 없이 둘러보기</option>
-        <option value="LIVE">실데이터(LIVE) — 아래 무료 키 필요</option>
-      </select>
-      {FIELDS.map((f) => (
-        <div key={f.key}>
-          <label htmlFor={`setup-${f.key}`}>{f.label} <span className="muted">({configured[f.key] ? "설정됨" : "없음"})</span></label>
-          <input id={`setup-${f.key}`} type={f.secret ? "password" : "text"} autoComplete="off" value={vals[f.key] ?? ""}
-                 placeholder={configured[f.key] ? "바꾸려면 새 값을 입력" : ""} onChange={(e) => setVals({ ...vals, [f.key]: e.target.value })} />
-          <div className="muted" style={{ fontSize: 12 }}>{f.help}</div>
+      <div className="field-grid">
+        <label htmlFor="setup-mode">데이터 모드</label>
+        <div className="field">
+          <select id="setup-mode" value={newMode} onChange={(e) => setNewMode(e.target.value)}>
+            <option value="MOCK">모의 데이터(MOCK) — 키 없이 둘러보기</option>
+            <option value="LIVE">실데이터(LIVE) — 아래 무료 키 필요</option>
+          </select>
         </div>
-      ))}
-      <button disabled={busy} onClick={save}>저장</button>
+        {FIELDS.map((f) => (
+          <div key={f.key} className="field-row">
+            <label htmlFor={`setup-${f.key}`}>{f.label} <span className={`key-state ${configured[f.key] ? "on" : ""}`}>({configured[f.key] ? "설정됨" : "없음"})</span></label>
+            <div className="field">
+              <input id={`setup-${f.key}`} type={f.secret ? "password" : "text"} autoComplete="off" value={vals[f.key] ?? ""}
+                     placeholder={configured[f.key] ? "바꾸려면 새 값을 입력" : "입력"} onChange={(e) => setVals({ ...vals, [f.key]: e.target.value })} />
+              <div className="help">{f.help}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="row" style={{ marginTop: 14 }}><button className="primary" disabled={busy} onClick={save}>{busy ? "저장 중…" : "저장"}</button></div>
       {msg && <div role="status">{msg}</div>}
       {err && <div role="alert" className="neg">{err}</div>}
     </Card>

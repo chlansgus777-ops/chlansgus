@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { Card, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } from "../components/ui";
 import { Ledger } from "../components/Ledger";
@@ -56,7 +56,10 @@ export default function Portfolio() {
   const [sellFor, setSellFor] = useState<string | null>(null);
   if (p.state === "loading") return <Loading what="포트폴리오 재계산" steps={["보유 종목 종가 확인", "평가금액·손익 계산", "쏠림·상관관계 점검"]} />;
   if (!p.data) return <Err error={p.error} retry={p.reload} />;
-  const save = async (body: unknown) => { setErr(null); try { await api.put("/portfolio", body); p.reload(); refreshQuoteSubscriptions(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } };
+  const save = async (body: unknown): Promise<boolean> => {
+    setErr(null);
+    try { await api.put("/portfolio", body); p.reload(); refreshQuoteSubscriptions(); return true; } catch (e) { setErr(e instanceof Error ? e.message : String(e)); return false; }
+  };
   // removing an entered line = saving it with quantity 0 (the trade records are never touched here)
   const removeManual = async (tickers: string[], tag: string) => {
     if (busy) return;
@@ -101,7 +104,7 @@ export default function Portfolio() {
       {!empty && (
         <Card title="보유 종목" explain="평가액·손익·비중은 모든 종목을 같은 거래일 종가로 계산합니다. ‘최신 시세’는 표시용입니다." testId="holdings">
 <div className="scroll"><table><thead><tr><th>종목</th><th>수량</th><th>매입 단가</th><th>종가(기준일)</th><th title="표시용 최신 시세 — 평가액·손익은 모든 종목 같은 거래일 종가 기준">최신 시세</th><th>평가액</th><th>평가손익</th><th>비중</th><th>섹터</th><th><span className="sr-only">정리</span></th></tr></thead>
-            <tbody>{x.holdings.map((h) => <tr key={h.ticker}><td>{h.ticker}</td><td>{h.source === "ledger" ? shares(h.quantity) : num(h.quantity, 0)}{h.source === "ledger" ? <span className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}> 거래 기록 기준</span> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)} <span className="caption">{day(h.price_day)}</span></>}</td>
+            <tbody>{x.holdings.map((h) => <tr key={h.ticker}><td><Link to={`/stocks/${h.ticker}`}><b>{h.ticker}</b></Link></td><td>{h.source === "ledger" ? shares(h.quantity) : num(h.quantity, 0)}{h.source === "ledger" ? <span className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}> 거래 기록 기준</span> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td>{price(h.cost_basis)}</td><td>{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)} <span className="caption">{day(h.price_day)}</span></>}</td>
               <td><LivePrice ticker={h.ticker} size="sm" /></td>
               <td>{h.market_value === null ? "—" : price(h.market_value)}</td><td className={h.unrealized_pnl === null ? "" : h.unrealized_pnl >= 0 ? "pos" : "neg"}>{h.unrealized_pnl === null ? "계산 안 함" : <>{h.unrealized_pnl >= 0 ? "▲" : "▼"} {price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</>}</td><td>{h.weight === null ? "—" : pct(h.weight, 1, false)}</td><td>{h.sector}</td>
               <td>{h.source === "ledger"
@@ -116,33 +119,33 @@ export default function Portfolio() {
         </Card>
         <Card title="비중 한눈에 보기" icon="◔">
           {x.holdings.length ? <Donut parts={weights} /> : <Empty>보유 종목을 입력하면 비중 차트가 보입니다.</Empty>}
-        </Card>
-      </div>
-      <div className="g2">
-        <Card title="업종 쏠림">
-          {Object.keys(x.sector_weights).length ? Object.entries(x.sector_weights).sort((a, b) => b[1] - a[1]).map(([s, w]) => (
-            <div key={s} style={{ marginBottom: 8 }}><div className="row spread"><span>{s}</span><b className={w > 0.3 ? "warn" : ""}>{pct(w, 1, false)}</b></div><div className="bar"><div style={{ width: `${Math.min(100, w * 100)}%`, background: w > 0.3 ? "var(--warn)" : undefined }} /></div></div>
-          )) : <Empty>없음</Empty>}
-        </Card>
-        <Card title="보유 종목 추가·수정" explain="수량 0을 입력하면 삭제됩니다. 거래 기록이 있는 종목은 이 줄 대신 거래 기록으로 계산합니다. MarketLens는 실제 주문을 넣지 않습니다.">
-          <form className="stack" onSubmit={(e) => {
-            e.preventDefault();
-            const q = Number(row.quantity), c = Number(row.cost);
-            if (!row.ticker.trim() || !Number.isFinite(q) || q < 0 || !Number.isFinite(c) || c < 0) { setErr("종목 코드, 수량(0 이상), 매입 단가(0 이상)를 입력하세요."); return; }
-            void save({ holdings: [{ ticker: row.ticker.trim().toUpperCase(), quantity: q, cost_basis: c }] });
-          }}>
-            <div className="row">
-              <input aria-label="보유 종목 코드" placeholder="종목 코드 (예: NVDA)" value={row.ticker} onChange={(e) => setRow({ ...row, ticker: e.target.value })} />
-              <input aria-label="보유 수량" inputMode="decimal" placeholder="수량" value={row.quantity} onChange={(e) => setRow({ ...row, quantity: e.target.value })} />
-              <input aria-label="매입 단가(USD)" inputMode="decimal" placeholder="매입 단가(USD)" value={row.cost} onChange={(e) => setRow({ ...row, cost: e.target.value })} />
-              <button className="primary">저장</button>
+          {Object.keys(x.sector_weights).length > 0 && (
+            <div className="sector-mix" data-testid="sector-mix">
+              <div className="t-kicker">업종 쏠림 <span className="caption">(30% 넘으면 주의)</span></div>
+              {Object.entries(x.sector_weights).sort((a, b) => b[1] - a[1]).map(([s, w]) => (
+                <div key={s} className="mix-row"><span>{s}</span><div className="bar"><div style={{ width: `${Math.min(100, w * 100)}%`, background: w > 0.3 ? "var(--warn)" : undefined }} /></div><b className={w > 0.3 ? "warn" : ""}>{pct(w, 1, false)}</b></div>
+              ))}
             </div>
-          </form>
-          <form className="row" style={{ marginTop: 10 }} onSubmit={(e) => { e.preventDefault(); const v = Number(cash); if (Number.isFinite(v) && v >= 0) void save({ cash: v }); else setErr("현금은 0 이상의 숫자여야 합니다."); }}>
-            <input aria-label="현금(USD)" inputMode="decimal" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="현금(USD)" /><button>현금 저장</button>
-          </form>
+          )}
         </Card>
       </div>
+      <Card title="보유 종목 직접 입력" explain="증권사 기록 없이 보유만 빠르게 입력합니다. 수량 0으로 저장하면 그 줄을 지웁니다. 거래 기록이 있는 종목은 거래 기록이 우선입니다. MarketLens는 실제 주문을 넣지 않습니다.">
+        <form className="form-grid holding" onSubmit={(e) => {
+          e.preventDefault();
+          const q = Number(row.quantity), c = Number(row.cost);
+          if (!row.ticker.trim() || !Number.isFinite(q) || q < 0 || !Number.isFinite(c) || c < 0) { setErr("종목 코드, 수량(0 이상), 매입 단가(0 이상)를 입력하세요."); return; }
+          void save({ holdings: [{ ticker: row.ticker.trim().toUpperCase(), quantity: q, cost_basis: c }] }).then((ok) => { if (ok) setRow({ ticker: "", quantity: "", cost: "" }); });
+        }}>
+          <label><span>종목 코드</span><input aria-label="보유 종목 코드" placeholder="예: NVDA" value={row.ticker} onChange={(e) => setRow({ ...row, ticker: e.target.value })} /></label>
+          <label><span>수량(주)</span><input aria-label="보유 수량" inputMode="decimal" placeholder="0" value={row.quantity} onChange={(e) => setRow({ ...row, quantity: e.target.value })} /></label>
+          <label><span>평균 매입 단가(USD)</span><input aria-label="매입 단가(USD)" inputMode="decimal" placeholder="0.00" value={row.cost} onChange={(e) => setRow({ ...row, cost: e.target.value })} /></label>
+          <button className="primary">보유 저장</button>
+        </form>
+        <form className="form-grid cash" onSubmit={(e) => { e.preventDefault(); const v = Number(cash); if (Number.isFinite(v) && v >= 0) void save({ cash: v }).then((ok) => { if (ok) setCash(""); }); else setErr("현금은 0 이상의 숫자여야 합니다."); }}>
+          <label><span>현금(USD) <em className="caption">지금 {price(x.cash)}</em></span><input aria-label="현금(USD)" inputMode="decimal" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="예: 25000" /></label>
+          <button>현금 저장</button>
+        </form>
+      </Card>
       <Ledger today={nyToday()} prefill={sellFor ?? params.get("trade")} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
 
     </div>

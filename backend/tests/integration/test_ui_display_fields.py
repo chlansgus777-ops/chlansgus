@@ -54,3 +54,17 @@ def test_card_facts_order_veto_then_event_then_negative():
     res["decision"] = {"vetoes": ["STALE_PRICE"]}
     assert _card_facts(res)["key_risk"]["code"] == "STALE_PRICE"
     assert _card_facts({}) == {"key_reason": None, "key_risk": None}
+
+
+def test_every_watched_stock_is_listed_on_the_home_screen():
+    # screen audit 2026-09-29: a watched stock with nothing alarming (no buy signal, current, no veto) was left out,
+    # so the home rail said "관심 종목이 없습니다" while the stock was on the watchlist
+    svc = make_service(universe=80)
+    svc.run_scan(run_committee=False)
+    with svc.sf() as s:
+        tickers = [r.ticker for r in repo.recommendations_for_scan(s, repo.latest_scan(s).id)]
+    with _client(svc) as c:
+        for t in tickers[:6]:
+            c.post(f"/api/watchlist/{t}")
+        listed = {a["ticker"] for a in c.get("/api/dashboard").json()["watchlist_alerts"]}
+    assert set(tickers[:6]) <= listed

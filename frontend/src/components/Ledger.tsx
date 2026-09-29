@@ -59,7 +59,7 @@ export function Ledger({ today, onChange, prefill }: { today: string; onChange: 
     const [t, q] = pf.split(":");
     return q ? { ...EMPTY_FORM, kind: "SELL", ticker: (t ?? "").toUpperCase(), day: today, quantity: q } : { ...EMPTY_FORM, ticker: pf.toUpperCase(), day: today };
   };
-  const [f, setF] = useState<TradeForm>(() => prefill ? fromPrefill(prefill) : EMPTY_FORM);
+  const [f, setF] = useState<TradeForm>(() => prefill ? fromPrefill(prefill) : { ...EMPTY_FORM, day: today });  // today (New York) filled in
   const [seen, setSeen] = useState(prefill ?? null);
   if (prefill && prefill !== seen) { setSeen(prefill); setF(fromPrefill(prefill)); } // a new request while open
   const formRef = useCallback((el: HTMLFormElement | null) => {
@@ -80,21 +80,21 @@ export function Ledger({ today, onChange, prefill }: { today: string; onChange: 
         if (r.error) { setErr(r.error); return; }
         void run(() => api.post("/transactions", r.body)).then((ok) => { if (ok) setF({ ...EMPTY_FORM, kind: f.kind, day: f.day }); });
       }}>
-        <div className="row">
-          <select aria-label="거래 종류" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as Kind })}>
+        <div className="form-grid trade">
+          <label><span>종류</span><select aria-label="거래 종류" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as Kind })}>
             {(Object.keys(KIND_KO) as Kind[]).map((k) => <option key={k} value={k}>{KIND_KO[k]}</option>)}
-          </select>
-          <input aria-label="체결일" type="date" max={today} value={f.day} onChange={set("day")} />
-          <input aria-label="거래 종목 코드" placeholder="티커" value={f.ticker} onChange={set("ticker")} />
+          </select></label>
+          <label><span>체결일(미국)</span><input aria-label="체결일" type="date" max={today} value={f.day} onChange={set("day")} /></label>
+          <label><span>종목 코드</span><input aria-label="거래 종목 코드" placeholder="예: NVDA" value={f.ticker} onChange={set("ticker")} /></label>
           {(f.kind === "BUY" || f.kind === "SELL") && <>
-            <input aria-label="거래 수량" placeholder="몇 주" value={f.quantity} onChange={set("quantity")} />
-            <input aria-label="체결 가격" placeholder="체결가(1주, USD)" value={f.price} onChange={set("price")} />
-            <input aria-label="거래 수수료" placeholder="수수료(USD)" value={f.fees} onChange={set("fees")} />
+            <label><span>수량(주)</span><input aria-label="거래 수량" inputMode="decimal" placeholder="0" value={f.quantity} onChange={set("quantity")} /></label>
+            <label><span>체결가(1주, USD)</span><input aria-label="체결 가격" inputMode="decimal" placeholder="0.00" value={f.price} onChange={set("price")} /></label>
+            <label><span>수수료(USD)</span><input aria-label="거래 수수료" inputMode="decimal" placeholder="0" value={f.fees} onChange={set("fees")} /></label>
           </>}
-          {f.kind === "DIVIDEND" && <input aria-label="배당 총액" placeholder="받은 총액(USD)" value={f.amount} onChange={set("amount")} />}
+          {f.kind === "DIVIDEND" && <label><span>받은 총액(USD)</span><input aria-label="배당 총액" inputMode="decimal" placeholder="0.00" value={f.amount} onChange={set("amount")} /></label>}
           {f.kind === "SPLIT" && <>
-            <input aria-label="분할 전" placeholder="분할 전 주식 수" value={f.split_from} onChange={set("split_from")} />
-            <input aria-label="분할 후" placeholder="분할 후 주식 수" value={f.split_to} onChange={set("split_to")} />
+            <label><span>분할 전 주식 수</span><input aria-label="분할 전" inputMode="decimal" placeholder="1" value={f.split_from} onChange={set("split_from")} /></label>
+            <label><span>분할 후 주식 수</span><input aria-label="분할 후" inputMode="decimal" placeholder="10" value={f.split_to} onChange={set("split_to")} /></label>
           </>}
           <button className="primary" disabled={busy}>기록</button>
         </div>

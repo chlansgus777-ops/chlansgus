@@ -149,13 +149,13 @@ export function StatusBar() {
       )}
       {p && p.priceTs && (
         <Item tone={p.quality && !["FRESH", "DELAYED"].includes(p.quality) ? "warn" : undefined} icon="$" testId="sb-price-time"
-              title="화면에 보이는 가격이 언제 가격인지입니다(화면을 불러온 시각이 아닙니다).">
+              title={`화면에 보이는 가격이 언제 가격인지입니다(화면을 불러온 시각이 아닙니다). ${ago(p.priceTs, st.nowMs)}${p.priceSession ? ` · ${SESSION_KO[p.priceSession] ?? p.priceSession}` : ""}${p.quality ? ` · ${QUALITY_INFO[p.quality]?.label ?? p.quality}` : ""}`}>
           <span className="k">{p.label} 가격</span><b>{stampEt(p.priceTs)}</b>
-          <span className="k">· {ago(p.priceTs, st.nowMs)}{p.priceSession ? ` · ${SESSION_KO[p.priceSession] ?? p.priceSession}` : ""}{p.quality ? ` · ${QUALITY_INFO[p.quality]?.label ?? p.quality}` : ""}</span>
+          <span className="k opt">· {ago(p.priceTs, st.nowMs)}{p.priceSession ? ` · ${SESSION_KO[p.priceSession] ?? p.priceSession}` : ""}{p.quality ? ` · ${QUALITY_INFO[p.quality]?.label ?? p.quality}` : ""}</span>
         </Item>
       )}
       {p && p.analysedAt && (
-        <Item icon="⌖" testId="sb-analysed"><span className="k">분석</span><b>{stampEt(p.analysedAt)}</b><span className="k">· {ago(p.analysedAt, st.nowMs)}</span></Item>
+        <Item icon="⌖" testId="sb-analysed"><span className="k">분석</span><b>{stampEt(p.analysedAt)}</b><span className="k opt">· {ago(p.analysedAt, st.nowMs)}</span></Item>
       )}
       {sys?.mode === "LIVE" && (job?.status === "RUNNING" ? (
         <Item tone="info" icon="⏳" to="/settings?tab=data" testId="sb-sync"><span className="k">데이터 수집</span><b>{job.progress ? `${job.progress.percent}%` : "받는 중"}</b></Item>

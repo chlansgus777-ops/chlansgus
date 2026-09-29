@@ -258,6 +258,8 @@ a.sb-item:hover { background: var(--s2); text-decoration: none; color: var(--tex
 .sb-mode { letter-spacing: 0.01em; }
 .statusbar .sep { width: 1px; height: 18px; background: var(--line-2); margin: 0 4px; }
 .statusbar .grow { flex: 1; }
+/* one line on a normal desktop window: the secondary words (age, session, quality) move into the tooltip */
+@media (max-width: 1560px) { .statusbar .opt { display: none; } .statusbar { padding-left: 28px; padding-right: 28px; } }
 .statusbar .tools { display: flex; align-items: center; gap: 8px; }
 .statusbar .tools a { font-size: 12.5px; color: var(--sub); display: inline-flex; align-items: center; gap: 5px; }
 .statusbar .tools a:hover { color: var(--text); text-decoration: none; }
@@ -637,15 +639,24 @@ tr.row-expired:hover td { opacity: 0.9; }
 @media (max-width: 980px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
   .nav { position: sticky; top: 0; z-index: 30; height: auto; flex-direction: row; align-items: center; overflow-x: auto; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .nav .brand { padding: 0 10px 0 2px; } .nav .brand small { display: none; }
-  .nav a { height: 36px; flex: none; } .nav a.active::before { display: none; }
+  .nav .brand { flex: none; white-space: nowrap; padding: 0 10px 0 2px; } .nav .brand small { display: none; }
+  .nav .qs { flex: 0 1 200px; min-width: 140px; margin: 0 6px 0 0; }
+  .nav .qs-list { position: fixed; top: 58px; left: 12px; right: auto; width: min(420px, calc(100vw - 24px)); } /* the scrolling menu row would clip it */
+  .nav a { height: 36px; flex: none; white-space: nowrap; padding: 0 10px; } .nav a.active::before { display: none; }
   .nav .grow, .nav .foot { display: none; }
+  .nav { scrollbar-width: none; } .nav::-webkit-scrollbar { display: none; }
   .statusbar { position: static; padding: 8px 18px; }
   .main { padding: 20px 18px 56px; }
   .banner { padding: 7px 18px; }
   .g3, .g2, .two, .split { grid-template-columns: minmax(0, 1fr); }
 }
+@media (max-width: 860px) {
+  /* narrow window: the menu keeps every item on one row — the labels of the two utility links fold into their icons */
+  .nav .brand > div { display: none; }
+  .nav a.util { font-size: 0; gap: 0; padding: 0 9px; } .nav a.util svg { width: 19px; height: 19px; }
+}
 @media (max-width: 640px) {
+  .nav a { font-size: 0; gap: 0; padding: 0 10px; }
   .g4, .tiles, .hero .metrics { grid-template-columns: minmax(0, 1fr); }
   .hero .metrics .metric { border-left: 0 !important; padding-left: 0 !important; border-top: 1px solid rgba(148, 160, 200, 0.1); }
   .pulse { grid-template-columns: minmax(0, 1fr); } .pulse .p { border-left: 0 !important; border-top: 1px solid var(--line); }
@@ -713,3 +724,35 @@ tr.row-expired:hover td { opacity: 0.9; }
 .invalid-list .it a { color: var(--text); font-weight: 700; }
 @media (max-width: 1180px) { .home-grid { grid-template-columns: minmax(0, 1fr); } .home-rail { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .home-rail { grid-template-columns: minmax(0, 1fr); } .today .facts { grid-template-columns: minmax(0, 1fr); } .today .facts > div + div { border-left: 0; padding-left: 0; border-top: 1px solid rgba(148, 160, 200, 0.1); } .today .count { font-size: 44px; } }
+
+/* ------------------------------------------------------------------ labelled one-row forms (portfolio) */
+.form-grid { display: grid; gap: 10px 12px; align-items: end; }
+.form-grid.holding { grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 1fr) auto; }
+.form-grid.trade { grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); }
+.form-grid.cash { grid-template-columns: minmax(0, 1fr) auto; max-width: 520px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.form-grid label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.form-grid label > span { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.01em; }
+.form-grid label em { font-style: normal; margin-left: 6px; }
+.form-grid input { width: 100%; }
+.form-grid button { height: 40px; white-space: nowrap; }
+.sector-mix { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.sector-mix .t-kicker { margin-bottom: 10px; }
+.mix-row { display: grid; grid-template-columns: minmax(90px, 0.9fr) minmax(0, 1.4fr) 52px; align-items: center; gap: 12px; font-size: 13px; margin-bottom: 8px; }
+.mix-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--sub); }
+.mix-row b { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .form-grid.holding { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .form-grid.holding button { grid-column: 1 / -1; } }
+
+/* ------------------------------------------------------------------ label | field settings grid */
+.field-grid { display: grid; grid-template-columns: 220px minmax(0, 520px); gap: 14px 20px; align-items: start; margin-top: 16px; }
+.field-grid .field-row { display: contents; }
+.field-grid > label, .field-grid .field-row > label { padding-top: 10px; font-size: 13px; font-weight: 600; color: var(--sub); }
+.field-grid .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field-grid .field input, .field-grid .field select { width: 100%; }
+.field-grid .help { font-size: 12px; color: var(--muted); }
+.key-state { font-weight: 500; color: var(--faint); }
+.key-state.on { color: var(--ok); }
+@media (max-width: 760px) { .field-grid { grid-template-columns: minmax(0, 1fr); gap: 6px; } .field-grid > label, .field-grid .field-row > label { padding-top: 8px; } }
+
+/* a table of short machine values: one line per cell; only the free-text column wraps */
+tr.nowrap-row td { white-space: nowrap; }
+tr.nowrap-row td.wrap { white-space: normal; min-width: 180px; }

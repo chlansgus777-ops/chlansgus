@@ -357,7 +357,9 @@ def dashboard(req: Request) -> dict[str, Any]:
     failing provider never holds the screen (owner report 2026-09-28: 30 s+ for FRED and the calendar in turn)."""
     s = svc(req)
     ready = s.readiness_view(wait=0.0)
-    mv, cv = s.macro_view(), s.calendar_view(CALENDAR_VIEW_DAYS)  # never wait: cached value or "loading"
+    # at most a brief wait, and only by the request that starts a fetch (a fast provider answers within it); after that
+    # the cached value or "loading" — a slow provider never holds the home screen
+    mv, cv = s.macro_view(wait=0.3), s.calendar_view(CALENDAR_VIEW_DAYS, wait=0.3)
     bullish_set = {a.value for a in BULLISH_ACTIONS}
     alerts = []
     with s.sf() as ss:
@@ -375,6 +377,8 @@ def dashboard(req: Request) -> dict[str, Any]:
                 alerts.append({"ticker": w.ticker, "level": "info", "text": "마지막 분석이 오래되었습니다. 다시 분석해 보세요."})
             elif row["vetoes"]:
                 alerts.append({"ticker": w.ticker, "level": "warning", "text": "주의: " + ", ".join(row["vetoes"])})
+            else:  # nothing to act on: still listed, so a watched name never reads as "no watchlist"
+                alerts.append({"ticker": w.ticker, "level": "info", "text": f"{row['action_ko']} · 새 신호 없음"})
     top = [r for r in rows if r["action"] in bullish_set][:8] or rows[:8]
     risks = []
     for r in rows:

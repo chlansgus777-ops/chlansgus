@@ -45,13 +45,13 @@ function Shell() {
         <div className="brand"><BrandMark className="mark" /><div>MarketLens<small>미국 주식 판단 도우미</small></div></div>
         <QuickSearch />
         {NAV.map(([to, Icon, label]) => (
-          <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => (isActive || (to === "/stocks" && inStocks) ? "active" : "")}>
+          <NavLink key={to} to={to} end={to === "/"} title={label} className={({ isActive }) => (isActive || (to === "/stocks" && inStocks) ? "active" : "")}>
             <Icon />{label}
           </NavLink>
         ))}
         <div className="grow" />
-        <NavLink to="/settings" className={({ isActive }) => (isActive ? "active" : "")}><ISettings />설정</NavLink>
-        <NavLink to="/guide" className={({ isActive }) => (isActive ? "active" : "")}><IHelp />용어·도움말</NavLink>
+        <NavLink to="/settings" title="설정" className={({ isActive }) => `util${isActive ? " active" : ""}`}><ISettings />설정</NavLink>
+        <NavLink to="/guide" title="용어·도움말" className={({ isActive }) => `util${isActive ? " active" : ""}`}><IHelp />용어·도움말</NavLink>
         <div className="foot">주문은 넣지 않습니다. 모든 매매는 직접 판단·실행하세요. 가격은 미국 달러(USD).
           {sys.data && <div data-testid="app-version" style={{ marginTop: 6 }}>{versionLabel(sys.data)}</div>}</div>
       </nav>
