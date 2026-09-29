@@ -15,6 +15,7 @@ import argparse
 import json
 import logging
 import os
+import pickle
 import random
 import subprocess
 import time
@@ -26,6 +27,7 @@ from marketlens.backtest.schema import bt_engine, file_sha256
 
 WARMUP_SESSIONS = 252
 SEED = 20260928
+CHECKPOINT = "checkpoint.pkl"  # in --out: the weeks done so far and the engine's state after them (resumable)
 
 
 def git_commit() -> str:
@@ -53,6 +55,10 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     ap.add_argument("--min-names", type=int, default=100)
     ap.add_argument("--leak-checks", type=int, default=20, help="random weeks for the truncated-copy check (0 = skip)")
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 1, help="processes for the per-name analyses of a week (same rows as 1)")
+    ap.add_argument("--budget-minutes", type=float, default=0.0,
+                    help="stop after the week that passes this many minutes, with a checkpoint in --out; the same command "
+                         "again (on another machine, with --out copied) goes on from there. 0 = no limit")
+    ap.add_argument("--max-weeks", type=int, default=0, help="stop after this many weeks in this process (tests); 0 = no limit")
     a = ap.parse_args(argv)
     logging.getLogger("marketlens").setLevel(logging.ERROR)  # provider failures are expected (blocked) — counted below
     os.makedirs(a.out, exist_ok=True)
@@ -75,13 +81,47 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         times = weekly_times(start, end)
         store = BacktestStore(data)
         reg, replay, blocked = build_offline_registry(eng, store)
-        engine = Engine(store, reg, cfg, os.path.join(a.out, "rows.db"), replay=replay)
+        # a checkpoint of an earlier process (another runner) with the same data, config and window: go on from it
+        cp_path = os.path.join(a.out, CHECKPOINT)
+        ident = {"data_sha256": data_hash, "config": config_fingerprint(cfg), "times": [t.isoformat() for t in times], "version": 1}
+        cp = None
+        if os.path.exists(cp_path):
+            with open(cp_path, "rb") as f:
+                cp = pickle.load(f)  # noqa: S301 - our own file, written by this function in --out
+            if cp["ident"] != ident:
+                raise SystemExit(f"{cp_path}: a checkpoint of another run (data, config or window differ) — remove it or use another --out")
+        engine = Engine(store, reg, cfg, os.path.join(a.out, "rows.db"), replay=replay, resume=cp is not None)
         engine.blocked = blocked
+        done: list[dict[str, Any]] = list(cp["weeks"]) if cp else []
+        elapsed0 = cp["elapsed"] if cp else 0.0
+        if cp:
+            engine.restore(cp["engine"])
+            print(json.dumps({"resumed": len(done), "of": len(times)}))
+
+        def save(info: dict[str, Any]) -> None:  # after every week: a lost runner loses at most the week it was in
+            done.append(info)
+            tmp = cp_path + ".tmp"
+            with open(tmp, "wb") as f:
+                pickle.dump({"ident": ident, "weeks": done, "engine": engine.checkpoint(), "elapsed": elapsed0 + time.monotonic() - t_start}, f,
+                            protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(tmp, cp_path)
+
+        todo = times[len(done):]
+        if a.max_weeks:
+            todo = todo[: a.max_weeks]
+        deadline = t_start + a.budget_minutes * 60 if a.budget_minutes else None
         engine.start_workers(a.workers)
         try:
-            weeks = engine.run(times)
+            engine.run(todo, deadline=deadline, on_week=save)
         finally:
             engine.stop_workers()
+        weeks = done
+        if len(weeks) < len(times):
+            status = {"done": False, "weeks_done": len(weeks), "weeks_total": len(times), "next": times[len(weeks)].isoformat()}
+            with open(os.path.join(a.out, "status.json"), "w", encoding="utf-8") as f:
+                json.dump(status, f)
+            print(json.dumps(status))
+            return status
         from marketlens.backtest.apply import data_verdict, data_weeks
 
         spy_ln = next((ln for ln in data.lineages if ln.labels and ln.labels[-1] == "SPY" and ln.cik is None), None)
@@ -99,7 +139,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     manifest = {
         "commit": git_commit(), "config_fingerprint": config_fingerprint(cfg), "scoring_version": cfg.scoring_model.version,
         "weights": dict(cfg.scoring_model.weights), "min_completeness": cfg.decision.min_completeness, "backtest_raw": cfg.raw.get("backtest"),
-        "data_sha256": data_hash, "results_sha256": digest, "seed": SEED, "runtime_seconds": round(time.monotonic() - t_start, 1),
+        "data_sha256": data_hash, "results_sha256": digest, "seed": SEED, "runtime_seconds": round(elapsed0 + time.monotonic() - t_start, 1),
         "weeks": len(weeks), "audited_inputs": engine.audited, "fred_replayed": replay.served + engine.worker_counts["replay_served"], "workers": engine.workers, "fred_replay_misses": len(replay.misses),
         "blocked_provider_attempts": {k: b.attempts for k, b in blocked.items()}, "blocked_attempts_in_workers": engine.worker_counts["blocked"], "sockets_refused": len(refused),
         "network_isolation": os.environ.get("BACKTEST_NETNS", "socket-guard-only"),
@@ -108,6 +148,10 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     }
     with open(os.path.join(a.out, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, sort_keys=True)
+    with open(os.path.join(a.out, "status.json"), "w", encoding="utf-8") as f:
+        json.dump({"done": True, "weeks_done": len(weeks), "weeks_total": len(times)}, f)
+    if os.path.exists(os.path.join(a.out, CHECKPOINT)):
+        os.remove(os.path.join(a.out, CHECKPOINT))  # the run is complete: results.json and rows.db are what it produced
     print(json.dumps({"results_sha256": digest, "weeks": len(weeks), "runtime_seconds": manifest["runtime_seconds"]}))
     return manifest
 

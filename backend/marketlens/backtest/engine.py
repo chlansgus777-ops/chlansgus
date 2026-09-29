@@ -164,7 +164,9 @@ def final_basis_bars(store: BacktestStore, key: str, upto: date) -> list[Bar]:
 
 # ------------------------------------------------------------------------------------------------ the loop
 class Engine:
-    def __init__(self, store: BacktestStore, registry: Any, cfg: ModelConfig, results_path: str, replay: Any = None) -> None:
+    RECYCLE_WEEKS = 20  # fresh workers this often: a forked worker slowly copies the shared data it touches (copy-on-write)
+
+    def __init__(self, store: BacktestStore, registry: Any, cfg: ModelConfig, results_path: str, replay: Any = None, resume: bool = False) -> None:
         from marketlens.application.graph_seed import GraphSeed
         from marketlens.application.theses import ThesisBook
 
@@ -175,7 +177,8 @@ class Engine:
         self.theses = ThesisBook()
         self.state = EngineState()
         self.out = create_engine("sqlite://" if results_path == ":memory:" else f"sqlite:///{results_path}")
-        RESULTS_META.drop_all(self.out)
+        if not resume:  # a resumed run keeps the rows of the weeks it already did (run.py checkpoints)
+            RESULTS_META.drop_all(self.out)
         RESULTS_META.create_all(self.out)
         self._key_of: dict[str, str] = {}
         self._bars_cache: dict[str, list[Bar]] = {}
@@ -292,6 +295,7 @@ class Engine:
         gc.collect()
         gc.freeze()  # the loaded bars stay shared: the collector of a worker never touches them
         self.workers = n
+        self._n_workers = n
         self.pool = mp.get_context("fork").Pool(n, initializer=_worker_init)
 
     def stop_workers(self) -> None:
@@ -300,15 +304,42 @@ class Engine:
             self.pool.join()
             self.pool = None
 
-    def run(self, times: Sequence[datetime], log: Callable[[str], None] = print) -> list[dict[str, Any]]:
+    def run(self, times: Sequence[datetime], log: Callable[[str], None] = print, deadline: float | None = None,
+            on_week: Callable[[dict[str, Any]], None] | None = None) -> list[dict[str, Any]]:
+        """The weeks in order. ``deadline`` (time.monotonic()): stop after the week that passes it (run.py saves a
+        checkpoint after every week through ``on_week`` and the next runner goes on from there)."""
         out = []
-        for t in times:
+        for i, t in enumerate(times):
+            if i and i % self.RECYCLE_WEEKS == 0 and self.pool is not None:
+                n = self._n_workers
+                self.stop_workers()
+                self.start_workers(n)
             t0 = time.monotonic()
             info = self.step(t)
             info["seconds"] = round(time.monotonic() - t0, 1)
-            log(json.dumps(info))
+            log(json.dumps(info | memory_mb(self.pool)))
             out.append(info)
+            if on_week is not None:
+                on_week(info)
+            if deadline is not None and time.monotonic() >= deadline:
+                break
         return out
+
+    def checkpoint(self) -> dict[str, Any]:
+        """What a later process needs to go on exactly where this one stopped (the rows are in the results file)."""
+        return {"state": self.state, "audited": self.audited, "worker_counts": dict(self.worker_counts),
+                "replay": None if self.replay is None else {"served": self.replay.served, "urls": list(self.replay.urls), "misses": list(self.replay.misses)},
+                "blocked": {k: getattr(b, "attempts", 0) for k, b in self.blocked.items()}}
+
+    def restore(self, cp: dict[str, Any]) -> None:
+        self.state = cp["state"]
+        self.audited = cp["audited"]
+        self.worker_counts = dict(cp["worker_counts"])
+        if self.replay is not None and cp["replay"] is not None:
+            self.replay.served, self.replay.urls[:], self.replay.misses[:] = cp["replay"]["served"], cp["replay"]["urls"], cp["replay"]["misses"]
+        for k, n in cp["blocked"].items():
+            if k in self.blocked:
+                self.blocked[k].attempts = n
 
     def signals_json(self) -> list[dict[str, Any]]:
         return [{**{k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in s.__dict__.items()}} for s in self.state.signals]
@@ -387,6 +418,24 @@ def analyse_chunk(eng: Engine, week: Week, kind: str, jobs: list[tuple[str, tupl
     if eng.replay is not None:
         audit_vintages(eng.replay.urls[n_urls:], week.t)  # anything the analyses themselves asked FRED
     return out
+
+
+def memory_mb(pool: Any = None) -> dict[str, int]:
+    """Resident memory of this process and its workers, and what the machine has left (Linux /proc; {} elsewhere) —
+    in the run's log, so a runner that runs out of memory shows it coming."""
+    def rss(pid: int | str) -> int:
+        try:
+            with open(f"/proc/{pid}/status", encoding="ascii") as f:
+                return next((int(x.split()[1]) // 1024 for x in f if x.startswith("VmRSS:")), 0)
+        except OSError:
+            return 0
+    try:
+        with open("/proc/meminfo", encoding="ascii") as f:
+            avail = next((int(x.split()[1]) // 1024 for x in f if x.startswith("MemAvailable:")), 0)
+    except OSError:
+        return {}
+    kids = sum(rss(p.pid) for p in getattr(pool, "_pool", []) or [])
+    return {"rss_mb": rss("self"), "workers_rss_mb": kids, "avail_mb": avail}
 
 
 _W: Engine | None = None  # the engine a forked worker inherited

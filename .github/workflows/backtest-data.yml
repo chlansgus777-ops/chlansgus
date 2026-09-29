@@ -123,70 +123,175 @@ jobs:
             coverage.json
           retention-days: 90
           compression-level: 0
-      # ---------------------------------------------------------------- measurement (offline: no secrets, no network)
+  # ---------------------------------------------------------------- measurement (offline: no secrets, no network)
+  # In legs of ~45 minutes on fresh runners, one after the other: a leg goes on from the newest earlier leg's checkpoint
+  # (backtest/run.py --budget-minutes; the resumed run's results.json is the same as an uninterrupted one — tests/backtest/
+  # test_resume.py). The first 7-year run lost its runner after 62 minutes (memory of long-lived forked workers). The
+  # reproduction runs its own legs at the same time; "compare" checks the two results.json.
+  measure:
+    if: inputs.task == 'run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        leg: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    env:
+      CP: bt-cp
+      OUT: bt-out
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkpoints of the earlier legs
+        if: matrix.leg > 1
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bt-cp-*
+          path: legs
+      - name: Where the run stands
+        id: prev
+        run: |
+          last=$(ls -d legs/$CP-* 2>/dev/null | sed 's/.*-//' | sort -n | tail -1 || true)
+          echo "last=$last" >> "$GITHUB_OUTPUT"
+          if [ -n "$last" ] && [ -f "legs/$CP-$last/status.json" ] && grep -q '"done": true' "legs/$CP-$last/status.json"; then
+            echo "done=true" >> "$GITHUB_OUTPUT"; echo "finished in leg $last: nothing to do"
+          else
+            echo "done=false" >> "$GITHUB_OUTPUT"; echo "going on from leg ${last:-none}"; cat "legs/$CP-$last/status.json" 2>/dev/null || true
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.prev.outputs.done != 'true'
+        with:
+          python-version: "3.11"
+      - name: Install backend (lock file)
+        if: steps.prev.outputs.done != 'true'
+        run: pip install -r backend/requirements.lock && pip install --no-deps -e ./backend
       - name: Backtest database
-        if: inputs.task == 'run'
+        if: steps.prev.outputs.done != 'true'
         uses: actions/download-artifact@v4
         with:
           name: backtest-db
           run-id: ${{ inputs.data_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Run the backtest with the network removed (the reproduction runs in the job "repro" at the same time)
-        if: inputs.task == 'run'
+      - name: Leg ${{ matrix.leg }} with the network removed
+        id: leg
+        if: steps.prev.outputs.done != 'true'
         run: |
           gunzip -f backtest.db.gz
           sha256sum -c backtest.db.sha256
+          mkdir -p "$OUT"
+          last="${{ steps.prev.outputs.last }}"
+          if [ -n "$last" ]; then cp -r "legs/$CP-$last/." "$OUT/"; fi
           # an empty network namespace when the runner allows one; the Python socket guard refuses connections either way
           PREFIX=""
           if unshare -rn true 2>/dev/null; then PREFIX="unshare -rn"; echo "network namespace: none (unshare -rn)"; fi
           export BACKTEST_NETNS="${PREFIX:-socket-guard-only}"
-          echo "cpus: $(nproc)"
+          echo "cpus: $(nproc) · memory: $(free -m | awk '/Mem:/ {print $2}') MB"
           cd backend
-          $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out ../bt-out ${{ inputs.run_args }}
+          $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out "../$OUT" --budget-minutes 45  ${{ inputs.run_args }}
           cd ..
-          gzip -f bt-out/rows.db
-      - uses: actions/upload-artifact@v4
-        if: always() && inputs.task == 'run'
+          if grep -q '"done": true' "$OUT/status.json"; then
+            echo "finished=true" >> "$GITHUB_OUTPUT"
+            gzip -f "$OUT/rows.db"
+          fi
+      - name: Checkpoint for the next leg
+        if: always() && steps.prev.outputs.done != 'true' && steps.leg.outputs.finished != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bt-cp-${{ matrix.leg }}
+          path: bt-out
+          retention-days: 7
+      - name: Results
+        if: steps.leg.outputs.finished == 'true'
+        uses: actions/upload-artifact@v4
         with:
           name: backtest-results
           path: bt-out
           retention-days: 90
-  # ---------------------------------------------------------------- reproduction: the same command, same results.json SHA-256
   repro:
     if: inputs.task == 'run'
     runs-on: ubuntu-latest
     timeout-minutes: 355
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        leg: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    env:
+      CP: bt-repro-cp
+      OUT: bt-out-repro
     steps:
       - uses: actions/checkout@v4
+      - name: Checkpoints of the earlier legs
+        if: matrix.leg > 1
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bt-repro-cp-*
+          path: legs
+      - name: Where the run stands
+        id: prev
+        run: |
+          last=$(ls -d legs/$CP-* 2>/dev/null | sed 's/.*-//' | sort -n | tail -1 || true)
+          echo "last=$last" >> "$GITHUB_OUTPUT"
+          if [ -n "$last" ] && [ -f "legs/$CP-$last/status.json" ] && grep -q '"done": true' "legs/$CP-$last/status.json"; then
+            echo "done=true" >> "$GITHUB_OUTPUT"; echo "finished in leg $last: nothing to do"
+          else
+            echo "done=false" >> "$GITHUB_OUTPUT"; echo "going on from leg ${last:-none}"; cat "legs/$CP-$last/status.json" 2>/dev/null || true
+          fi
       - uses: actions/setup-python@v5
+        if: steps.prev.outputs.done != 'true'
         with:
           python-version: "3.11"
       - name: Install backend (lock file)
+        if: steps.prev.outputs.done != 'true'
         run: pip install -r backend/requirements.lock && pip install --no-deps -e ./backend
-      - uses: actions/download-artifact@v4
+      - name: Backtest database
+        if: steps.prev.outputs.done != 'true'
+        uses: actions/download-artifact@v4
         with:
           name: backtest-db
           run-id: ${{ inputs.data_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Reproduce (leak checks are written outside results.json, so they are skipped here)
+      - name: Leg ${{ matrix.leg }} with the network removed
+        id: leg
+        if: steps.prev.outputs.done != 'true'
         run: |
           gunzip -f backtest.db.gz
           sha256sum -c backtest.db.sha256
+          mkdir -p "$OUT"
+          last="${{ steps.prev.outputs.last }}"
+          if [ -n "$last" ]; then cp -r "legs/$CP-$last/." "$OUT/"; fi
+          # an empty network namespace when the runner allows one; the Python socket guard refuses connections either way
           PREFIX=""
-          if unshare -rn true 2>/dev/null; then PREFIX="unshare -rn"; fi
+          if unshare -rn true 2>/dev/null; then PREFIX="unshare -rn"; echo "network namespace: none (unshare -rn)"; fi
           export BACKTEST_NETNS="${PREFIX:-socket-guard-only}"
+          echo "cpus: $(nproc) · memory: $(free -m | awk '/Mem:/ {print $2}') MB"
           cd backend
-          $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out ../bt-out-repro --leak-checks 0 ${{ inputs.run_args }}
-          rm -f ../bt-out-repro/rows.db
-      - uses: actions/upload-artifact@v4
-        if: always()
+          $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out "../$OUT" --budget-minutes 45 --leak-checks 0 ${{ inputs.run_args }}
+          cd ..
+          if grep -q '"done": true' "$OUT/status.json"; then
+            echo "finished=true" >> "$GITHUB_OUTPUT"
+            rm -f "$OUT/rows.db"
+          fi
+      - name: Checkpoint for the next leg
+        if: always() && steps.prev.outputs.done != 'true' && steps.leg.outputs.finished != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bt-repro-cp-${{ matrix.leg }}
+          path: bt-out-repro
+          retention-days: 7
+      - name: Results
+        if: steps.leg.outputs.finished == 'true'
+        uses: actions/upload-artifact@v4
         with:
           name: backtest-repro
           path: bt-out-repro
           retention-days: 90
   compare:
-    if: inputs.task == 'run'
-    needs: [run, repro]
+    # also after a leg that failed (a lost runner): a later leg went on from the checkpoint before it
+    if: always() && inputs.task == 'run'
+    needs: [measure, repro]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
