@@ -868,3 +868,49 @@ main > .grid > *:nth-child(4) { animation-delay: 90ms; } main > .grid > *:nth-ch
 .krw-split .legend em { font-style: normal; color: var(--muted); font-size: 12.5px; margin-left: 4px; }
 .krw-split .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; }
 @media (max-width: 900px) { .krw-head { grid-template-columns: minmax(0, 1fr); } }
+
+/* ------------------------------------------------------------------ 오늘 아침 브리핑 */
+.brief {
+  position: relative; overflow: hidden; border-radius: var(--r-xl); padding: 20px 22px 18px;
+  background:
+    radial-gradient(520px 220px at 0% 0%, rgba(255, 196, 92, 0.13), transparent 62%),
+    radial-gradient(640px 260px at 100% 110%, rgba(114, 184, 255, 0.10), transparent 70%),
+    linear-gradient(180deg, rgba(24, 27, 44, 0.96), rgba(13, 16, 29, 0.98));
+  border: 1px solid rgba(255, 196, 92, 0.18); box-shadow: var(--shadow-2);
+}
+.brief::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255, 220, 160, 0.6), transparent); opacity: 0.55; }
+.brief-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.brief-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brief-title .sun { width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center; font-size: 19px; color: #ffc45c;
+  background: radial-gradient(circle at 35% 30%, rgba(255, 196, 92, 0.30), rgba(255, 196, 92, 0.06)); border: 1px solid rgba(255, 196, 92, 0.25); flex: none; }
+.brief-title h2 { font-size: 17px; font-weight: 720; letter-spacing: -0.02em; }
+.brief-sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.brief-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.brief-tile { min-width: 0; padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(148, 160, 200, 0.12); }
+.brief-tile .t { color: var(--muted); font-size: 12px; font-weight: 560; }
+.brief-tile .v { font-size: 21px; font-weight: 740; letter-spacing: -0.03em; margin-top: 3px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brief-tile .s { color: var(--sub); font-size: 12px; margin-top: 2px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.brief-tile.up .v { color: var(--pos); }
+.brief-tile.down .v { color: var(--neg); }
+.brief-tile.acct { background: linear-gradient(180deg, rgba(114, 184, 255, 0.07), rgba(114, 184, 255, 0.02)); border-color: rgba(114, 184, 255, 0.2); }
+.brief-movers { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.brief-movers .mover { display: inline-flex; align-items: center; gap: 8px; padding: 6px 11px; border-radius: 999px; font-size: 12.5px; color: var(--text-2);
+  background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(148, 160, 200, 0.14); text-decoration: none; font-variant-numeric: tabular-nums; }
+.brief-movers .mover:hover { border-color: rgba(114, 184, 255, 0.4); color: var(--text); }
+.brief-movers .mover b { color: var(--text); font-weight: 680; }
+.brief-movers .mover .pnl { color: var(--muted); }
+.brief-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 18px; margin-top: 14px; }
+.brief-cols:empty { display: none; }
+.brief-col { min-width: 0; }
+.brief-col h3 { color: var(--muted); font-size: 12px; font-weight: 620; letter-spacing: 0.01em; margin-bottom: 6px; }
+.brief-row { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-top: 1px solid rgba(38, 47, 71, 0.5); color: var(--text-2); font-size: 13px; line-height: 1.45; text-decoration: none; min-width: 0; }
+.brief-row:first-of-type { border-top: 0; }
+a.brief-row:hover .txt { color: var(--text); }
+.brief-row .tag { flex: none; font-size: 11px; font-weight: 650; padding: 1px 7px; border-radius: 6px; color: var(--sub); background: rgba(148, 160, 200, 0.1); font-variant-numeric: tabular-nums; }
+.brief-row .txt { min-width: 0; overflow-wrap: anywhere; }
+.brief-row.neg .tag { color: var(--neg); background: rgba(255, 107, 107, 0.12); }
+.brief-row.pos .tag { color: var(--pos); background: rgba(52, 211, 153, 0.12); }
+.brief-row.lvl-danger .txt { color: var(--neg); }
+.brief-row.lvl-warning .txt { color: var(--warn); }
+.brief-notes { color: var(--muted); font-size: 12px; margin-top: 12px; }
+@media (max-width: 900px) { .brief-tiles { grid-template-columns: minmax(0, 1fr); } }

@@ -566,6 +566,12 @@ def toss_prefs(req: Request, body: TossPrefsIn) -> dict[str, Any]:
     return s.broker.view()
 
 
+@router.get("/briefing")
+def morning_briefing(req: Request, refresh: bool = False) -> dict[str, Any]:
+    """오늘 아침 브리핑 (한국시간 07:00부터) — the overnight US session for the owner's account, in the app only."""
+    return svc(req).morning_briefing(refresh=refresh)
+
+
 @router.get("/broker/toss/fills")
 def toss_fills(req: Request, limit: int = 300) -> dict[str, Any]:
     s = svc(req)

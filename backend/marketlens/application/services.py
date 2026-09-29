@@ -242,6 +242,9 @@ class MarketLensService:
         self.quotes.on_price = self.judge.observe
         self.judge.on_reanalyze = self.request_reanalysis
         self._reanalyzed: dict[str, float] = {}
+        self._briefing: tuple[str, float, dict[str, Any]] | None = None  # (KST day, monotonic time built, briefing)
+        self._briefing_lock = threading.Lock()
+        self._briefing_announced: str | None = None  # the KST day whose briefing alert went out (once a day)
         # 토스증권 account (read-only): decides the holdings and cash it has; LIVE only (never valued on mock prices)
         # its prices are the app's real-time feed in every session Toss quotes (application/toss_quotes.py)
         self.toss_feed = TossQuoteFeed(self.quotes, None)
@@ -573,6 +576,43 @@ class MarketLensService:
         routes; the refresher runs at most one sync at a time and backs off after a failure."""
         if self.broker.due():  # the schedule is the broker's own (wall clock): one sync in flight at most
             self.refresher.get("broker:toss", self.broker.sync, max_age=0.0, retry_after=0.0)
+
+    BRIEFING_AGE = 600.0  # seconds a built briefing is shown before it is rebuilt (the numbers are end-of-session)
+
+    def morning_briefing(self, refresh: bool = False) -> dict[str, Any]:
+        """The 오늘 아침 브리핑 (application/briefing.py): built on request in the request's own thread (reads only),
+        kept 10 minutes per Korean day."""
+        from marketlens.application import briefing
+
+        now = self.now()
+        day = briefing.kst_day(now).isoformat()
+        with self._briefing_lock:
+            c = self._briefing
+            if not refresh and c is not None and c[0] == day and time.monotonic() - c[1] < self.BRIEFING_AGE:
+                return c[2]
+        b = briefing.build(self, now)
+        with self._briefing_lock:
+            self._briefing = (day, time.monotonic(), b)
+        return b
+
+    def briefing_tick(self) -> None:
+        """From 07:00 KST, once per Korean day, the briefing's one line goes out as an alert (the app open at 07:00, or
+        the first moment it is opened after). Called by the quote stream's status tick."""
+        from marketlens.application import briefing
+
+        now = self.now()
+        if not briefing.is_ready(now):
+            return
+        day = briefing.kst_day(now).isoformat()
+        if self._briefing_announced == day:
+            return
+        self._briefing_announced = day  # first: a failing build never turns into an alert storm
+        try:
+            b = self.morning_briefing(refresh=True)
+        except Exception as e:  # noqa: BLE001 - the stream keeps going; the card builds again when opened
+            log.warning("morning briefing not built: %s", type(e).__name__)
+            return
+        self.judge.add("", "BRIEFING", "info", f"오늘 아침 브리핑 · {b['headline']}")
 
     def broker_sync_now(self) -> dict[str, Any]:
         """The "지금 동기화" button: one sync now, whatever the schedule or back-off (raises TossError)."""

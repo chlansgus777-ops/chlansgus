@@ -67,7 +67,8 @@ export function AlertCenter() {
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
-  const go = (a: LiveAlert) => { setOpen(false); setToasts((t) => t.filter((x) => x.id !== a.id)); nav(`/stocks/${a.ticker}`); };
+  // an alert about one name opens that name; the morning briefing (no name) opens the home screen where its card is
+  const go = (a: LiveAlert) => { setOpen(false); setToasts((t) => t.filter((x) => x.id !== a.id)); nav(a.ticker ? `/stocks/${a.ticker}` : "/"); };
   return (
     <>
       <div className="alert-bell" ref={box}>

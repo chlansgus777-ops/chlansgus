@@ -10,6 +10,7 @@ import { LivePrice } from "../components/LivePrice";
 import { StalePriceNote, stalePriceCause } from "../components/OppTable";
 import { useJudgedRows, useQuote, useViewQuotes, type QuoteRow } from "../quotes";
 import { LiveZone } from "../components/LiveZone";
+import { MorningBriefing } from "../components/Briefing";
 import { ago, day, num, pct, price, stampEt, errKo } from "../format";
 import { ACTION_PLAIN, BULLISH, HEALTH_KO, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
 import type { OppRow, ScanInfo } from "../types";
@@ -237,6 +238,7 @@ export default function Dashboard() {
 
       <div className="home-grid">
         <div className="home-main">
+          <MorningBriefing />
           {/* the first five seconds: how many names pass right now, the market's mood, the biggest risk, the next event */}
           <section className="today enter" aria-label="오늘의 요약">
             <div className="big">
