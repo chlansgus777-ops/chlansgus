@@ -55,3 +55,15 @@ describe("api client", () => {
     expect(calls).toHaveLength(1);
   });
 });
+
+describe("the API address on a phone (owner 2026-09-30: the phone showed '백엔드가 시작되지 않았습니다')", () => {
+  it("a page served by a MarketLens backend asks that backend, not the build's 127.0.0.1", async () => {
+    const { servedByBackend } = await import("./api");
+    expect(servedByBackend({ protocol: "http:", hostname: "192.168.0.10" }, false)).toBe(true);  // the phone
+    expect(servedByBackend({ protocol: "http:", hostname: "127.0.0.1" }, false)).toBe(true);  // the PC's browser on the backend
+    expect(servedByBackend({ protocol: "tauri:", hostname: "localhost" }, false)).toBe(false);  // the desktop shell
+    expect(servedByBackend({ protocol: "http:", hostname: "tauri.localhost" }, false)).toBe(false);
+    expect(servedByBackend({ protocol: "http:", hostname: "localhost" }, true)).toBe(false);  // the Vite dev server
+    expect(servedByBackend(undefined, false)).toBe(false);
+  });
+});

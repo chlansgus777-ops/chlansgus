@@ -44,7 +44,18 @@ export function clientHeaders(): Record<string, string> {
 
 export function baseUrl(): string {
   if (typeof window !== "undefined" && window.__MARKETLENS_API__) return window.__MARKETLENS_API__.replace(/\/$/, "");
+  // served by a MarketLens backend itself (the phone on the home Wi-Fi opens http://192.168.x.x:8766/): the API is
+  // that same origin — never the build's 127.0.0.1, which on a phone is the phone
+  if (servedByBackend()) return "";
   return ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
+}
+
+/** The page came over http(s) from a real host (not the desktop shell's tauri://localhost / tauri.localhost, not the
+ * Vite dev server) — so the backend that served it is the one to ask. */
+export function servedByBackend(loc: { protocol: string; hostname: string } | undefined = typeof window !== "undefined" ? window.location : undefined,
+                                dev: boolean = !!import.meta.env.DEV): boolean {
+  if (dev || !loc || (loc.protocol !== "http:" && loc.protocol !== "https:")) return false;
+  return loc.hostname !== "tauri.localhost" && loc.hostname !== "";
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

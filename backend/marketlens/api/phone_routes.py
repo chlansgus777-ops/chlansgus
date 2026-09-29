@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 from marketlens.application.phone import COOKIE, PairError
 
 router = APIRouter()
-PUBLIC = {("GET", "/api/phone/hello"), ("POST", "/api/phone/pair"), ("GET", "/api/health/live")}
+# health: the page's start-up check runs before the pairing screen (it says only ready / version / mode)
+PUBLIC = {("GET", "/api/phone/hello"), ("POST", "/api/phone/pair"), ("GET", "/api/health/live"), ("GET", "/api/health/ready")}
 COOKIE_MAX_AGE = 400 * 24 * 3600  # a year and a bit (browsers cap at 400 days); removed on the PC at any time
 
 
