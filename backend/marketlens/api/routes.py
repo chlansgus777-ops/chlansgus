@@ -121,13 +121,48 @@ def _row_summary(r: Any, s: MarketLensService | None = None, fetch_quote: bool =
     }
 
 
+def _overlay_live(row: dict[str, Any], live: dict[str, Any] | None) -> None:
+    """The live re-judgement (MarketLensService.live_rejudge) over a stored row: the same analysis with the current
+    price. The stored analysis is kept under ``stored`` so the screen can say what changed."""
+    if not live:
+        return
+    row["stored"] = {k: row.get(k) for k in ("action", "score", "price", "max_buy", "data_quality", "vetoes")}
+    row.update({"action": live["action"], "action_ko": ACTION_KO.get(Action(live["action"]), live["action"]), "score": live["score"],
+                "price": live["price"], "price_timestamp": live["quote_ts"], "price_source": live["source"], "session": live["session"],
+                "data_quality": live["data_quality"], "vetoes": live["vetoes"], "max_buy": live["max_buy"], "ideal_entry": live["ideal_entry"],
+                "stop": live["stop"], "target": live["target1"], "target2": live["target2"], "rr": live["rr"], "downside": live["downside"],
+                "buy_zone_low": live["buy_zone_low"], "buy_zone_high": live["buy_zone_high"], "live_at": live["at"]})
+    bullish = live["action"] in {a.value for a in BULLISH_ACTIONS}
+    row["actionable_now"] = (live["data_quality"] in ("FRESH", "DELAYED")) if bullish else None
+    row["current_status"], row["current_status_reason"] = "CURRENT", "실시간 가격으로 다시 판정"
+
+
 def _scan_rows(s: MarketLensService, ss: Any) -> tuple[Any, list[dict[str, Any]], dict[int, dict[str, Any]]]:
     """The latest scan's current recommendations: (scan, row summaries, stored analysis by id) from ONE query."""
-    scan = repo.latest_scan(ss, mode=s.mode.value)
+    scan = s.shown_scan(ss)  # while a scan is being saved, the previous complete one stays on screen
     if scan is None:
         return None, [], {}
     recs = repo.recommendations_for_scan(ss, scan.id)
-    return scan, [_row_summary(r, s) for r in recs], {r.id: (r.result or {}) for r in recs}
+    # a name analysed again after the scan ("이 종목만 다시 분석", an automatic re-analysis) shows that newer analysis in
+    # its scan place (owner 2026-09-29: the stock page said WATCH, the list still the scan's 데이터 부족)
+    newer = repo.newer_single_analyses(ss, [r.ticker for r in recs], scan.as_of, s.mode.value)
+    rows, results = [], {}
+    for r in recs:
+        n = newer.get(r.ticker)
+        use = n if n is not None else r
+        row = _row_summary(use, s)
+        if n is not None:
+            row["rank"] = r.rank
+            row["reanalyzed_at"] = n.as_of.isoformat()
+            row["scan_action"] = r.final_action
+        _overlay_live(row, s.rejudged(use.id))
+        rows.append(row)
+        results[use.id] = use.result or {}
+    # the live order (owner 2026-09-29: a name that turns good climbs at once): judged rows by score, data-insufficient last
+    rows.sort(key=lambda x: (x["action"] == Action.DATA_INSUFFICIENT.value, -(x["score"] or 0), x["rank"] or 0))
+    for i, row in enumerate(rows, start=1):
+        row["scan_rank"], row["rank"] = row["rank"], i
+    return scan, rows, results
 
 
 def _scan_head(scan: Any) -> dict[str, Any] | None:
@@ -142,6 +177,12 @@ def opportunities(req: Request) -> dict[str, Any]:
     with s.sf() as ss:
         scan, rows, _ = _scan_rows(s, ss)
     return {"scan": _scan_head(scan), "rows": rows, "readiness": ready}
+
+
+@router.get("/opportunities/live")
+def opportunities_live(req: Request) -> dict[str, Any]:
+    """The list's live re-judgements only (memory, no database) — the screens poll this every second."""
+    return svc(req).live_board()
 
 
 @router.post("/scan")

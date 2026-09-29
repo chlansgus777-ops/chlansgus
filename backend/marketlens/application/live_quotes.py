@@ -231,7 +231,9 @@ class QuoteHub:
         last scan (watched for alerts even when no screen shows them); stable order within each."""
         with self._lock:
             order: list[str] = []
-            for group in (sorted(self._views), sorted(self._pinned["holdings"]), sorted(self._pinned["watchlist"]), sorted(self._pinned.get("candidates", ()))):
+            # "top": the list's top names, re-judged on the live price (MarketLensService.live_rejudge)
+            for group in (sorted(self._views), sorted(self._pinned["holdings"]), sorted(self._pinned["watchlist"]), sorted(self._pinned.get("candidates", ())),
+                          sorted(self._pinned.get("top", ()))):
                 for t in group:
                     if t not in order:
                         order.append(t)

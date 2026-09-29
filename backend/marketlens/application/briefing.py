@@ -84,7 +84,7 @@ def build(svc: Any, now: datetime) -> dict[str, Any]:
     with svc.sf() as s:
         pf = svc.portfolio(s)
         watched = [w.ticker for w in repo.watchlist(s)]
-        scan = repo.latest_scan(s, mode=svc.mode.value)
+        scan = svc.shown_scan(s)
         recs = [r for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None] if scan is not None else []
         bull = {a.value for a in BULLISH_ACTIONS}
         bullish = [r for r in sorted(recs, key=lambda r: r.rank) if r.final_action in bull][:3]

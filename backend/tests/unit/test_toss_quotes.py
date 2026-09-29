@@ -160,4 +160,4 @@ def test_a_scan_prices_its_final_names_in_batches_not_one_call_each():
         scan = repo.latest_scan(s, mode=svc.mode.value)
         recs = [r for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None]
     assert recs and all(r.price_source == "toss" for r in recs), {r.ticker: r.price_source for r in recs}
-    assert not any(r.final_action == "DATA_INSUFFICIENT" and r.price is None for r in recs)
+    assert not any(r.final_action == "DATA INSUFFICIENT" and r.price is None for r in recs)

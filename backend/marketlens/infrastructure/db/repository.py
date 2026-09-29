@@ -43,6 +43,28 @@ def latest_scan(s: Session, mode: str | None = None) -> ScanRunRow | None:
     return s.scalars(q.order_by(desc(ScanRunRow.id)).limit(1)).first()
 
 
+def newer_single_analyses(s: Session, tickers: list[str], after: datetime, mode: str) -> dict[str, RecommendationRow]:
+    """For each ticker, its newest analysis outside any scan made after ``after`` (the current version only)."""
+    if not tickers:
+        return {}
+    q = (select(RecommendationRow).options(*heavy_deferred())
+         .where(RecommendationRow.ticker.in_(sorted(set(tickers))), RecommendationRow.scan_run_id.is_(None), RecommendationRow.mode == mode,
+                RecommendationRow.as_of > after, RecommendationRow.id.not_in(_superseded_ids()))
+         .order_by(desc(RecommendationRow.as_of), desc(RecommendationRow.id)))
+    out: dict[str, RecommendationRow] = {}
+    for r in s.scalars(q):
+        out.setdefault(r.ticker, r)
+    return out
+
+
+def scan_before(s: Session, scan_id: int, mode: str | None = None) -> ScanRunRow | None:
+    """The newest scan older than ``scan_id`` (what the screens keep showing while ``scan_id`` is still running)."""
+    q = select(ScanRunRow).where(ScanRunRow.id < scan_id)
+    if mode is not None:
+        q = q.where(ScanRunRow.mode == mode)
+    return s.scalars(q.order_by(desc(ScanRunRow.id)).limit(1)).first()
+
+
 def _superseded_ids() -> Any:
     return select(RecommendationRow.supersedes_id).where(RecommendationRow.supersedes_id.is_not(None))
 
