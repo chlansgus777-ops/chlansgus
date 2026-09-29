@@ -285,6 +285,8 @@ class Engine:
 
         if n <= 1:
             return
+        if "fork" not in mp.get_all_start_methods():  # Windows: the per-name analyses stay in this process (same rows)
+            return
         global _W
         _W = self
         gc.collect()

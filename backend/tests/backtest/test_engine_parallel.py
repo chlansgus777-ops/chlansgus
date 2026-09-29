@@ -48,9 +48,13 @@ def _run(world, tmp_path, name, workers):
 def test_workers_give_the_same_rows(world, tmp_path):
     one, s1, e1, _ = _run(world, tmp_path, "one", 1)
     two, s2, e2, refused = _run(world, tmp_path, "two", 3)
-    assert e2.workers == 3 and e1.workers == 1
+    import multiprocessing as mp
+
+    # where fork exists (Linux: the backtest runner) three workers ran; elsewhere (Windows) it stays one process
+    assert e2.workers == (3 if "fork" in mp.get_all_start_methods() else 1) and e1.workers == 1
     assert len(one) > 20 and one == two
     assert s1 == s2
     assert e1.audited == e2.audited
     assert refused == []  # nothing tried to leave, in the parent or the workers
-    assert e2.worker_counts["blocked"] > 0  # the workers asked the (blocked) providers like the parent does
+    if e2.workers > 1:
+        assert e2.worker_counts["blocked"] > 0  # the workers asked the (blocked) providers like the parent does
