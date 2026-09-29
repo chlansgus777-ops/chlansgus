@@ -46,7 +46,7 @@ export function QuickSearch() {
       if (o.status === "fulfilled" && Array.isArray(o.value?.rows)) for (const r of o.value.rows) {
         const cur = out.get(r.ticker);
         if (cur) cur.name ||= r.company;
-        else out.set(r.ticker, { ticker: r.ticker, name: r.company, why: `스캔 후보 #${r.rank ?? "—"}` });
+        else out.set(r.ticker, { ticker: r.ticker, name: r.company, why: `후보 #${r.rank ?? "—"}` });
       }
       setPool([...out.values()]);
     });

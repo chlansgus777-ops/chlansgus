@@ -28,7 +28,7 @@ export default function Stocks() {
       <div className="page-head enter">
         <div>
           <h1>종목</h1>
-          <div className="t-sub">종목 코드를 넣으면 지금 사도 되는지, 얼마에 사야 하는지, 무엇이 판단을 바꾸는지 분석합니다. 아래에는 마지막 스캔의 후보와 관심 종목이 있습니다.</div>
+          <div className="t-sub">종목 코드를 넣으면 지금 사도 되는지, 얼마에 사야 하는지, 무엇이 판단을 바꾸는지 분석합니다. 아래에는 실시간 가격으로 1초마다 다시 판정하는 후보와 관심 종목이 있습니다.</div>
         </div>
       </div>
       <section className="today enter" style={{ padding: "20px 22px" }} aria-label="종목 분석하기">
@@ -49,7 +49,7 @@ export default function Stocks() {
       </section>
       <div className="row spread">
         <Tabs<Tab> label="목록" value={tab} onChange={(v) => setParams(v === "candidates" ? {} : { tab: v }, { replace: true })}
-              items={[["candidates", "스캔 후보", o.data?.rows.length], ["watch", "관심 종목", w.data?.length]]} />
+              items={[["candidates", "후보", o.data?.rows.length], ["watch", "관심 종목", w.data?.length]]} />
       </div>
       {tab === "candidates" ? <Opportunities /> : <Watchlist />}
     </div>

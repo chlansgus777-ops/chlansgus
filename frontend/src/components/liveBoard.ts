@@ -6,7 +6,7 @@ import type { OppRow } from "../types";
 /** The list's live re-judgements (GET /opportunities/live, from memory): each pooled analysis again with the live price,
  * every second (owner 2026-09-29: "시장 스캔 없이, 가만히 둬도 1초마다 실시간으로"). */
 export type LiveJudgement = {
-  at: string; quote_ts: string; price: number | null; source: string; session: string; action: string; score: number; data_quality: string;
+  at: string; quote_ts: string; price: number | null; source: string; session: string; price_quality?: string; action: string; score: number; data_quality: string;
   vetoes: string[]; max_buy: number | null; ideal_entry: number | null; stop: number | null; target1: number | null; target2: number | null;
   rr: number | null; downside: number | null; buy_zone_low: number | null; buy_zone_high: number | null;
 };
@@ -21,7 +21,7 @@ export function applyLive(r: OppRow, j: LiveJudgement | undefined): OppRow {
   const bullish = BULLISH.has(j.action);
   return {
     ...r, action: j.action, action_ko: ACTION_INFO[j.action]?.label ?? j.action, score: j.score, price: j.price, price_timestamp: j.quote_ts,
-    price_source: j.source, session: j.session, data_quality: j.data_quality, vetoes: j.vetoes, max_buy: j.max_buy, ideal_entry: j.ideal_entry,
+    price_source: j.source, session: j.session, price_quality: j.price_quality ?? r.price_quality, data_quality: j.data_quality, vetoes: j.vetoes, max_buy: j.max_buy, ideal_entry: j.ideal_entry,
     stop: j.stop, target: j.target1, target2: j.target2, rr: j.rr, downside: j.downside, buy_zone_low: j.buy_zone_low, buy_zone_high: j.buy_zone_high,
     actionable_now: bullish ? (j.data_quality === "FRESH" || j.data_quality === "DELAYED") : null,
     current_status: "CURRENT", current_status_reason: "실시간 가격으로 다시 판정", live_at: j.at,

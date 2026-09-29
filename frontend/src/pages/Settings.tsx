@@ -201,7 +201,7 @@ function Quotes() {
           {s.last_error && <><span className="k">최근 오류</span><span className="muted">{s.last_error}</span></>}
         </div>
       ) : <div className="muted" style={{ marginTop: 8 }}>시세 상태를 받는 중…</div>}
-      <div className="caption" style={{ marginTop: 10 }}>보고 있는 종목 → 보유 종목 → 관심 종목 → 마지막 스캔의 상위 매수 후보 순으로 구독합니다. 체결이 올 때마다 저장된 가격 계획(최대 매수가·손절·목표·손익비)과 비교해 ‘지금 매수 구간’, ‘손절 기준 도달’ 같은 판정을 바로 바꾸고, 경계를 넘으면 알림을 띄웁니다. ‘지금 매수 구간’은 20분 안의 체결가가 있을 때만 나옵니다.</div>
+      <div className="caption" style={{ marginTop: 10 }}>보고 있는 종목 → 보유 종목 → 관심 종목 → 후보 목록 순으로 구독합니다. 체결이 올 때마다 저장된 가격 계획(최대 매수가·손절·목표·손익비)과 비교해 ‘지금 매수 구간’, ‘손절 기준 도달’ 같은 판정을 바로 바꾸고, 경계를 넘으면 알림을 띄웁니다. ‘지금 매수 구간’은 20분 안의 체결가가 있을 때만 나옵니다.</div>
       <DesktopAlerts />
     </Card>
   );

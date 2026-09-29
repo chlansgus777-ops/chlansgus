@@ -716,7 +716,7 @@ class MarketLensService:
                 changed = True
             self._rejudged[rid] = {
                 "at": now.isoformat(), "quote_ts": q.timestamp.isoformat(), "price": res.price, "source": q.source,
-                "session": q.session.value, "action": res.decision.action.value, "score": res.scorecard.total,
+                "session": q.session.value, "price_quality": res.price_quality.value, "action": res.decision.action.value, "score": res.scorecard.total,
                 "data_quality": res.data_quality.overall.value, "vetoes": [v.value for v in res.decision.vetoes],
                 "max_buy": p.max_buy if p else None, "ideal_entry": p.ideal_entry if p else None, "stop": p.stop if p else None,
                 "target1": p.target1 if p else None, "target2": p.target2 if p else None, "rr": p.rr_at_current if p else None,

@@ -129,6 +129,7 @@ def _overlay_live(row: dict[str, Any], live: dict[str, Any] | None) -> None:
     row["stored"] = {k: row.get(k) for k in ("action", "score", "price", "max_buy", "data_quality", "vetoes")}
     row.update({"action": live["action"], "action_ko": ACTION_KO.get(Action(live["action"]), live["action"]), "score": live["score"],
                 "price": live["price"], "price_timestamp": live["quote_ts"], "price_source": live["source"], "session": live["session"],
+                "price_quality": live.get("price_quality", row.get("price_quality")),
                 "data_quality": live["data_quality"], "vetoes": live["vetoes"], "max_buy": live["max_buy"], "ideal_entry": live["ideal_entry"],
                 "stop": live["stop"], "target": live["target1"], "target2": live["target2"], "rr": live["rr"], "downside": live["downside"],
                 "buy_zone_low": live["buy_zone_low"], "buy_zone_high": live["buy_zone_high"], "live_at": live["at"]})

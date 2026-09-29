@@ -138,7 +138,7 @@ export function CoverageCard({ s }: { s: ScanStatus | null }) {
   const st = s.state;
   const rate = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
   return (
-    <Card title="분석 범위" sub explain="마지막 스캔이 종목 목록 중 얼마를 실제로 판단했는지와 빠진 이유" tone={st.status === "INTERRUPTED" ? "warn" : undefined}>
+    <Card title="분석 범위" sub explain="후보를 고를 때 종목 목록 중 얼마를 실제로 판단했는지와 빠진 이유" tone={st.status === "INTERRUPTED" ? "warn" : undefined}>
       {st.status === "INTERRUPTED" && <Notice tone="warn">지난 스캔이 중간에 멈췄습니다({st.saved}/{st.total}개 저장). 저장된 결과는 유지되며, 다시 스캔하면 이미 받은 AI 검토 결과를 재사용합니다.</Notice>}
       {st.status === "RUNNING" && <div className="caption">스캔 진행 중: {st.saved}/{st.total}개 저장</div>}
       {c && (
@@ -164,7 +164,7 @@ export function scopeLine(s: ScanStatus | null | undefined, mode: string | undef
   const c = s?.coverage;
   if (!c) return null;
   const list = mode === "MOCK" ? "모의 종목 목록" : "종목 목록";
-  return `이번 스캔 범위: ${list} ${c.universe.toLocaleString("ko-KR")}개 → 기준 통과 ${(c.universe - c.excluded).toLocaleString("ko-KR")}개 → 정밀 분석 ${c.deep_analysed.toLocaleString("ko-KR")}개 → 최종 ${c.analysed}개`;
+  return `후보 선정 범위: ${list} ${c.universe.toLocaleString("ko-KR")}개 → 기준 통과 ${(c.universe - c.excluded).toLocaleString("ko-KR")}개 → 정밀 분석 ${c.deep_analysed.toLocaleString("ko-KR")}개 → 최종 ${c.analysed}개`;
 }
 
 /** When an outside section's data was fetched — shown once it is older than 30 minutes or a refresh failed, so a

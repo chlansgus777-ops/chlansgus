@@ -122,12 +122,12 @@ export function BriefingView({ x, onRefresh }: { x: Briefing; onRefresh?: () => 
         )}
         {x.alerts.length > 0 && (
           <div className="brief-col">
-            <h3>밤사이 알림</h3>
+            <h3>최근 알림</h3>
             {x.alerts.map((a) => <div key={a.id} className={`brief-row lvl-${a.level}`}><span className="txt">{a.text}</span></div>)}
           </div>
         )}
       </div>
-      {x.notes.length > 0 && <div className="brief-notes">{x.notes.join(" · ")}</div>}
+      {!x.live && x.notes.length > 0 && <div className="brief-notes">{x.notes.join(" · ")}</div>}
     </section>
   );
 }

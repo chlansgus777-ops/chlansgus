@@ -114,7 +114,7 @@ describe("first screen: candidates", () => {
 
   it("the scan scope is the real list size, never 'the whole market'", () => {
     const s = { state: null, coverage: { universe: 594, excluded: 206, deep_analysed: 60, analysed: 40, data_insufficient: 0, data_insufficient_rate: 0, missing_by_field: {}, excluded_by_reason: {}, llm: { calls: 0, estimated_cost_usd: 0, cost_complete: true } } };
-    expect(scopeLine(s, "MOCK")).toBe("이번 스캔 범위: 모의 종목 목록 594개 → 기준 통과 388개 → 정밀 분석 60개 → 최종 40개");
+    expect(scopeLine(s, "MOCK")).toBe("후보 선정 범위: 모의 종목 목록 594개 → 기준 통과 388개 → 정밀 분석 60개 → 최종 40개");
     expect(scopeLine(s, "LIVE")).not.toContain("전체");
   });
 
