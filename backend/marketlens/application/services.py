@@ -252,6 +252,7 @@ class MarketLensService:
         self.attach_broker(BrokerSync(self.sf, self.now, getattr(settings, "toss_client_id", None), getattr(settings, "toss_client_secret", None),
                                       enabled=settings.mode == DataMode.LIVE))
         self.data.live_quote = self._live_quote  # an analysis prices at the same second the screens show
+        self.data.prefetch_quotes = self.toss_feed.fetch  # a scan's final names: one Toss request per batch, not per name
         self._readiness_lock = threading.Lock()
         self._readiness_cache: tuple[Any, Any, datetime] | None = None  # (data key, coverage counts, counted at)
         self._readiness_started = 0.0
@@ -532,7 +533,8 @@ class MarketLensService:
                 if fn is not None and getattr(p, "configured", True):
                     return fn(start - timedelta(days=10), end)
             return {}
-        v = self.refresher.get(f"fx:usdkrw:{start.isoformat()}:{end.isoformat()}", load, max_age=6 * 3600, wait=3.0, retry_after=600)
+        # never holds the portfolio page: a short wait for a quick answer, else "loading" and the page asks again
+        v = self.refresher.get(f"fx:usdkrw:{start.isoformat()}:{end.isoformat()}", load, max_age=6 * 3600, wait=0.3, retry_after=600)
         return v.value
 
     def fx_attribution(self, s: Session, pf: Portfolio, snap: Any) -> dict[str, Any]:

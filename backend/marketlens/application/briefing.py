@@ -36,7 +36,10 @@ def is_ready(now: datetime) -> bool:
 
 
 def _closes(svc: Any, ticker: str, upto: date) -> list[tuple[date, float]]:
-    bars = svc.data.bars(ticker, upto - timedelta(days=14), upto).value or []
+    # the stored closes only (LIVE): a briefing never waits on a provider — a slow network made it take 8 s; without a
+    # store (MOCK) the data layer answers from its fixtures
+    start = upto - timedelta(days=14)
+    bars = svc.store.bars(ticker, start, upto) if getattr(svc, "store", None) is not None else (svc.data.bars(ticker, start, upto).value or [])
     return [(b.day, b.close) for b in bars if b.day <= upto and b.close]
 
 

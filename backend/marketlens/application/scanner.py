@@ -49,6 +49,7 @@ log = logging.getLogger("marketlens.scanner")
 BENCHMARK = "SPY"
 HISTORY_CALENDAR_DAYS = 420
 RS_MIN_UNIVERSE = 30  # a percentile of fewer names says little
+QUOTE_BATCH = 25  # names per real-time price request in the final stage (Toss: up to 200 per call, ~1 call per 25 analyses)
 NEWS_LOOKBACK = timedelta(days=5)
 ISSUE_RANK_POINTS = 10.0  # stage 4: max ± points an issue swing of ±100 adds to the deep score
 
@@ -440,7 +441,10 @@ class Scanner:
         ctx.guidance_fetch = self.data.prefetch_guidance(s4[: sc.estimate_top_n], obs_day)
         full: dict[str, AnalysisResult] = {}
         inputs: dict[str, AnalysisInputs] = {}
-        for t in s4:
+        for i, t in enumerate(s4):
+            if i % QUOTE_BATCH == 0 and self.data.prefetch_quotes is not None:
+                # the live prices of the next batch in one request, just before they are analysed (fresh for each)
+                self.data.prefetch_quotes(s4[i:i + QUOTE_BATCH])
             mid = lite[t].sector_model_id
             own_val = lite[t].relative_valuation.primary_value if lite[t].relative_valuation else None
             peers = tuple(v for v in peer_values.get(mid, []) if v != own_val)

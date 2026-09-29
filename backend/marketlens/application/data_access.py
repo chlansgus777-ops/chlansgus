@@ -79,6 +79,9 @@ class DataAccess:
         self.store = store
         self.now_fn = now_fn or (lambda: datetime.now(timezone.utc))
         self.live_quote: Callable[[str], Any] | None = None  # set by the service: the real-time feed's price, when fresh
+        # set by the service: ask the real-time feed for many names in ONE request before they are analysed (a scan);
+        # one request per name hit the broker's rate limit and left most of a pre-market scan without a price
+        self.prefetch_quotes: Callable[[list[str]], None] | None = None
 
     def _get(self, kind: str, chain: str, method: str, key: str, *args: Any, cross_check: Any = None) -> Fetched:
         ttl = self.ttl.get(kind, timedelta(minutes=5))

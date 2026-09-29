@@ -98,6 +98,7 @@ class FakeToss:
         self.prices: dict[str, tuple[str, str | None]] = {}  # symbol -> (lastPrice, timestamp) for /api/v1/prices
         self.faults: list[httpx.Response | Exception] = []  # served first, in order (429, 500, a network error…)
         self.requests: list[httpx.Request] = []
+        self.price_calls_allowed: int | None = None  # after this many /api/v1/prices calls: 429 (a burst over the rate limit)
         self.errors: list[str] = []  # spec violations seen (requests or our own responses)
 
     def transport(self) -> httpx.MockTransport:
@@ -154,6 +155,9 @@ class FakeToss:
             return self._error(path, method, 401, "unauthorized", headers={"WWW-Authenticate": 'Bearer error="invalid_token"'})
         acct = req.headers.get("x-tossinvest-account")
         if path == "/api/v1/prices":
+            n_prices = sum(1 for r in self.requests if r.url.path == "/api/v1/prices")
+            if self.price_calls_allowed is not None and n_prices > self.price_calls_allowed:
+                return self._error(path, method, 429, "too-many-requests", "rate limit", headers={"Retry-After": "0"})
             syms = [x for x in q.get("symbols", "").split(",") if x]
             if len(syms) > 200:
                 self.errors.append(f"/api/v1/prices with {len(syms)} symbols (spec: at most 200)")

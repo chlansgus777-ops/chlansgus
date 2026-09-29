@@ -135,3 +135,29 @@ def test_a_name_no_screen_shows_is_asked_for_at_analysis_time():
     assert q.provider == "toss" and q.value.price == pytest.approx(123.45)
     fake.prices.clear()
     assert svc.data.quote("MSFT").provider != "toss"  # Toss has no price: the providers answer as before
+
+
+def test_a_scan_prices_its_final_names_in_batches_not_one_call_each():
+    """Owner 2026-09-29 (pre-market, Toss connected): every scan name below the 9th showed "분석 때 현재가 없음 → 데이터
+    부족" while a single re-analysis of the same name gave WATCH — the scan asked Toss once per name and hit its rate
+    limit. The final stage now asks for 25 names per request, just before analysing them."""
+    from tests.integration.test_service_api import make_service
+
+    fake = FakeToss()
+    svc = make_service(universe=40)
+    svc.attach_broker(BrokerSync(svc.sf, svc.now, fake.client_id, fake.secret, enabled=True, transport=fake.transport()))
+    from marketlens.infrastructure.db import repository as repo
+
+    names = [sec.ticker for sec in svc.data.securities().value]
+    for t in names:
+        fake.prices[t] = ("123.45", svc.now().isoformat())
+    fake.price_calls_allowed = 4  # a burst of per-name calls would be refused after four
+    before = len(fake.requests)
+    svc.run_scan(run_committee=False)
+    calls = [r for r in fake.requests[before:] if r.url.path == "/api/v1/prices"]
+    assert 1 <= len(calls) <= 4
+    with svc.sf() as s:
+        scan = repo.latest_scan(s, mode=svc.mode.value)
+        recs = [r for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None]
+    assert recs and all(r.price_source == "toss" for r in recs), {r.ticker: r.price_source for r in recs}
+    assert not any(r.final_action == "DATA_INSUFFICIENT" and r.price is None for r in recs)

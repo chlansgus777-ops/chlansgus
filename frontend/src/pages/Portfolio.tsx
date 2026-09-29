@@ -59,7 +59,8 @@ export function nyToday(now: Date = new Date()): string {
 
 export default function Portfolio() {
   const p = useApi<Pf>("/portfolio");
-  usePoll(p.reload, 3_000, !!p.data?.history_pending?.length); // prices the store lacked are being fetched in the background
+  // prices the store lacked, or the purchase-day exchange rates, are being fetched in the background: ask again shortly
+  usePoll(p.reload, 3_000, !!p.data?.history_pending?.length || !!p.data?.krw?.loading);
   const [params] = useSearchParams();
   const [row, setRow] = useState({ ticker: "", quantity: "", cost: "" });
   const [cash, setCash] = useState("");
