@@ -21,7 +21,8 @@ def test_live_fixture_after_a_complete_sync_is_limited_not_full(live):  # noqa: 
     # free data: options/13F unavailable, revisions accumulating, providers not live-verified → LIMITED
     assert r["recommendation_readiness"] == "LIMITED"
     cats = {c["category"]: c["status"] for c in r["categories"]}
-    assert cats["옵션(IV·예상 변동폭)"] == "UNAVAILABLE" and cats["추정치 리비전"].startswith("ACCUMULATING")
+    # options were removed from the product on 2026-09-29 (no free source): no longer a readiness category at all
+    assert "옵션(IV·예상 변동폭)" not in cats and cats["추정치 리비전"].startswith("ACCUMULATING")
     assert all("NOT_LIVE_VERIFIED" in v for k, v in cats.items() if v not in ("UNAVAILABLE", "BLOCKED_BY_CREDENTIAL"))
 
 
