@@ -1,15 +1,14 @@
-import { Fragment, useState } from "react";
+import { Fragment } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api";
-import { IArrow, IDownload, IEvent, IPerf, IPortfolio, IScan, IShield, IStar } from "../components/icons";
-import { Action, Card, Change, Empty, Err, LineChart, Loading, Notice, Ribbon, ScoreMeter, StaleData, StatePanel, StatusBadge, Term } from "../components/ui";
+import { IArrow, IDownload, IEvent, IPerf, IPortfolio, IShield, IStar } from "../components/icons";
+import { Action, Card, Change, Empty, Err, LineChart, Loading, Notice, ScoreMeter, StaleData, StatePanel, StatusBadge, Term } from "../components/ui";
 import { NotReady, ReadinessBanner, SyncControl, type ReadinessInfo } from "../components/Readiness";
 import { type ScanStatus, usePageTime, useStatus } from "../components/status";
 import { useApi, usePoll } from "../components/useApi";
 import { LivePrice } from "../components/LivePrice";
-import { StalePriceNote, stalePriceCause } from "../components/OppTable";
 import { useJudgedRows, useQuote, useViewQuotes, type QuoteRow } from "../quotes";
 import { LiveZone } from "../components/LiveZone";
+import { useLiveRows } from "../components/liveBoard";
 import { MorningBriefing } from "../components/Briefing";
 import { ago, day, num, pct, price, stampEt, errKo } from "../format";
 import { ACTION_PLAIN, BULLISH, HEALTH_KO, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
@@ -47,7 +46,6 @@ const REGIME_HELP: Record<string, string> = {
   Neutral: "뚜렷한 방향 없이 종목별로 움직이는 환경",
   Unknown: "거시 지표를 받지 못해 시장 국면을 판단하지 않았습니다",
 };
-const SCAN_STEPS = ["종목 목록 1차 필터", "펀더멘털 선별", "뉴스·이슈 반영", "최종 점수·가격 계획", "상위 후보 AI 검토"];
 const MAX_CARDS = 5;
 const BAD_QUALITY = new Set(["STALE", "MISSING", "CONFLICTING"]);
 
@@ -186,22 +184,13 @@ export default function Dashboard() {
   usePoll(d.reload, 3_000, sectionsLoading);
   const ownScan = useApi<ScanStatus>(st ? null : "/scan/status"); // outside the app shell (tests) read it here
   const ss = st ? st.scan.data : ownScan.data;
-  const [busy, setBusy] = useState(false);
-  const [scanErr, setScanErr] = useState<string | null>(null);
   const x = d.data;
-  const { valid, notValid } = splitCandidates(x?.top_opportunities ?? []);
-  const staleCause = stalePriceCause(x?.top_opportunities ?? []);
+  const lv = useLiveRows(x?.top_opportunities);  // the live re-judgement, every second (no scan button)
+  const { valid, notValid } = splitCandidates(lv.rows);
   const shown = valid.slice(0, MAX_CARDS);
   const newestPrice = shown.map((r) => r.price_timestamp).filter((t): t is string => !!t).sort().pop() ?? null;
   useViewQuotes(shown.map((r) => r.ticker));  // the few names on the home screen join the app-wide quote stream
   usePageTime(x && x.scan ? { label: "후보", priceTs: newestPrice, priceSession: shown[0]?.session ?? null, analysedAt: x.scan.as_of } : null);
-  const scan = async () => {
-    if (busy) return;  // a second click never starts a second scan (and its AI calls)
-    setBusy(true);
-    st?.setScanning(true);
-    setScanErr(null);
-    try { await api.post("/scan?committee=true"); d.reload(); } catch (e) { setScanErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); st?.setScanning(false); st?.refresh(); ownScan.reload(); }
-  };
   if (d.state === "loading") return <Loading what="오늘의 요약" rows={2} />;
   if (!x) return <Err error={d.error} retry={d.reload} />;
   const sysMode = st?.system.data?.mode ?? x.scan?.mode;
@@ -211,18 +200,16 @@ export default function Dashboard() {
   const notReady = x.readiness?.scanner_status === "SCANNER_NOT_READY";
   const nowMs = st?.nowMs ?? Date.now();
   const scope = scopeLine(ss, sysMode);
-  const running = busy || ss?.state?.status === "RUNNING";
-  const headline = !x.scan ? "아직 오늘의 스캔이 없습니다" : shown.length ? "개 종목이 지금 매수 조건을 통과했습니다" : notReady ? "데이터 준비가 끝나지 않아 후보를 계산하지 못했습니다" : "지금은 매수 조건을 통과한 종목이 없습니다";
+  const headline = !x.scan ? "후보를 고르는 중입니다" : shown.length ? "개 종목이 지금 매수 조건을 통과했습니다" : notReady ? "데이터 준비가 끝나지 않아 후보를 계산하지 못했습니다" : "지금은 매수 조건을 통과한 종목이 없습니다";
   return (
     <div className="grid">
       <div className="page-head enter">
         <div>
           <h1>오늘</h1>
-          <div className="t-sub">{x.scan ? <>분석 {stampEt(x.scan.as_of)} ({ago(x.scan.as_of, nowMs)}){scope ? ` · ${scope}` : ""}</> : "시장 스캔을 실행하면 조건을 통과한 종목과 그 이유가 여기에 나옵니다."}</div>
+          <div className="t-sub">{x.scan ? <>{lv.at ? <><span className="live-dot" aria-hidden />실시간 판정 · 1초 · </> : null}후보 선정 {stampEt(x.scan.as_of)} ({ago(x.scan.as_of, nowMs)}){scope ? ` · ${scope}` : ""}</> : "데이터 준비가 끝나면 앱이 스스로 후보를 고르고, 실시간 가격으로 1초마다 다시 판정합니다."}</div>
         </div>
         <div className="actions">
           {sysMode === "LIVE" && <button data-testid="goto-data-prep" onClick={() => document.getElementById("data-prep")?.scrollIntoView({ behavior: "smooth", block: "start" })}><IDownload />데이터 준비</button>}
-          <button className="primary" disabled={running} onClick={scan}>{running ? <><span className="spin" />스캔 중…</> : <><IScan />시장 스캔 실행</>}</button>
         </div>
       </div>
 
@@ -232,9 +219,6 @@ export default function Dashboard() {
         <StatePanel kind="provider_failure" testId="provider-failure" what={<><b>{down.map((h) => `${h.kind}(${h.name})`).join(", ")}</b> 데이터를 받지 못하고 있습니다. 해당 값은 ‘없음’으로 표시하고 판단에서 보수적으로 처리합니다.</>}
                     actions={<Link to="/settings?tab=status">원인 보기 →</Link>} />
       )}
-      {ss?.state?.status === "INTERRUPTED" && <Ribbon tone="warn" cap="분석 중단">지난 스캔이 중간에 멈췄습니다({ss.state.saved}/{ss.state.total}개 저장). 아래 후보는 저장된 결과만 보여줍니다.</Ribbon>}
-      {running && <StatePanel kind="analyzing" what={`시장 스캔을 실행하고 있습니다${ss?.state?.status === "RUNNING" ? `(${ss.state.saved}/${ss.state.total}개 저장)` : ""}: ${SCAN_STEPS.join(" → ")}`} />}
-      <Err error={scanErr} />
 
       <div className="home-grid">
         <div className="home-main">
@@ -246,15 +230,15 @@ export default function Dashboard() {
               <span className="count-l">{headline}</span>
             </div>
             <p className="lead">
-              {x.scan && !x.regime_status?.pending ? <>시장 분위기는 <b>{ko(REGIME_KO, x.regime.primary, "판단 불가")}</b> — {REGIME_HELP[x.regime.primary] ?? "거시 지표로 판단한 현재 환경"}.</> : x.scan ? null : "스캔은 종목 목록을 거래대금·시가총액으로 거른 뒤 업종별 재무·밸류에이션·실적·가격 계획을 차례로 계산합니다."}
+              {x.scan && !x.regime_status?.pending ? <>시장 분위기는 <b>{ko(REGIME_KO, x.regime.primary, "판단 불가")}</b> — {REGIME_HELP[x.regime.primary] ?? "거시 지표로 판단한 현재 환경"}.</> : x.scan ? null : "종목 목록을 거래대금·시가총액으로 거른 뒤 업종별 재무·밸류에이션·실적·가격 계획을 차례로 계산해 후보를 고릅니다."}
               {notValid.length > 0 ? <> 매수 계열 추천 중 {notValid.length}개는 시간 경과·가격 조건 이탈·자료 오래됨으로 지금은 유효하지 않아 따로 표시했습니다.</> : null}
             </p>
             <div className="facts">
               <div><div className="t">시장 분위기</div><div className="v">{x.regime_status?.pending ? <span className="muted" data-testid="regime-loading">거시 지표 불러오는 중…</span> : ko(REGIME_KO, x.regime.primary, "판단 불가")}</div>
                 <SectionAge s={x.regime_status} nowMs={nowMs} what="거시 지표" />
                 {x.regime.readings.length > 1 && <div className="s" title={x.regime.readings.map((r) => `${ko(REGIME_KO, r.regime)}: ${r.evidence.join(", ")}`).join("\n")}>함께 나타난 국면: {x.regime.readings.filter((r) => r.regime !== x.regime.primary).slice(0, 2).map((r) => ko(REGIME_KO, r.regime)).join(", ")}</div>}</div>
-              <div className={risk0 || notValid.length ? "warn" : ""}><div className="t">가장 큰 위험</div><div className="v">{risk0 ? `${risk0.ticker} — ${risk0.text.split(", ").map((v) => VETO_KO[v] ?? v).join(", ")}` : notValid.length ? `유효하지 않은 추천 ${notValid.length}개` : !x.scan ? <span className="muted">스캔 후 표시</span> : "상위 후보에 유동성·이벤트·투자 논리 위험 신호 없음"}</div>
-                <div className="s">{risk0 ? "상위 후보 중 위험 거부권이나 큰 이벤트가 걸린 종목" : !x.scan ? "시장 스캔을 실행하면 후보 중 가장 큰 위험을 보여줍니다" : "종목별 가장 큰 위험은 후보 카드에 있습니다"}</div></div>
+              <div className={risk0 || notValid.length ? "warn" : ""}><div className="t">가장 큰 위험</div><div className="v">{risk0 ? `${risk0.ticker} — ${risk0.text.split(", ").map((v) => VETO_KO[v] ?? v).join(", ")}` : notValid.length ? `유효하지 않은 추천 ${notValid.length}개` : !x.scan ? <span className="muted">후보 선정 후 표시</span> : "상위 후보에 유동성·이벤트·투자 논리 위험 신호 없음"}</div>
+                <div className="s">{risk0 ? "상위 후보 중 위험 거부권이나 큰 이벤트가 걸린 종목" : !x.scan ? "후보를 고르면 그중 가장 큰 위험을 보여줍니다" : "종목별 가장 큰 위험은 후보 카드에 있습니다"}</div></div>
               <div><div className="t">다음 핵심 일정</div><div className="v">{next ? next.title : x.catalysts_status?.pending ? <span className="muted">일정 불러오는 중…</span> : "일정 자료 없음"}</div>
                 <div className="s">{next ? `${day(next.event_date)} (미국 날짜) · ${next.days_until === 0 ? "오늘" : `${next.days_until}일 후`}` : x.catalysts_status?.pending ? "일정 공급자에게 요청했습니다" : x.catalysts_status?.reason ? errKo(x.catalysts_status.reason) : "일정 공급자에게서 받은 일정이 없습니다"}</div></div>
             </div>
@@ -263,11 +247,9 @@ export default function Dashboard() {
           {sysMode === "LIVE" && notReady && !shown.length && <span id="data-prep" />}
           <Card title="지금 검토할 후보" right={<Link to="/stocks?tab=candidates" className="row tight">전체 후보 보기 <IArrow width={15} height={15} /></Link>}
                 explain="매수 조건을 통과하고 지금 다시 확인해도 유효한 종목만, 최대 5개까지 보여줍니다.">
-            {!shown.length && staleCause ? <div style={{ marginBottom: 12 }}><StalePriceNote c={staleCause} session={st?.system.data?.market?.session ?? null} onRescan={() => void scan()} busy={running} /></div> : null}
             {shown.length ? <div className="cands">{shown.map((r, i) => <CandidateCard key={r.id} r={r} lead={i === 0 && shown.length !== 2 && shown.length !== 4} />)}</div>
               : notReady && x.readiness ? <NotReady r={x.readiness} onChange={d.reload} />
-              : !x.scan ? <StatePanel kind="not_scanned" actions={<button className="primary" disabled={running} onClick={scan}>시장 스캔 실행</button>} />
-              : staleCause ? null /* the note above already says why and what to do */
+              : !x.scan ? <StatePanel kind="not_scanned" />
               : <StatePanel kind="no_candidates" actions={<Link to="/stocks?tab=candidates">대기·관찰 종목 보기 →</Link>} />}
             {shown.length > 0 && shown.length < 3 && (
               <div className="explain" style={{ marginTop: 12 }} data-testid="few-candidates">매수 조건을 통과한 종목이 {shown.length}개뿐입니다. 빈자리를 점수 상위 종목으로 채우지 않았습니다. 대기·관찰 종목은 ‘전체 후보 보기’에서 볼 수 있습니다.</div>

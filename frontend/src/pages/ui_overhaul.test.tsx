@@ -96,10 +96,12 @@ describe("first screen: candidates", () => {
     expect(screen.queryAllByTestId("candidate-card")).toHaveLength(0);
   });
 
-  it("never scanned: says so and offers the scan", async () => {
+  it("no candidates chosen yet: says the app chooses them by itself (no scan button, owner 2026-09-29)", async () => {
     serve([[/\/dashboard/, dash([], { scan: null })], [/\/scan\/status/, { state: null, coverage: null }]]);
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
-    expect((await screen.findByTestId("state-not_scanned")).textContent).toContain("아직 시장 스캔을 하지 않았습니다");
+    const t = (await screen.findByTestId("state-not_scanned")).textContent!;
+    expect(t).toContain("후보를 고르는 중입니다");
+    expect(screen.queryByRole("button", { name: /시장 스캔/ })).toBeNull();
   });
 
   it("LIVE provider failure is shown, never covered by other data", async () => {

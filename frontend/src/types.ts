@@ -13,6 +13,10 @@ export interface OppRow {
   split_factor_since?: number; target2?: number | null; buy_zone_low?: number | null; buy_zone_high?: number | null; add_zone_low?: number | null; add_zone_high?: number | null;
   /** dashboard only: one reason and one risk read from the stored analysis (never written by the screen) */
   key_reason?: string | null; key_risk?: { kind: "veto" | "event" | "negative"; code: string | null; text: string | null } | null;
+  /** the live re-judgement (the stored analysis with the current price), when one is applied */
+  live_at?: string | null;
+  /** analysed again after the candidates were chosen (shown in its place) */
+  reanalyzed_at?: string | null; scan_rank?: number | null; scan_action?: string | null;
 }
 
 export interface FreshnessCheck { data_type: string; quality: string; effective: string | null; published: string | null; age: number | null; unit: string; fresh_max: number; usable_max: number; reason_ko: string }

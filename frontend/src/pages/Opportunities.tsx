@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import { OppTable, StalePriceNote, stalePriceCause } from "../components/OppTable";
+import { OppTable } from "../components/OppTable";
+import { useLiveRows } from "../components/liveBoard";
 import { Empty, Err, Loading, StaleData } from "../components/ui";
 import { NotReady, ReadinessBanner } from "../components/Readiness";
 import { useApi } from "../components/useApi";
 import { useStatus } from "../components/status";
 import { useAllQuotes, useViewQuotes, type QuoteRow } from "../quotes";
-import { api } from "../api";
 import { stamp } from "../format";
 import { ACTION_INFO } from "../i18n";
 import type { Opportunities as Opp } from "../types";
@@ -17,44 +17,36 @@ export function validNow(r: { ticker: string; id: number; current_status: string
   return j && j.rec_id === r.id && j.zone !== "NO_PLAN" ? j.valid_now : r.current_status === "CURRENT";
 }
 
-/** The last scan's candidates (buy, wait and watch), searchable and filterable — the "후보" tab of the stock screen. */
+/** The candidates (buy, wait and watch), re-judged on the live price every second, searchable and filterable — the
+ * "후보" tab of the stock screen. No scan button (owner 2026-09-29): the pool is chosen in the background and the list
+ * follows the price by itself. */
 export default function Opportunities() {
   const o = useApi<Opp>("/opportunities");
-  const st = useStatus();
-  const [busy, setBusy] = useState(false);
-  const [scanErr, setScanErr] = useState<string | null>(null);
-  // the top of the list joins the app-wide quote stream, so 현재가 is live even when the scan's price was not
-  useViewQuotes((o.data?.rows ?? []).slice(0, 30).map((r) => r.ticker));
-  const sessionNow = st?.system.data?.market?.session ?? null;
-  const rescan = async () => {
-    if (busy) return;  // never a second scan (and its AI calls) from a double click
-    setBusy(true); st?.setScanning(true); setScanErr(null);
-    try { await api.post("/scan?committee=true"); } catch (e) { setScanErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); st?.setScanning(false); st?.refresh(); o.reload(); }
-  };
+  useStatus();
+  const lv = useLiveRows(o.data?.rows);
+  // the top of the list joins the app-wide quote stream (1 s)
+  useViewQuotes(lv.rows.slice(0, 40).map((r) => r.ticker));
   const [filter, setFilter] = useState("");
   const [action, setAction] = useState("ALL");
   const [onlyCurrent, setOnlyCurrent] = useState(false);
   const live = useAllQuotes();
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
-    for (const r of o.data?.rows ?? []) c[r.action] = (c[r.action] ?? 0) + 1;
+    for (const r of lv.rows) c[r.action] = (c[r.action] ?? 0) + 1;
     return c;
-  }, [o.data]);
+  }, [lv.rows]);
   // the quote map only matters to the "현재 유효" filter: without it the table is not rebuilt on every print
   const liveKey = onlyCurrent ? live : null;
-  const rows = useMemo(() => (o.data?.rows ?? []).filter((r) => (action === "ALL" || r.action === action)
+  const rows = useMemo(() => lv.rows.filter((r) => (action === "ALL" || r.action === action)
     && (!liveKey || validNow(r, liveKey))
-    && (filter === "" || `${r.ticker} ${r.company} ${r.sector}`.toLowerCase().includes(filter.toLowerCase()))), [o.data, action, liveKey, filter]);
+    && (filter === "" || `${r.ticker} ${r.company} ${r.sector}`.toLowerCase().includes(filter.toLowerCase()))), [lv.rows, action, liveKey, filter]);
   if (o.state === "loading") return <Loading what="매수 후보" rows={4} />;
   if (!o.data) return <Err error={o.error} retry={o.reload} />;
   const scan = o.data.scan;
-  const stale = stalePriceCause(o.data.rows);
   return (
     <div className="grid">
       <ReadinessBanner r={o.data.readiness} />
       <StaleData error={o.error} at={o.fetchedAt} retry={o.reload} />
-      <Err error={scanErr} />
-      {stale && <StalePriceNote c={stale} session={sessionNow} onRescan={() => void rescan()} busy={busy || st?.scanning} />}
       {o.data.readiness?.scanner_status === "SCANNER_NOT_READY" && !o.data.rows.length && <NotReady r={o.data.readiness} onChange={o.reload} />}
       <section className="card flush">
         <div className="row spread" style={{ padding: "16px 18px 12px", borderBottom: "1px solid var(--line)" }}>
@@ -66,11 +58,11 @@ export default function Opportunities() {
             </select>
             <label className="check"><input type="checkbox" checked={onlyCurrent} onChange={(e) => setOnlyCurrent(e.target.checked)} /> 현재 유효한 추천만</label>
           </div>
-          <span className="caption">{rows.length.toLocaleString("ko-KR")}개 · {scan ? `스캔 #${scan.id} · 분석 ${stamp(scan.as_of)} · ${scan.scoring_model_version}` : "스캔 없음"}</span>
+          <span className="caption live-cap">{lv.at ? <span className="live-dot" aria-hidden /> : null}{rows.length.toLocaleString("ko-KR")}개 · {lv.at ? "실시간 판정 · 1초" : "실시간 가격 기다리는 중"}{scan ? ` · 후보 선정 ${stamp(scan.as_of)}` : ""}</span>
         </div>
         <div style={{ padding: "4px 8px 8px" }}>
-          {rows.length ? <OppTable rows={rows} commonStale={!!stale} /> : o.data.readiness?.scanner_status === "SCANNER_NOT_READY"
-            ? <div style={{ padding: 12 }}><Empty hint="데이터 준비가 100%에 가까워지면 다시 스캔하세요.">데이터 준비 중이라 후보를 계산하지 못했습니다(‘살 종목이 없음’이 아님).</Empty></div>
+          {rows.length ? <OppTable rows={rows} commonStale={false} /> : o.data.readiness?.scanner_status === "SCANNER_NOT_READY"
+            ? <div style={{ padding: 12 }}><Empty hint="데이터 준비가 끝나면 후보를 자동으로 고릅니다.">데이터 준비 중이라 후보를 계산하지 못했습니다(‘살 종목이 없음’이 아님).</Empty></div>
             : <div style={{ padding: 12 }}><Empty>조건에 맞는 후보가 없습니다.</Empty></div>}
         </div>
       </section>
