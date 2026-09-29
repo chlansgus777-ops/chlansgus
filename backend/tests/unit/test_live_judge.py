@@ -103,3 +103,21 @@ def test_the_service_judges_quote_rows_after_a_scan_and_serves_alerts():
     with _client(svc) as c:
         body = c.get("/api/alerts").json()
     assert body["last_id"] >= 1 and body["alerts"][-1]["ticker"] == t
+
+
+def test_a_change_drops_the_plans_without_reading_the_store_from_the_changing_request():
+    """CI 2026-09-29: a trade record, and on Windows a stored identity, were lost when every change started the plan
+    reload in the background — on the shared in-memory connection its read raced the request's commit. A change now
+    only drops the plans; the next quote route or stream tick reloads them."""
+    from tests.integration.test_service_api import make_service
+
+    svc = make_service(universe=40)
+    svc.live_plans()
+    if (job := svc.refresher._inflight.get("live-plans")) is not None:
+        job.result(timeout=30)
+    runs = svc.refresher.runs
+    svc.analyze("NVDA", run_committee=False, persist=True)
+    svc.invalidate_live_plans()
+    assert svc.refresher.runs == runs and svc.refresher.peek("live-plans").value is None
+    svc.live_plans()
+    assert svc.refresher.runs == runs + 1

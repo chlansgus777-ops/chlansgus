@@ -479,8 +479,10 @@ class MarketLensService:
         self.refresher.get("live-plans", self._load_live_plans, max_age=self.LIVE_PLAN_AGE, retry_after=60)
 
     def invalidate_live_plans(self) -> None:
+        """Drop the plans after a change; they are reloaded by the next quote route or stream tick (≤ STATUS_EVERY_S),
+        never from the request that changed the data — a background read racing its commit on a shared connection
+        (in-memory SQLite) lost the record, and a burst of changes reloads once instead of once per change."""
         self.refresher.invalidate("live-plans")
-        self.live_plans()
 
     def _load_live_plans(self) -> int:
         with self.sf() as s:
