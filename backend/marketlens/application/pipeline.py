@@ -34,7 +34,7 @@ from marketlens.domain.facts import DataQualityReport, Fact, build_quality_repor
 from marketlens.domain.freshness import FreshnessCheck, check_age, missing as fresh_missing, rules_from_config
 from marketlens.domain.annual import AnnualFinancials, annual_features
 from marketlens.domain.banks import bank_features
-from marketlens.domain.signals import return_signals
+from marketlens.domain.signals import ReturnSignals, return_signals
 from marketlens.domain.corporate_actions import SplitEvent, analysis_basis, normalize_quarters, share_multiplier, split_key
 from marketlens.domain.fundamentals import FundamentalMetrics, QuarterlyFinancials, as_of, compute_metrics
 from marketlens.domain.indicators import TechnicalSnapshot, aligned_closes, compute_technicals
@@ -191,6 +191,7 @@ class AnalysisResult:
     short_interest_pct: float | None = None  # short interest / shares outstanding (FINRA ÷ SEC cover page)
     valuation_price_basis: str = "현재가"
     fundamental_adjustments: tuple[str, ...] = ()  # restated values used (as known then) and split normalisation
+    return_signals: ReturnSignals | None = None  # §13 sub-signals (the backtest records each for its reference ICs)
 
 
 # ------------------------------------------------------------------------------------------------ helpers
@@ -374,7 +375,9 @@ def _fact(check: FreshnessCheck, value: float | None, source: str) -> Fact:
 # ------------------------------------------------------------------------------------------------ main
 
 
-def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
+def run_analysis(inp: AnalysisInputs, cfg: ModelConfig, fingerprint: bool = True) -> AnalysisResult:
+    """``fingerprint=False`` (the backtest only): the input hash is for storing and replaying an analysis, which a
+    backtest row never does — it is 3/4 of the time of an analysis. Everything else is identical."""
     t = inp.ticker
     eb = EvidenceBuilder(t, inp.as_of)
     src = inp.source_map
@@ -769,9 +772,10 @@ def run_analysis(inp: AnalysisInputs, cfg: ModelConfig) -> AnalysisResult:
             "config_hash": cfg.config_hash,
             "sector_models_version": cfg.sector_models_version,
         },
-        input_fingerprint=inp.fingerprint(),
+        input_fingerprint=inp.fingerprint() if fingerprint else "",
         sector_known=sector_known,
         short_interest_pct=si_pct,
         valuation_price_basis=val_basis,
         fundamental_adjustments=tuple([f"재작성 반영: {r}" for r in restated] + split_notes),
+        return_signals=si.return_signals,
     )

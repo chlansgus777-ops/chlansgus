@@ -103,3 +103,24 @@ def test_paging_that_does_not_advance_stops_with_an_error():
     else:
         raise AssertionError("an endless page loop must stop")
     assert poly.calls == 2
+
+
+def test_an_earlier_ranges_fred_flag_never_marks_an_extended_range_complete(tmp_path):
+    """Run 36517882674: the 2016+ extension ran out of time after 2017-02-17, yet coverage said complete — the
+    2-year collection's done.fred flag survived. The flag now names the range it covers and is removed while any week of
+    the asked range is missing; the resume records the rest and sets it again."""
+    import json
+    from datetime import date
+
+    from marketlens.backtest import collect as C
+    from marketlens.backtest.schema import bt_engine, get_meta
+    from tests.live_fixtures import live_transport
+
+    eng = bt_engine(str(tmp_path / "f.db"))
+    C.collect_fred(eng, "k", date(2025, 11, 3), date(2025, 11, 28), deadline=1e18, inner=live_transport())  # the short range
+    assert json.loads(get_meta(eng, "done.fred"))["weeks"] == 4
+    C.collect_fred(eng, "k", date(2025, 10, 6), date(2025, 11, 28), deadline=0.0, inner=live_transport())  # extension, no time left
+    assert get_meta(eng, "done.fred") is None
+    C.collect_fred(eng, "k", date(2025, 10, 6), date(2025, 11, 28), deadline=1e18, inner=live_transport())  # the resume
+    flag = json.loads(get_meta(eng, "done.fred"))
+    assert flag["weeks"] == 8 and flag["first"].startswith("2025-10-10") and flag["last"].startswith("2025-11-28")

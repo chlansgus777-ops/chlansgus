@@ -303,6 +303,12 @@ class Scanner:
         )
 
     # ------------------------------------------------------------------ stages
+    @staticmethod
+    def rank_universe(ctx: ScanContext, eligible: Mapping[str, list[Bar]]) -> None:
+        """The relative-strength universe of the session (§13): the weighted returns of every stage-1 name."""
+        ctx.rs_universe = tuple(sorted(v for v in (rs_raw([b.close for b in bars]) for bars in eligible.values()) if v is not None))
+        ctx.rs_session = last_completed_session(ctx.as_of)
+
     def stage1(self, ctx: ScanContext, excluded: dict[str, str], only: list[str] | None = None) -> dict[str, list[Bar]]:
         sc = self.cfg.scanner
         d = to_ny(ctx.as_of).date()
@@ -387,8 +393,7 @@ class Scanner:
 
         eligible = self.stage1(ctx, excluded, only)
         if not only:  # the rank needs the whole universe; a partial run keeps what it has
-            ctx.rs_universe = tuple(sorted(v for v in (rs_raw([b.close for b in bars]) for bars in eligible.values()) if v is not None))
-            ctx.rs_session = last_completed_session(ctx.as_of)
+            self.rank_universe(ctx, eligible)
         reasons = Counter(excluded.values())
         top = ", ".join(f"{k} {v}" for k, v in reasons.most_common(4))
         stages.append(StageStats("1-eligibility", len(only) if only else len(ctx.securities), len(eligible), f"주가≥{sc.min_price}, 시총≥{sc.min_market_cap:.0e}, 거래대금≥{sc.min_avg_dollar_volume:.0e}; 제외: {top or '없음'}"))

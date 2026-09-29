@@ -131,7 +131,7 @@ jobs:
           name: backtest-db
           run-id: ${{ inputs.data_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Run the backtest twice (reproduction) with the network removed
+      - name: Run the backtest with the network removed (the reproduction runs in the job "repro" at the same time)
         if: inputs.task == 'run'
         run: |
           gunzip -f backtest.db.gz
@@ -140,23 +140,70 @@ jobs:
           PREFIX=""
           if unshare -rn true 2>/dev/null; then PREFIX="unshare -rn"; echo "network namespace: none (unshare -rn)"; fi
           export BACKTEST_NETNS="${PREFIX:-socket-guard-only}"
+          echo "cpus: $(nproc)"
           cd backend
           $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out ../bt-out ${{ inputs.run_args }}
-          $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out ../bt-out-repro --leak-checks 0 ${{ inputs.run_args }}
           cd ..
-          python - <<'PY'
-          import json
-          a = json.load(open("bt-out/manifest.json")); b = json.load(open("bt-out-repro/manifest.json"))
-          print("results_sha256", a["results_sha256"], "reproduction", b["results_sha256"])
-          assert a["results_sha256"] == b["results_sha256"], "the reproduction gave a different results.json"
-          PY
           gzip -f bt-out/rows.db
-          rm -f bt-out-repro/rows.db
       - uses: actions/upload-artifact@v4
         if: always() && inputs.task == 'run'
         with:
           name: backtest-results
-          path: |
-            bt-out
-            bt-out-repro
+          path: bt-out
           retention-days: 90
+  # ---------------------------------------------------------------- reproduction: the same command, same results.json SHA-256
+  repro:
+    if: inputs.task == 'run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend (lock file)
+        run: pip install -r backend/requirements.lock && pip install --no-deps -e ./backend
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          run-id: ${{ inputs.data_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Reproduce (leak checks are written outside results.json, so they are skipped here)
+        run: |
+          gunzip -f backtest.db.gz
+          sha256sum -c backtest.db.sha256
+          PREFIX=""
+          if unshare -rn true 2>/dev/null; then PREFIX="unshare -rn"; fi
+          export BACKTEST_NETNS="${PREFIX:-socket-guard-only}"
+          cd backend
+          $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out ../bt-out-repro --leak-checks 0 ${{ inputs.run_args }}
+          rm -f ../bt-out-repro/rows.db
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backtest-repro
+          path: bt-out-repro
+          retention-days: 90
+  compare:
+    if: inputs.task == 'run'
+    needs: [run, repro]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-results
+          path: bt-out
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-repro
+          path: bt-out-repro
+      - name: The reproduction gives the same results.json
+        run: |
+          python3 - <<'PY'
+          import hashlib, json
+          a = json.load(open("bt-out/manifest.json")); b = json.load(open("bt-out-repro/manifest.json"))
+          ha = hashlib.sha256(open("bt-out/results.json", "rb").read()).hexdigest()
+          hb = hashlib.sha256(open("bt-out-repro/results.json", "rb").read()).hexdigest()
+          print("results_sha256", a["results_sha256"], ha, "reproduction", b["results_sha256"], hb)
+          assert a["results_sha256"] == ha == hb == b["results_sha256"], "the reproduction gave a different results.json"
+          PY

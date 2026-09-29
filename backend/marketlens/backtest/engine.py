@@ -181,6 +181,12 @@ class Engine:
         self._bars_cache: dict[str, list[Bar]] = {}
         self.audited = 0
         self.replay = replay  # the FRED replay: every vintage it served at t is audited
+        self.pool: Any = None
+        self.blocked: dict[str, Any] = {}  # the blocked providers (their attempts are counted in the manifest)
+        self.workers = 1
+        self.min_parallel = 16  # fewer names than this are analysed here (forking work costs more than it saves)
+        self.worker_counts = {"blocked": 0, "replay_served": 0}
+        self._week_ctx: tuple[datetime, Any, Any] | None = None  # (t, scanner, context) of the week this process analyses
 
     def _previous(self, label: str, _ts: datetime) -> tuple[AnalysisDigest | None, Action | None]:
         key = self._key_of.get(label)
@@ -209,7 +215,6 @@ class Engine:
 
     def step(self, t: datetime) -> dict[str, Any]:
         from marketlens.application.data_access import DataAccess
-        from marketlens.application.pipeline import _beta, run_analysis
         from marketlens.application.scanner import Scanner
 
         self.store.set_time(t)
@@ -220,60 +225,78 @@ class Engine:
         ctx = sc.build_context(t)
         excluded: dict[str, str] = {}
         eligible = sc.stage1(ctx, excluded)
+        sc.rank_universe(ctx, eligible)  # the relative-strength rank of §13, as the scanner does before stage 2
         held = self.held_at(t)
+        if self.replay is not None:
+            audit_vintages(self.replay.urls[n_urls:], t)
+        labels = sorted(eligible)
+        prev = {lab: self.state.previous[self._key_of[lab]] for lab in labels if self._key_of[lab] in self.state.previous}
+        week = Week(t, ctx.rs_universe, ctx.rs_session, prev, frozenset(self._key_of[lab] for lab in labels if self._key_of[lab] in held))
+        self._week_ctx = (t, sc, ctx)  # this process analyses with the context it just built (workers build their own)
         # pass 1 (the scanner's stage 3): sector-model peer multiples from every eligible name
-        lite = {}
-        for lab in sorted(eligible):
-            inp = sc.gather_inputs(ctx, ctx.securities[lab], None, (), full=False)
-            audit_inputs(inp, t, self.store)
-            lite[lab] = run_analysis(inp, self.cfg)
+        lite = self._map(week, "lite", [(lab, ()) for lab in labels])
         peers: dict[str, list[tuple[str, float]]] = {}
-        for lab, r in lite.items():
-            if r.relative_valuation and r.relative_valuation.primary_value is not None:
-                peers.setdefault(r.sector_model_id, []).append((lab, r.relative_valuation.primary_value))
-        bench = [b for b in ctx.benchmark_bars]
+        for lab, (mid, pv) in zip(labels, lite):
+            if pv is not None:
+                peers.setdefault(mid, []).append((lab, pv))
+        # pass 2: every eligible name with its peers
+        jobs = [(lab, tuple(v for other, v in peers.get(mid, []) if other != lab)) for lab, (mid, _pv) in zip(labels, lite)]
         rows = []
         new_prev: dict[str, tuple[AnalysisDigest, Action]] = {}
-        for lab in sorted(eligible):
-            sec = ctx.securities[lab]
+        for lab, res in zip(labels, self._map(week, "full", jobs)):
             key = self._key_of[lab]
-            mid = lite[lab].sector_model_id
-            pv = tuple(v for other, v in peers.get(mid, []) if other != lab)
-            inp = sc.gather_inputs(ctx, sec, None, pv, full=True)
-            inp = replace(inp, held=key in held)  # the simulated account (the app: the user's portfolio)
-            audit_inputs(inp, t, self.store)
             self.audited += 1
-            r = run_analysis(inp, self.cfg)
-            card, dec, plan = r.scorecard, r.decision, r.entry
-            new_prev[key] = (r.digest, dec.action)
-            self.state.later.setdefault(key, []).append((t, dec.action.value, bool(r.thesis_invalidated)))
-            adv = r.technicals.avg_dollar_volume_20d if r.technicals else None
-            if dec.action in BULLISH_ACTIONS and plan is not None:
-                self.state.signals.append(Signal(t, key, lab, dec.action.value, card.total, dec.confidence, plan.stop, plan.target1, plan.target2,
-                                                 plan.max_buy, adv, r.primary_regime, sec.sector))
-            hist = self.store.bars(lab, self.store.session - timedelta(days=400), self.store.session)
-            payload = {
-                "total": card.total, "sell_total": card.sell_side_total, "completeness": card.completeness,
-                "components": {c.name: {"sub": c.subscore, "available": c.available, "coverage": c.coverage} for c in card.components},
-                "action": dec.action.value, "raw_action": dec.raw_action.value, "vetoes": [v.value for v in dec.vetoes], "held": key in held,
-                "price": r.price, "stop": plan.stop if plan else None, "target1": plan.target1 if plan else None, "max_buy": plan.max_buy if plan else None,
-                "adv20": adv, "market_cap": sec.market_cap, "beta252": _beta(tuple(hist), tuple(bench), 252),
-                "sector_model": r.sector_model_id, "dq_completeness": r.data_quality.completeness,
-            }
+            new_prev[key] = (res["digest"], Action(res["action"]))
+            self.state.later.setdefault(key, []).append((t, res["action"], res["thesis_invalidated"]))
+            if res["signal"] is not None:
+                self.state.signals.append(Signal(t, key, lab, *res["signal"]))
+            sec = ctx.securities[lab]
             rows.append({"t": t.isoformat(), "key": key, "label": lab, "cik": sec.cik, "sector": sec.sector, "eligible": 1, "excluded": None,
-                         "payload": json.dumps(payload, sort_keys=True)})
+                         "payload": json.dumps(res["payload"], sort_keys=True)})
         for lab, why in sorted(excluded.items()):
             sec = ctx.securities.get(lab)
             rows.append({"t": t.isoformat(), "key": self._key_of.get(lab, lab), "label": lab, "cik": sec.cik if sec else None,
                          "sector": sec.sector if sec else None, "eligible": 0, "excluded": why, "payload": None})
-        if self.replay is not None:
-            audit_vintages(self.replay.urls[n_urls:], t)
         # a name outside this week's eligible set gets no new analysis: its last one stays the previous (as in the app)
         self.state.previous.update(new_prev)
         with self.out.begin() as c:
             if rows:
                 c.execute(insert(bt_rows), rows)
         return {"t": t.isoformat(), "universe": len(ctx.securities), "eligible": len(eligible), "held": len(held), "macro": ctx.macro is not None}
+
+    # ------------------------------------------------------------------ the per-name analyses (in this process or the workers)
+    def _map(self, week: "Week", kind: str, jobs: list[tuple[str, tuple[float, ...]]]) -> list[Any]:
+        if self.pool is None or len(jobs) < self.min_parallel:
+            return analyse_chunk(self, week, kind, jobs)
+        size = max(1, -(-len(jobs) // (self.workers * 4)))
+        chunks = [jobs[i:i + size] for i in range(0, len(jobs), size)]
+        out: list[Any] = []
+        for part, counts in self.pool.imap(_worker_chunk, [(week, kind, c) for c in chunks]):  # imap keeps the order
+            out.extend(part)
+            self.worker_counts["blocked"] += counts["blocked"]
+            self.worker_counts["replay_served"] += counts["replay_served"]
+        return out
+
+    def start_workers(self, n: int) -> None:
+        """Fork ``n`` workers that share this engine's loaded data (copy-on-write). Results are merged in label order,
+        so a run with workers gives the same rows as one without (tests/backtest: test_workers_give_the_same_rows)."""
+        import gc
+        import multiprocessing as mp
+
+        if n <= 1:
+            return
+        global _W
+        _W = self
+        gc.collect()
+        gc.freeze()  # the loaded bars stay shared: the collector of a worker never touches them
+        self.workers = n
+        self.pool = mp.get_context("fork").Pool(n, initializer=_worker_init)
+
+    def stop_workers(self) -> None:
+        if self.pool is not None:
+            self.pool.close()
+            self.pool.join()
+            self.pool = None
 
     def run(self, times: Sequence[datetime], log: Callable[[str], None] = print) -> list[dict[str, Any]]:
         out = []
@@ -287,6 +310,104 @@ class Engine:
 
     def signals_json(self) -> list[dict[str, Any]]:
         return [{**{k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in s.__dict__.items()}} for s in self.state.signals]
+
+
+@dataclass(frozen=True)
+class Week:
+    """What a per-name analysis needs from the week besides the store: the §13 rank universe, the previous analyses
+    of these names (hysteresis, carried stop) and which of them the simulated account holds."""
+    t: datetime
+    rs_universe: tuple[float, ...]
+    rs_session: date | None
+    previous: dict[str, tuple[AnalysisDigest, Action]]
+    held: frozenset[str]
+
+
+def _week_scanner(eng: Engine, week: Week) -> tuple[Any, Any]:
+    """The scanner and context of ``week`` in this process (built once per week; the parent's own for 1 process)."""
+    from marketlens.application.data_access import DataAccess
+    from marketlens.application.scanner import Scanner
+
+    if eng._week_ctx is not None and eng._week_ctx[0] == week.t:
+        return eng._week_ctx[1], eng._week_ctx[2]
+    if eng.store.t != week.t:
+        eng.store.set_time(week.t)
+    n_urls = len(eng.replay.urls) if eng.replay is not None else 0
+    data = DataAccess(eng.reg, eng.cfg.cache_ttl, store=eng.store, now_fn=lambda: week.t)
+    sc = Scanner(data, eng.cfg, eng.seed, eng.theses, previous_lookup=lambda label, _ts: week.previous.get(label, (None, None)))
+    ctx = sc.build_context(week.t)
+    ctx.rs_universe, ctx.rs_session = week.rs_universe, week.rs_session
+    if eng.replay is not None:
+        audit_vintages(eng.replay.urls[n_urls:], week.t)
+    eng._week_ctx = (week.t, sc, ctx)
+    return sc, ctx
+
+
+def analyse_chunk(eng: Engine, week: Week, kind: str, jobs: list[tuple[str, tuple[float, ...]]]) -> list[Any]:
+    """Pass 1 (``lite``: sector model and primary multiple) or pass 2 (``full``: the analysis the app would store) of
+    the listed names at ``week.t`` — the same code in the parent and in a worker."""
+    from marketlens.application.pipeline import _beta, run_analysis
+
+    sc, ctx = _week_scanner(eng, week)
+    n_urls = len(eng.replay.urls) if eng.replay is not None else 0
+    out: list[Any] = []
+    for lab, pv in jobs:
+        sec = ctx.securities[lab]
+        if kind == "lite":
+            inp = sc.gather_inputs(ctx, sec, None, (), full=False)
+            audit_inputs(inp, week.t, eng.store)
+            r = run_analysis(inp, eng.cfg, fingerprint=False)
+            rv = r.relative_valuation.primary_value if r.relative_valuation else None
+            out.append((r.sector_model_id, rv))
+            continue
+        key = eng.store.labels()[lab].key
+        inp = sc.gather_inputs(ctx, sec, None, pv, full=True)
+        inp = replace(inp, held=key in week.held)  # the simulated account (the app: the user's portfolio)
+        audit_inputs(inp, week.t, eng.store)
+        r = run_analysis(inp, eng.cfg, fingerprint=False)
+        card, dec, plan = r.scorecard, r.decision, r.entry
+        adv = r.technicals.avg_dollar_volume_20d if r.technicals else None
+        signal = None
+        if dec.action in BULLISH_ACTIONS and plan is not None:
+            signal = (dec.action.value, card.total, dec.confidence, plan.stop, plan.target1, plan.target2, plan.max_buy, adv, r.primary_regime, sec.sector)
+        hist = eng.store.bars(lab, eng.store.session - timedelta(days=400), eng.store.session)
+        payload = {
+            "total": card.total, "sell_total": card.sell_side_total, "completeness": card.completeness,
+            "components": {c.name: {"sub": c.subscore, "available": c.available, "coverage": c.coverage} for c in card.components},
+            "action": dec.action.value, "raw_action": dec.raw_action.value, "vetoes": [v.value for v in dec.vetoes], "held": key in week.held,
+            "price": r.price, "stop": plan.stop if plan else None, "target1": plan.target1 if plan else None, "max_buy": plan.max_buy if plan else None,
+            "adv20": adv, "market_cap": sec.market_cap, "beta252": _beta(tuple(hist), tuple(ctx.benchmark_bars), 252),
+            "sector_model": r.sector_model_id, "dq_completeness": r.data_quality.completeness,
+            # the four §13 sub-signals (reference ICs only — never used to change the combination)
+            "signals": {s.key: s.sub for s in r.return_signals.signals} if r.return_signals else {},
+        }
+        out.append({"digest": r.digest, "action": dec.action.value, "thesis_invalidated": bool(r.thesis_invalidated), "signal": signal, "payload": payload})
+    if eng.replay is not None:
+        audit_vintages(eng.replay.urls[n_urls:], week.t)  # anything the analyses themselves asked FRED
+    return out
+
+
+_W: Engine | None = None  # the engine a forked worker inherited
+
+
+def _worker_init() -> None:
+    assert _W is not None
+    _W.store.data.eng.dispose(close=False)  # never share the parent's SQLite connections across processes
+    _W.pool = None
+
+
+def _worker_chunk(arg: tuple[Week, str, list[tuple[str, tuple[float, ...]]]]) -> tuple[list[Any], dict[str, int]]:
+    assert _W is not None
+    week, kind, jobs = arg
+    b0 = sum(getattr(p, "attempts", 0) for p in _blocked_providers(_W))
+    s0 = _W.replay.served if _W.replay is not None else 0
+    part = analyse_chunk(_W, week, kind, jobs)
+    return part, {"blocked": sum(getattr(p, "attempts", 0) for p in _blocked_providers(_W)) - b0,
+                  "replay_served": (_W.replay.served if _W.replay is not None else 0) - s0}
+
+
+def _blocked_providers(eng: Engine) -> list[Any]:
+    return list(getattr(eng, "blocked", {}).values())
 
 
 def config_fingerprint(cfg: ModelConfig) -> str:

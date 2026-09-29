@@ -34,11 +34,22 @@ def load_series(eng: Engine) -> dict[str, list[tuple[date, float]]]:
     return out
 
 
-def element_values(p: dict[str, Any]) -> dict[str, float]:
-    v = {f"component.{n}": p["components"][n]["sub"] for n in COMPONENTS}
+SUB_SIGNALS = ("high52", "rs_rank", "fscore", "ear")  # §13: reference ICs only (outside the Holm family, no verdict)
+
+
+def element_values(p: dict[str, Any]) -> dict[str, float | None]:
+    # a row written before a component existed has no entry for it (None: left out of that week's IC)
+    v: dict[str, float | None] = {f"component.{n}": p["components"][n]["sub"] if n in p["components"] else None for n in COMPONENTS}
     v["score"] = p["total"]
     v["sell_score"] = p["sell_total"]
+    sig = p.get("signals") or {}
+    for k in SUB_SIGNALS:
+        v[f"signal.{k}"] = sig.get(k)
     return v
+
+
+def is_reference(el: str) -> bool:
+    return el.startswith("signal.")
 
 
 def _r(x: Any, nd: int = 8) -> Any:
@@ -74,7 +85,9 @@ def regimes_at(t_day: date, spy_closes: list[tuple[date, float]], series: dict[s
 
 
 def build(results: Engine, data: BacktestData, bt: Engine, signals_state: Any, paper_base: Any, min_names: int = 100,
-          seed: int = 20260928) -> dict[str, Any]:
+          seed: int = 20260928, only_t: set[str] | None = None, prefix: str = "예비: ") -> dict[str, Any]:
+    """``only_t``: measure only these analysis times (§12's training / holdout periods); ``prefix``: "예비: " while the
+    data verdict is 부족 (< 220 weeks), "" from 220 weeks (§12)."""
     from marketlens.backtest.strategy import run_strategy
 
     series = load_series(bt)
@@ -85,6 +98,8 @@ def build(results: Engine, data: BacktestData, bt: Engine, signals_state: Any, p
         from types import SimpleNamespace
 
         rows = [SimpleNamespace(**dict(r._mapping)) for r in c.execute(select(bt_rows).order_by(bt_rows.c.t, bt_rows.c.key))]
+    if only_t is not None:
+        rows = [r for r in rows if r.t in only_t]
     by_t: dict[str, list[Any]] = {}
     universe: dict[str, dict[str, int]] = {}
     ended = {ln.key for ln in data.lineages if data_end is not None and (data_end - ln.days[-1]).days > 7}
@@ -138,11 +153,20 @@ def build(results: Engine, data: BacktestData, bt: Engine, signals_state: Any, p
                 continue
             ic, ic_sn, ic_ra, cov, by_regime, by_sector = [], [], [], [], {}, {}
             for t in weeks:
-                cs = xs[h][t]
-                f = [element_values(x["p"])[el] for x in cs]
+                full = xs[h][t]
+                vals = [element_values(x["p"])[el] for x in full]
+                cs = [x for x, fv in zip(full, vals) if fv is not None]  # a sub-signal is measured where it has a value
+                f = [fv for fv in vals if fv is not None]
+                if len(cs) < min_names:
+                    cov.append(len(cs) / len(full))
+                    continue
                 y = [x["ret"][0.0] for x in cs]
-                avail = [x["p"]["components"][el.split(".", 1)[1]]["available"] for x in cs] if el.startswith("component.") else [True] * len(cs)
-                cov.append(sum(avail) / len(avail))
+                if el.startswith("component."):
+                    comp = el.split(".", 1)[1]
+                    avail = [x["p"]["components"][comp]["available"] for x in cs]
+                    cov.append(sum(avail) / len(full))
+                else:
+                    cov.append(len(cs) / len(full))
                 v = spearman(f, y)
                 if v is None:
                     continue
@@ -169,7 +193,8 @@ def build(results: Engine, data: BacktestData, bt: Engine, signals_state: Any, p
                         if sv is not None:
                             by_sector.setdefault(s, []).append(sv)
             summ = ic_summary(ic, h)
-            pvals[el] = summ["p"]  # type: ignore[assignment]
+            if not is_reference(el):
+                pvals[el] = summ["p"]  # type: ignore[assignment]
             hres["elements"][el] = {
                 **summ, "coverage_mean": (sum(cov) / len(cov)) if cov else None,
                 "sector_neutral": {"mean_ic": (sum(ic_sn) / len(ic_sn)) if ic_sn else None, "weeks": len(ic_sn)},
@@ -179,6 +204,9 @@ def build(results: Engine, data: BacktestData, bt: Engine, signals_state: Any, p
                 "weekly_ic": ic,
             }
         adj = holm(pvals)
+        for el in elements:
+            if is_reference(el) and "verdict" not in hres["elements"][el]:
+                hres["elements"][el]["verdict"] = "참고용(판정 안 함)" if hres["elements"][el].get("mean_ic") is not None else "측정 불가(값 없음)"
         for el, p in adj.items():
             hres["elements"][el]["holm_p"] = p
             e = hres["elements"][el]
@@ -192,7 +220,7 @@ def build(results: Engine, data: BacktestData, bt: Engine, signals_state: Any, p
             d = sn is not None and ra is not None and (sn > 0) == (e["mean_ic"] > 0) and (ra > 0) == (e["mean_ic"] > 0)
             e["criteria"] = {"a": a, "b": b, "c": c_, "d": d}
             n = sum((a, b, c_, d))
-            e["verdict"] = "예비: " + ("유효" if n == 4 else "효과 없음" if n == 0 else "약함")
+            e["verdict"] = prefix + ("유효" if n == 4 else "효과 없음" if n == 0 else "약함")
 
         # ------------------------------------------------------------ quintiles of the verifiable total
         for k in COSTS:
@@ -286,8 +314,10 @@ def build(results: Engine, data: BacktestData, bt: Engine, signals_state: Any, p
                                                                              series.get("DTB3", []), spy_tr)
         strat["signals"] = len(sigs)
     out["strategy"] = strat
-    out["outliers_daily_50pct"] = daily_outliers(data)[:200]
-    out["outliers_daily_50pct_count"] = len(daily_outliers(data))
+    if only_t is None:
+        outl = daily_outliers(data)
+        out["outliers_daily_50pct"] = outl[:200]
+        out["outliers_daily_50pct_count"] = len(outl)
     return _r(out)
 
 

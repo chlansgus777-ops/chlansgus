@@ -301,8 +301,13 @@ def collect_fred(eng: Engine, fred_key: str, start: date, end: date, deadline: f
             set_meta(eng, "fred.failed", failed)
         done.add(t.isoformat())
         set_meta(eng, "fred.done", sorted(done))
-    if len(done) >= len(weekly_times(start, end)):
-        set_meta(eng, "done.fred", {"weeks": len(done)})
+    need = [t.isoformat() for t in weekly_times(start, end)]
+    if all(t in done for t in need):
+        set_meta(eng, "done.fred", {"weeks": len(need), "first": need[0] if need else None, "last": need[-1] if need else None})
+    else:  # a flag from a shorter, earlier range must not report this one as complete (2016+ extension, 2026-09-29)
+        with eng.begin() as c:
+            c.exec_driver_sql("DELETE FROM bt_meta WHERE key = 'done.fred'")
+        log.warning("fred: %d of %d weeks recorded (resume with another run)", sum(1 for t in need if t in done), len(need))
 
 
 def collect_series(eng: Engine, fred_key: str, since: date) -> None:
