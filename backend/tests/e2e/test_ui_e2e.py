@@ -249,10 +249,10 @@ def test_portfolio_input_gives_a_plain_reading(page, server):
     t = _rows(page, server)[0]["ticker"]
     page.goto(f"{server}/#/portfolio")
     page.get_by_role("heading", name="내 포트폴리오").wait_for()
-    page.get_by_placeholder("종목 코드 (예: NVDA)").fill(t)
-    page.get_by_placeholder("수량").fill("10")
-    page.get_by_placeholder("매입 단가(USD)").fill("100")
-    page.get_by_role("button", name="저장", exact=True).click()
+    page.get_by_label("보유 종목 코드").fill(t)  # labelled fields since the 2026-09-29 form polish
+    page.get_by_label("보유 수량").fill("10")
+    page.get_by_label("매입 단가(USD)").fill("100")
+    page.get_by_role("button", name="보유 저장", exact=True).click()
     page.get_by_text("현금 비중은").or_(page.get_by_text("현금이")).first.wait_for()
     bar = page.locator(".alloc[role=img]").first  # the weight bar that replaced the donut (overhaul 2026-09-28)
     assert bar.is_visible() and t in (bar.get_attribute("aria-label") or "")
