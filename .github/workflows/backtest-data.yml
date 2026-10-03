@@ -127,7 +127,9 @@ jobs:
   # In legs of ~45 minutes on fresh runners, one after the other: a leg goes on from the newest earlier leg's checkpoint
   # (backtest/run.py --budget-minutes; the resumed run's results.json is the same as an uninterrupted one — tests/backtest/
   # test_resume.py). The first 7-year run lost its runner after 62 minutes (memory of long-lived forked workers). The
-  # reproduction runs its own legs at the same time; "compare" checks the two results.json.
+  # reproduction runs its own legs at the same time; "compare" checks the two results.json. The final phase (the holdout
+  # reruns of §12/§13, ~150 weeks each, and the leak checks) goes on in legs the same way, so a run needs more legs than
+  # the 500-odd weeks alone: 30 (a leg after the end only reads the last status and stops).
   measure:
     if: inputs.task == 'run'
     runs-on: ubuntu-latest
@@ -136,7 +138,7 @@ jobs:
       max-parallel: 1
       fail-fast: false
       matrix:
-        leg: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        leg: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
     env:
       CP: bt-cp
       OUT: bt-out
@@ -224,7 +226,7 @@ jobs:
       max-parallel: 1
       fail-fast: false
       matrix:
-        leg: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        leg: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
     env:
       CP: bt-repro-cp
       OUT: bt-out-repro
