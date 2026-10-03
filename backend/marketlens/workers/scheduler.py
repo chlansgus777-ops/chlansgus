@@ -14,12 +14,15 @@ log = logging.getLogger("marketlens.scheduler")
 
 
 class BackgroundScheduler:
+    WANTED_GAP_S = 600.0  # an account change asks for a scan at most this often
+
     def __init__(self, service, tick_seconds: float = 60.0) -> None:  # type: ignore[no-untyped-def]
         self.svc = service
         self.tick = tick_seconds
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="marketlens-scheduler", daemon=True)
         self._last_scan: datetime | None = None
+        self._last_wanted: datetime | None = None
         self._last_eval_day = None
 
     def start(self) -> None:
@@ -88,6 +91,12 @@ class BackgroundScheduler:
         else:  # MOCK prices are generated for any time
             due = session in (TradingSession.PREMARKET, TradingSession.REGULAR, TradingSession.AFTER_HOURS) and (
                 self._last_scan is None or (now - self._last_scan).total_seconds() >= interval)
+        # an account change (a trade, a deposit, a sale): the list is analysed again with the new account — the live
+        # round re-judges only the names with a live price (owner 2026-10-03, review finding 2); at most every 10 min
+        wanted = getattr(self.svc, "scan_wanted", None)
+        if wanted and not due and (self._last_wanted is None or (now - self._last_wanted).total_seconds() >= self.WANTED_GAP_S):
+            due = (session == TradingSession.CLOSED or session == TradingSession.REGULAR
+                   or (session in (TradingSession.PREMARKET, TradingSession.AFTER_HOURS) and self._toss_live())) if live else True
         if due and live and not self._data_ready():
             due = False  # before the data is prepared a scan judges nothing and spends the free request limits
         self._publish(now, session, live, interval)
@@ -101,6 +110,9 @@ class BackgroundScheduler:
                 log.info("scheduled scan skipped: %s", e)
                 return
             self._last_scan = now
+            if wanted:
+                self.svc.scan_wanted = None  # this scan used the account as it is now
+                self._last_wanted = now
             self._publish(now, session, live, interval)  # the next due time at once, not a minute later
         day = to_ny(now).date()
         if session == TradingSession.AFTER_HOURS and self._last_eval_day != day:

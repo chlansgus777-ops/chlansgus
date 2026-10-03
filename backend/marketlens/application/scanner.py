@@ -19,7 +19,7 @@ import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Callable, Mapping
+from typing import Callable, Mapping, Sequence
 
 from marketlens.application.data_access import DataAccess
 from marketlens.application.graph_seed import GraphSeed
@@ -38,7 +38,7 @@ from marketlens.domain.issues import Issue, aggregate_issue_score, compute_issue
 from marketlens.domain.macro import MacroSnapshot
 from marketlens.domain.market import Bar, Security
 from marketlens.domain.market_calendar import last_completed_session, to_ny
-from marketlens.domain.portfolio import common_valuation, CandidateProfile, Portfolio, review_candidate
+from marketlens.domain.portfolio import common_valuation, CandidateProfile, Portfolio, PortfolioReview, review_candidate
 from marketlens.domain.sector_models import select_sector_model
 from marketlens.domain.signals import percentile, rs_raw
 from marketlens.domain.valuation import compute_multiples
@@ -185,6 +185,29 @@ class Scanner:
         ctx.company_issues = company if ctx.company_issues is None else ctx.company_issues.merged(company)
 
     # ------------------------------------------------------------------ inputs
+    def holdings_view(self, portfolio: Portfolio, as_of: datetime) -> tuple[date | None, dict[str, float], dict[str, dict[date, float]]]:
+        """The account's side of a portfolio review at ``as_of``: one common valuation session with each holding's price
+        (the portfolio page's policy — a missing price is never the cost) and each holding's daily returns."""
+        d = to_ny(as_of).date()
+        hold_rets: dict[str, dict[date, float]] = {}
+        closes: dict[str, dict[date, float]] = {}
+        for h in portfolio.holdings:
+            hb = self.data.bars(h.ticker, d - timedelta(days=200), d).value or []
+            hb = [b for b in hb if b.day <= last_completed_session(as_of)]
+            closes[h.ticker] = {b.day: b.close for b in hb}
+            hold_rets[h.ticker] = _returns_by_date(hb)
+        val_day, prices, _missing = common_valuation(closes, [h.ticker for h in portfolio.holdings])
+        return val_day, prices, hold_rets
+
+    def candidate_review(self, portfolio: Portfolio, holdings: tuple[date | None, dict[str, float], dict[str, dict[date, float]]],
+                         sec: Security, bars: Sequence[Bar]) -> PortfolioReview:
+        """What buying ``sec`` would do to this account (cash, sector, theme and correlation limits)."""
+        val_day, prices, hold_rets = holdings
+        exp = self.seed.macro_exposure(sec)
+        themes = tuple(k for k, v in (("AI", exp.ai),) if v >= 0.4)
+        return review_candidate(portfolio, prices, CandidateProfile(sec.ticker, sec.sector, themes, exp.rates, _returns_by_date(list(bars))), hold_rets,
+                                self.cfg.portfolio, valuation_day=val_day)
+
     def gather_inputs(self, ctx: ScanContext, sec: Security, portfolio: Portfolio | None, peer_multiples: tuple[float, ...] = (), full: bool = True) -> AnalysisInputs:
         """``full=False`` (stage 3) skips per-ticker live calls: quote, earnings, events, options, ownership."""
         t = sec.ticker
@@ -247,18 +270,7 @@ class Scanner:
         review = None
         if portfolio is not None:
             held = any(h.ticker == t for h in portfolio.holdings)
-            hold_rets: dict[str, dict[date, float]] = {}
-            closes: dict[str, dict[date, float]] = {}
-            for h in portfolio.holdings:
-                hb = self.data.bars(h.ticker, d - timedelta(days=200), d).value or []
-                hb = [b for b in hb if b.day <= last_completed_session(ctx.as_of)]
-                closes[h.ticker] = {b.day: b.close for b in hb}
-                hold_rets[h.ticker] = _returns_by_date(hb)
-            # same policy as the portfolio page: one common valuation session, missing prices never = cost
-            val_day, prices, _missing = common_valuation(closes, [h.ticker for h in portfolio.holdings])
-            exp = self.seed.macro_exposure(sec)
-            themes = tuple(k for k, v in (("AI", exp.ai),) if v >= 0.4)
-            review = review_candidate(portfolio, prices, CandidateProfile(t, sec.sector, themes, exp.rates, _returns_by_date(bars)), hold_rets, self.cfg.portfolio, valuation_day=val_day)
+            review = self.candidate_review(portfolio, self.holdings_view(portfolio, ctx.as_of), sec, bars)
 
         prev_digest, prev_action = self.previous_lookup(t, ctx.as_of)
         # the relative-strength rank against the universe of the same session (§13); unknown without one

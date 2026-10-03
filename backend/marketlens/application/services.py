@@ -8,7 +8,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from sqlalchemy import select
@@ -247,6 +247,13 @@ class MarketLensService:
         self._rejudge_constraints: dict[int, dict[str, Any]] = {}
         with self.sf() as s:
             self._account_changed_at = repo.get_setting(s, "account_changed_at", "") or ""
+        # the live verdicts follow the account as it is now (owner 2026-10-03, review finding 2): each change bumps the
+        # version, the next live round re-judges every pooled name with the new account's portfolio review, and the
+        # names it cannot reach (no live price) are re-analysed by the scheduler (``scan_wanted``)
+        self._account_version = 0
+        self._account_inputs: dict[tuple[int, int], tuple[bool, Any]] = {}
+        self._account_view: tuple[int, Any, Any, Any] | None = None  # (version, portfolio, holdings view, scanner)
+        self.scan_wanted: str | None = None
         # the price-dependent verdict on every quote (buy zone, stop, target, live reward/risk) + alerts
         self.judge = LiveJudge(now=self.now)
         self.quotes.annotate = self.judge.annotate
@@ -712,15 +719,47 @@ class MarketLensService:
         self._pool_cache = None  # holdings / watchlist changed: the live pool follows at the next round
 
     def portfolio_changed(self) -> None:
-        """An account change requires a new concentration review; a price tick cannot clear it."""
+        """An account change requires a new concentration review; a price tick cannot clear it. The live round gives it
+        within a second for the names with a live price (``_with_account``); the rest wait for the re-analysis the
+        scheduler runs on ``scan_wanted``."""
         self._account_changed_at = repo.now().isoformat()
         with self.sf() as s:
             repo.set_setting(s, "account_changed_at", self._account_changed_at)
             s.commit()
+        self._account_version += 1
+        self._account_inputs.clear()
+        self._account_view = None
+        self.scan_wanted = "계좌 변경"
         self.invalidate_live_plans()
         self._briefing = None
         self.judge.set_plans([])  # do not keep issuing signals based on the previous account
         self.quotes.touch_all()
+
+    def _with_account(self, rid: int, inp: Any) -> Any:
+        """``inp`` (a stored analysis's inputs) with the account as it is now: whether the name is held, and the
+        portfolio review (cash, sector, theme and correlation limits) — so a trade, a deposit or a sale moves the live
+        verdict at once instead of locking every recommendation until the next scan. Computed once per name and
+        account version (the holdings' side once per version)."""
+        from dataclasses import replace as _replace
+
+        key = (rid, self._account_version)
+        hit = self._account_inputs.get(key)
+        if hit is None:
+            view = self._account_view
+            if view is None or view[0] != self._account_version:
+                with self.sf() as s:
+                    pf = self.portfolio(s)
+                    scanner = self.scanner(self.model_config(), s)
+                view = (self._account_version, pf, scanner.holdings_view(pf, self.now()), scanner)
+                self._account_view = view
+            _v, pf, holdings, scanner = view
+            held = any(h.ticker == inp.ticker for h in pf.holdings)
+            hit = (held, scanner.candidate_review(pf, holdings, inp.security, inp.bars))
+            if len(self._account_inputs) > 4 * self.LIVE_POOL:
+                self._account_inputs.clear()
+            self._account_inputs[key] = hit
+        held, review = hit
+        return _replace(inp, held=held, portfolio_review=review)
 
     def _account_needs_review(self, issued_at: datetime | None) -> bool:
         if not self._account_changed_at:
@@ -814,9 +853,12 @@ class MarketLensService:
                 for row in s.scalars(select(RecommendationRow).where(RecommendationRow.id.in_(need))):
                     self._rejudge_inputs[row.id] = decode(AnalysisInputs, row.inputs)
                     from marketlens.domain.sizing import recommendation_size_cap
+                    committee = row.committee_status not in ("NOT_RUN", "SKIPPED", "UNAVAILABLE", None)
+                    # an AI review's hold and size stay until the AI looks again; without one, every limit is the
+                    # analysis's own and the live round recomputes it — the portfolio limits with today's account
                     self._rejudge_constraints[row.id] = {
-                        "as_of": row.as_of, "issued_at": row.created_at, "action": row.final_action, "size": recommendation_size_cap(row),
-                        "committee": row.committee_status not in ("NOT_RUN", "SKIPPED", "UNAVAILABLE", None),
+                        "as_of": row.as_of, "issued_at": row.created_at, "action": row.final_action,
+                        "size": recommendation_size_cap(row) if committee else None, "committee": committee,
                     }
         for rid, t, _sc in head + rest:
             q = self._fresh_quote(t)
@@ -832,15 +874,15 @@ class MarketLensService:
         changed = False
         for rid, inp, q in todo:
             prev = self._rejudged.get(rid)
-            if prev is not None and prev["price"]:
+            if prev is not None and prev["price"] and prev.get("account") == self._account_version:
                 moved = abs(q.price / prev["price"] - 1)
                 age = (now - datetime.fromisoformat(prev["at"])).total_seconds()
                 if moved <= self.LIVE_MIN_MOVE and age < self.LIVE_MAX_AGE:
-                    continue  # the same price since its judgement: the same decision (the PC stays quiet)
+                    continue  # the same price and account since its judgement: the same decision (the PC stays quiet)
             if done and time.perf_counter() - started > self.LIVE_ROUND_BUDGET:
                 break  # the rest next second, first in line
             try:
-                res = run_analysis(_replace(inp, quote=q, as_of=now), cfg, fingerprint=False)
+                res = run_analysis(_replace(self._with_account(rid, inp), quote=q, as_of=now), cfg, fingerprint=False)
             except Exception as e:  # noqa: BLE001 - one name never stops the round; its stored row stays shown
                 log.info("live re-judge %s: %s", inp.ticker, type(e).__name__)
                 continue
@@ -850,20 +892,20 @@ class MarketLensService:
             size_limit = tightest(constraint["size"], res.decision.size_limit)
             action = res.decision.action.value
             review_reason = None
-            if action in {a.value for a in BULLISH_ACTIONS}:
-                if size_limit == "WATCH" or (constraint["committee"] and constraint["action"] not in {a.value for a in BULLISH_ACTIONS}):
+            if action in {a.value for a in BULLISH_ACTIONS} and constraint["committee"]:
+                if size_limit == "WATCH" or constraint["action"] not in {a.value for a in BULLISH_ACTIONS}:
                     action = constraint["action"] if constraint["action"] not in {a.value for a in BULLISH_ACTIONS} else "WATCH"
-                    review_reason = "AI·포트폴리오 보류 유지 — 가격 변경만으로 해제하지 않음"
+                    review_reason = "AI 보류 유지 — 가격 변경만으로 해제하지 않음"
                 elif size_limit in ("HALF", "SMALL") or constraint["action"] == "BUY SMALL":
                     action = "BUY SMALL"
-                    review_reason = "기존 비중 제한 유지 — 재검토 전까지 확대하지 않음"
+                    review_reason = "AI 비중 제한 유지 — AI 재검토 전까지 확대하지 않음"
             if prev is None or prev["action"] != action or prev["max_buy"] != (p.max_buy if p else None) or prev["stop"] != (p.stop if p else None):
                 changed = True
             self._rejudged[rid] = {
                 "at": now.isoformat(), "quote_ts": q.timestamp.isoformat(), "price": res.price, "source": q.source,
                 "session": q.session.value, "price_quality": res.price_quality.value, "action": action, "score": res.scorecard.total,
                 "ticker": inp.ticker, "analysed_at": constraint["as_of"].isoformat(), "size_limit": size_limit,
-                "review_reason": review_reason,
+                "review_reason": review_reason, "account": self._account_version,
                 "data_quality": res.data_quality.overall.value, "vetoes": [v.value for v in res.decision.vetoes],
                 "max_buy": p.max_buy if p else None, "ideal_entry": p.ideal_entry if p else None, "stop": p.stop if p else None,
                 "target1": p.target1 if p else None, "target2": p.target2 if p else None, "rr": p.rr_at_current if p else None,
@@ -945,8 +987,8 @@ class MarketLensService:
         current = self._fresh_quote(raw["ticker"]) is not None
         state = status.status if current or status.status in ("EXPIRED", "AGING") else "NEEDS_REVALIDATION"
         reason = status.reason_ko if current else "새 체결가를 확인하지 못함 — 마지막 가격은 참고용"
-        if self._account_needs_review(self._rejudge_constraints.get(rec_id, {}).get("issued_at")):
-            state, reason = "NEEDS_REVALIDATION", "계좌가 변경되어 비중·집중도 재검토가 필요합니다. 종목을 다시 분석하세요."
+        if raw.get("account") != self._account_version:  # judged before the account changed: the next round redoes it
+            state, reason = "NEEDS_REVALIDATION", "계좌가 바뀌어 지금 계좌 기준으로 비중·집중도를 다시 판정하는 중입니다."
         return raw | {"current_status": state, "current_status_reason": reason,
                       "actionable_now": bool(bullish and current and state == "CURRENT"),
                       "checked_at": self.now().isoformat()}
