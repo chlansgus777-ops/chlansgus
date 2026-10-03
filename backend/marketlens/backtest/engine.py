@@ -294,10 +294,26 @@ class Engine:
         global _W
         _W = self
         gc.collect()
+        self._wanted = getattr(self, "_wanted", n)
+        n = self.affordable_workers(n, memory_mb())
+        if n <= 1:  # the analyses stay in this process (same rows)
+            self.workers = 1
+            return
         gc.freeze()  # the loaded bars stay shared: the collector of a worker never touches them
         self.workers = n
         self._n_workers = n
         self.pool = mp.get_context("fork").Pool(n, initializer=_worker_init)
+
+    WORKER_MARGIN_MB = 2500  # left for this process to grow in and for the final phase
+
+    @staticmethod
+    def affordable_workers(n: int, mem: dict[str, int]) -> int:
+        """At most as many workers as the memory left holds, each counted at this process's size: a forked worker
+        copies most of the shared data it reads. A leg that resumed late in the 7-year run (this process at 8 GB)
+        lost its runner when it forked three, then two (2026-10-03)."""
+        if not mem or not mem.get("rss_mb"):
+            return n
+        return max(1, min(n, (mem["avail_mb"] - Engine.WORKER_MARGIN_MB) // mem["rss_mb"]))
 
     def stop_workers(self) -> None:
         if self.pool is not None:
@@ -333,9 +349,8 @@ class Engine:
         return out
 
     def _recycle(self) -> None:
-        n = self._n_workers
         self.stop_workers()
-        self.start_workers(n)
+        self.start_workers(self._wanted)  # as many as wanted at first, if the memory left still holds them
 
     def checkpoint(self) -> dict[str, Any]:
         """What a later process needs to go on exactly where this one stopped (the rows are in the results file)."""

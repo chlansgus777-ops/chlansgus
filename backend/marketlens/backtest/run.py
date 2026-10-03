@@ -67,6 +67,24 @@ def _unfinished(out: str, status: dict[str, Any]) -> dict[str, Any]:
     return status
 
 
+def code_fingerprint() -> str:
+    """The analysis code a checkpoint was made with (every .py file of the package, line endings normalized). A
+    checkpoint of other code is refused: the 2026-10-03 rerun resumed weeks measured before the 0.1.1 merge with the
+    code after it, at a different week in the measurement and the reproduction, and the two results differed."""
+    import marketlens
+
+    root = os.path.dirname(marketlens.__file__)
+    h = hashlib.sha256()
+    for dirpath, dirnames, files in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+        for name in sorted(f for f in files if f.endswith(".py")):
+            path = os.path.join(dirpath, name)
+            h.update(os.path.relpath(path, root).replace(os.sep, "/").encode())
+            with open(path, "rb") as fh:
+                h.update(fh.read().replace(b"\r\n", b"\n"))
+    return h.hexdigest()
+
+
 def git_commit() -> str:
     if os.environ.get("GITHUB_SHA"):
         return os.environ["GITHUB_SHA"]
@@ -121,13 +139,13 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         reg, replay, blocked = build_offline_registry(eng, store)
         # a checkpoint of an earlier process (another runner) with the same data, config and window: go on from it
         cp_path = os.path.join(a.out, CHECKPOINT)
-        ident = {"data_sha256": data_hash, "config": config_fingerprint(cfg), "times": [t.isoformat() for t in times], "version": 1}
+        ident = {"data_sha256": data_hash, "config": config_fingerprint(cfg), "times": [t.isoformat() for t in times], "code": code_fingerprint(), "version": 2}
         cp = None
         if os.path.exists(cp_path):
             with open(cp_path, "rb") as f:
                 cp = pickle.load(f)  # noqa: S301 - our own file, written by this function in --out
             if cp["ident"] != ident:
-                raise SystemExit(f"{cp_path}: a checkpoint of another run (data, config or window differ) — remove it or use another --out")
+                raise SystemExit(f"{cp_path}: a checkpoint of another run (data, config, window or code differ) — remove it or use another --out")
         engine = Engine(store, reg, cfg, os.path.join(a.out, "rows.db"), replay=replay, resume=cp is not None)
         engine.blocked = blocked
         if a.recycle_weeks:

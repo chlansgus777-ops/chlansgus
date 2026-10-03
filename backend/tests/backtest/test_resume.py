@@ -39,6 +39,30 @@ def test_a_checkpoint_of_another_run_is_refused(world, tmp_path):  # noqa: F811
         main(args + ["--start", "2026-03-09", "--end", "2026-06-26"])  # another window
 
 
+def test_a_checkpoint_of_other_code_is_refused(world, tmp_path, monkeypatch):  # noqa: F811
+    """The 2026-10-03 rerun went on from weeks measured with the code before the 0.1.1 merge: the measurement and the
+    reproduction switched code at different weeks and their results differed. Other code: no resume."""
+    from marketlens.backtest import run as R
+
+    path, _eng, _data = world
+    args = ["--db", path, "--min-names", "2", "--leak-checks", "0", "--workers", "1", "--out", str(tmp_path / "o"),
+            "--start", "2026-03-02", "--end", "2026-06-26"]
+    R.main(args + ["--max-weeks", "2"])
+    monkeypatch.setattr(R, "code_fingerprint", lambda: "other code")
+    with pytest.raises(SystemExit, match="code differ"):
+        R.main(args)
+
+
+def test_workers_are_limited_to_what_the_memory_left_holds():
+    from marketlens.backtest.engine import Engine
+
+    m = Engine.WORKER_MARGIN_MB
+    assert Engine.affordable_workers(4, {"rss_mb": 8100, "avail_mb": 7000}) == 1  # the leg lost on 2026-10-03
+    assert Engine.affordable_workers(4, {"rss_mb": 2000, "avail_mb": m + 6500}) == 3
+    assert Engine.affordable_workers(2, {"rss_mb": 500, "avail_mb": 15000}) == 2
+    assert Engine.affordable_workers(4, {}) == 4  # no /proc (not Linux): as asked
+
+
 def test_fresh_workers_every_week_give_the_same_results(world, tmp_path):  # noqa: F811
     """Workers started again every week (--recycle-weeks, and at once on low memory) change nothing in the results."""
     from marketlens.backtest.run import main
