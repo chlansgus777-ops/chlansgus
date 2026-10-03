@@ -48,6 +48,15 @@ def element_values(p: dict[str, Any]) -> dict[str, float | None]:
     return v
 
 
+def compact(payload: str) -> dict[str, Any]:
+    """What the measurement reads of a stored row, parsed once and shared by both horizons. Every row's full payload,
+    parsed once per horizon, did not fit a runner's 16 GB over the 7-year run's ~500 weeks (2026-10-03)."""
+    p = json.loads(payload)
+    return {"total": p["total"], "sell_total": p["sell_total"],
+            "components": {n: {"sub": c["sub"], "available": c["available"]} for n, c in p["components"].items()},
+            "signals": p.get("signals") or {}, "beta252": p.get("beta252"), "market_cap": p.get("market_cap"), "adv20": p.get("adv20")}
+
+
 def is_reference(el: str) -> bool:
     return el.startswith("signal.")
 
@@ -97,9 +106,9 @@ def build(results: Engine, data: BacktestData, bt: Engine, signals_state: Any, p
         # plain namespaces: a SQLAlchemy Row's ``.t`` is its typed-tuple accessor, not the column
         from types import SimpleNamespace
 
-        rows = [SimpleNamespace(**dict(r._mapping)) for r in c.execute(select(bt_rows).order_by(bt_rows.c.t, bt_rows.c.key))]
-    if only_t is not None:
-        rows = [r for r in rows if r.t in only_t]
+        cols = (bt_rows.c.t, bt_rows.c.key, bt_rows.c.sector, bt_rows.c.eligible, bt_rows.c.payload)
+        rows = [SimpleNamespace(t=t, key=key, sector=sector, eligible=eligible, p=compact(payload) if eligible and payload else None)
+                for t, key, sector, eligible, payload in c.execute(select(*cols).order_by(bt_rows.c.t, bt_rows.c.key)) if only_t is None or t in only_t]
     by_t: dict[str, list[Any]] = {}
     universe: dict[str, dict[str, int]] = {}
     ended = {ln.key for ln in data.lineages if data_end is not None and (data_end - ln.days[-1]).days > 7}
@@ -131,13 +140,13 @@ def build(results: Engine, data: BacktestData, bt: Engine, signals_state: Any, p
                 o = outcome(ln, t_day, h, data_end) if ln else None
                 if o is None:
                     continue
-                p = json.loads(r.payload)
+                p = r.p
                 fx = fx_return(series.get("DEXKOUS", []), o.entry, o.end)
                 cs.append({"key": r.key, "sector": r.sector or "Unknown", "p": p, "ret": o.ret, "delisted": o.delisted, "fx": fx,
                            "beta": p.get("beta252"), "mcap": p.get("market_cap"), "adv": p.get("adv20")})
             xs[h][t] = cs
 
-    elements = sorted(element_values(json.loads(next(r.payload for r in rows if r.eligible))).keys()) if any(r.eligible for r in rows) else []
+    elements = sorted(element_values(next(r.p for r in rows if r.eligible)).keys()) if any(r.eligible for r in rows) else []
     unverifiable = {f"component.{n}" for n in UNVERIFIABLE_COMPONENTS}
     out: dict[str, Any] = {"horizons": {}, "universe_per_week": universe, "regimes_per_week": regimes}
 

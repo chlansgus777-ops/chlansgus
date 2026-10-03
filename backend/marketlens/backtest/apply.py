@@ -130,13 +130,13 @@ def rescore(p: Mapping[str, Any], weights: Mapping[str, float]) -> float:
 
 
 def holdout_cross_sections(results: Any, data: Any, times: set[str], min_names: int) -> list[list[dict[str, Any]]]:
+    from marketlens.backtest.report import compact
     data_end = data.last_session
     with results.connect() as c:
-        rows = [dict(r._mapping) for r in c.execute(select(bt_rows).where(bt_rows.c.eligible == 1).order_by(bt_rows.c.t, bt_rows.c.key))]
-    by_t: dict[str, list[dict[str, Any]]] = {}
-    for r in rows:
-        if r["t"] in times:
-            by_t.setdefault(r["t"], []).append(r)
+        by_t: dict[str, list[dict[str, Any]]] = {}
+        for t, key, payload in c.execute(select(bt_rows.c.t, bt_rows.c.key, bt_rows.c.payload).where(bt_rows.c.eligible == 1).order_by(bt_rows.c.t, bt_rows.c.key)):
+            if t in times:  # only the holdout's rows, each parsed once (report.compact)
+                by_t.setdefault(t, []).append({"key": key, "p": compact(payload)})
     out = []
     for t, rs in sorted(by_t.items()):
         t_day = datetime.fromisoformat(t).date()
@@ -146,7 +146,7 @@ def holdout_cross_sections(results: Any, data: Any, times: set[str], min_names: 
             o = outcome(ln, t_day, H, data_end) if ln else None
             if o is None:
                 continue
-            p = json.loads(r["payload"])
+            p = r["p"]
             cs.append({"p": p, "ret": o.ret, "adv": p.get("adv20")})
         if len(cs) >= min_names:
             out.append(cs)
