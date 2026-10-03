@@ -219,7 +219,7 @@ jobs:
           export BACKTEST_NETNS="${PREFIX:-socket-guard-only}"
           echo "cpus: $(nproc) · memory: $(free -m | awk '/Mem:/ {print $2}') MB"
           cd backend
-          $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out "../$OUT" --budget-minutes 45  ${{ inputs.run_args }}
+          scripts/bt_leg.sh $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out "../$OUT" --budget-minutes 45  ${{ inputs.run_args }}
           cd ..
           if grep -q '"done": true' "$OUT/status.json"; then
             echo "finished=true" >> "$GITHUB_OUTPUT"
@@ -316,7 +316,7 @@ jobs:
           export BACKTEST_NETNS="${PREFIX:-socket-guard-only}"
           echo "cpus: $(nproc) · memory: $(free -m | awk '/Mem:/ {print $2}') MB"
           cd backend
-          $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out "../$OUT" --budget-minutes 45 --leak-checks 0 ${{ inputs.run_args }}
+          scripts/bt_leg.sh $PREFIX python -m marketlens.backtest.run --db ../backtest.db --out "../$OUT" --budget-minutes 45 --leak-checks 0 ${{ inputs.run_args }}
           cd ..
           if grep -q '"done": true' "$OUT/status.json"; then
             echo "finished=true" >> "$GITHUB_OUTPUT"
