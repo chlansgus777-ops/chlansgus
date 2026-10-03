@@ -16,11 +16,13 @@ from marketlens.workers.runtime import AlreadyRunning, InstanceLock, process_ali
 
 
 def initial_settings(env_path: Path) -> None:
-    """Only seed a new installation. Never replace the owner's settings or database."""
+    """Only seed a new installation. Never replace the owner's settings or database. Automatic analysis is on, as in
+    every other install: there is no scan button, so a new install with it off would never show a candidate (owner
+    2026-10-03, review finding 3)."""
     env_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with env_path.open('x', encoding='utf-8') as f:
-            f.write('MARKETLENS_MODE=LIVE\nLLM_PROVIDER=none\nMARKETLENS_SCHEDULER=0\n')
+            f.write('MARKETLENS_MODE=LIVE\nLLM_PROVIDER=none\nMARKETLENS_SCHEDULER=1\n')
     except FileExistsError:
         return  # Existing installation settings belong to the user.
 

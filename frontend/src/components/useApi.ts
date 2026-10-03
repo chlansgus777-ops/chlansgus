@@ -7,6 +7,8 @@ export type LoadState = "idle" | "loading" | "ready" | "error";
 export interface ApiState<T> {
   data: T | null;
   error: string | null;
+  /** the HTTP status of that error (404: nothing stored yet), null for a network error or none */
+  errorStatus: number | null;
   /** a request for this screen's data is in flight (the data shown, if any, is the previous answer) */
   loading: boolean;
   state: LoadState;
@@ -36,6 +38,7 @@ interface Entry {
   data?: unknown;
   at?: number; // receive time of ``data`` (kept as-is when outdated — never shown as newer than it is)
   error?: string;
+  errorStatus?: number;
   inflight?: { p: Promise<void>; ctrl: AbortController; gen: number };
   gen: number; // bumped by invalidation
   subs: Set<() => void>;
@@ -69,10 +72,13 @@ function fetchInto(key: string, path: string): void {
   const gen = e.gen;
   const p = api
     .get<unknown>(path, { signal: ctrl.signal })
-    .then((d) => { if (!ctrl.signal.aborted && e.gen === gen && e.inflight?.ctrl === ctrl) { e.data = d; e.at = Date.now(); e.error = undefined; } })
+    .then((d) => { if (!ctrl.signal.aborted && e.gen === gen && e.inflight?.ctrl === ctrl) { e.data = d; e.at = Date.now(); e.error = undefined; e.errorStatus = undefined; } })
     .catch((err: unknown) => {
       if (ctrl.signal.aborted || (err instanceof ApiError && err.status === -1)) return;
-      if (e.gen === gen) e.error = err instanceof Error ? err.message : String(err);
+      if (e.gen === gen) {
+        e.error = err instanceof Error ? err.message : String(err);
+        e.errorStatus = err instanceof ApiError && err.status > 0 ? err.status : undefined;
+      }
     })
     .finally(() => { if (e.inflight?.ctrl === ctrl) e.inflight = undefined; notify(e); });
   e.inflight = { p, ctrl, gen };
@@ -163,7 +169,7 @@ export function useApi<T>(path: string | null, deps: unknown[] = []): ApiState<T
   const err = e?.error ?? null;
   const loading = path !== null && (!!e?.inflight || e === undefined);
   const state: LoadState = path === null ? "idle" : data === null && !err ? "loading" : err && data === null ? "error" : "ready";
-  return { data, error: err, loading, state, reload, fetchedAt: data !== null ? (e?.at ?? null) : null };
+  return { data, error: err, errorStatus: err ? (e?.errorStatus ?? null) : null, loading, state, reload, fetchedAt: data !== null ? (e?.at ?? null) : null };
 }
 
 /** Re-run ``tick`` every ``ms`` while ``active`` and the window is visible — for cheap status reads only

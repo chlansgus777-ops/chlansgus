@@ -39,6 +39,8 @@ def test_new_install_live_without_paid_ai_and_existing_settings_preserved(tmp_pa
     initial_settings(path)
     assert 'MARKETLENS_MODE=LIVE' in path.read_text()
     assert 'LLM_PROVIDER=none' in path.read_text()
+    # automatic analysis on: with no scan button, a new install that had it off never showed a candidate
+    assert 'MARKETLENS_SCHEDULER=1' in path.read_text() and 'MARKETLENS_SCHEDULER=0' not in path.read_text()
     path.write_text('MARKETLENS_MODE=MOCK\nLLM_PROVIDER=none\n# owner settings\n')
     before = path.read_bytes()
     initial_settings(path)

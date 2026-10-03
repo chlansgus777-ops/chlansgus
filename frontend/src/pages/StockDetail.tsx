@@ -1,10 +1,11 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { advise, planNow, priceZone, quantityShown } from "../advice";
 import { api } from "../api";
 import { CommitteeSummary, CommitteeView } from "../components/CommitteeView";
 import { IRefresh, IStar } from "../components/icons";
 import { LivePrice } from "../components/LivePrice";
+import { OnPhone } from "../components/Phone";
 import { SaveTickerSupplement, SaveTickerNews } from "../components/SaveTickerSupplement";
 import { ReturnSignalsCard } from "../components/ReturnSignals";
 import { LivePlanLine, LiveZone, UnlessLive, zoneView } from "../components/LiveZone";
@@ -174,12 +175,27 @@ function StockDetail({ ticker }: { ticker: string }) {
   }, []);
   useEffect(() => { if (mineOk) rememberStock(ticker); }, [ticker, mineOk]);  // for 최근 본 종목 and the quick search
   usePageTime(mine ? { label: ticker, priceTs: mine.analysis.price_timestamp, priceSession: mine.analysis.session, quality: mine.analysis.price_quality, analysedAt: mine.recommendation.as_of } : null);
+  // nothing stored for this stock yet: the page starts its analysis by itself, once (owner 2026-10-03 — opening a
+  // stock never needs a button). Reading still never writes: this is the page's own command (POST), and a phone,
+  // which may only look, waits for the PC instead.
+  const onPhone = useContext(OnPhone);
+  const noAnalysis = !d.data && d.errorStatus === 404;
+  const startRef = useRef(analysisJob.start);
+  startRef.current = analysisJob.start;
+  const autoFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!noAnalysis || onPhone || autoFor.current === ticker) return;
+    autoFor.current = ticker;
+    void startRef.current();
+  }, [noAnalysis, onPhone, ticker]);
   if (d.state === "loading") return <Loading what={`${ticker} 분석`} steps={["가격·재무 데이터 확인", "업종 모델 적용", "이슈·거시 반영", "가격 계획 계산"]} />;
-  if (!d.data) return <section className="card"><h2>{ticker} 분석</h2>
-    <p>저장된 분석이 없습니다. 가격·재무 자료를 확인해 분석을 시작하세요.</p>
-    <button className="primary" disabled={analysisJob.busy} onClick={analysisJob.start}>{analysisJob.busy ? "분석 진행 중…" : analysisJob.verifyOnly ? "작업 상태 확인" : "분석 시작"}</button>
-    <p role="status">{analysisJob.phase}</p>
-    {(analysisJob.error || d.error) && <Err error={analysisJob.error || d.error} retry={d.reload} />}
+  if (!d.data) return <section className="card" data-testid="no-analysis"><h2>{ticker} 분석</h2>
+    {onPhone && noAnalysis && !analysisJob.busy ? <p>아직 이 종목의 분석이 없습니다. PC에서 분석하면 여기에 나옵니다.</p> : <>
+      <p>{analysisJob.busy ? "저장된 분석이 없어 지금 분석하고 있습니다 — 가격·재무 자료를 확인하는 중입니다." : "저장된 분석이 없습니다."}</p>
+      {!onPhone && <button className="primary" disabled={analysisJob.busy} onClick={analysisJob.start}>{analysisJob.busy ? "분석 진행 중…" : analysisJob.verifyOnly ? "작업 상태 확인" : "분석 시작"}</button>}
+      <p role="status">{analysisJob.phase}</p>
+    </>}
+    {(analysisJob.error || (d.error && !noAnalysis)) && <Err error={analysisJob.error || d.error} retry={d.reload} />}
   </section>;
   if (d.data.analysis.ticker !== ticker) return <Loading what={`${ticker} 분석`} />;  // never render another stock's data
   const { recommendation: stored, analysis: a } = d.data;

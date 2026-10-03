@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { createContext, useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { useApi, usePoll } from "./useApi";
 import { Card, Notice } from "./ui";
@@ -69,6 +69,9 @@ export function PhoneSettings() {
   );
 }
 
+/** True on a paired phone: the screens there can look but never start anything (the PC refuses it anyway). */
+export const OnPhone = createContext(false);
+
 /** On a phone: the pairing screen until it is paired, then the app with a read-only note. On the PC: the app. */
 export function PhoneGate({ children }: { children: ReactNode }) {
   const [hello, setHello] = useState<Hello | null>(null);
@@ -86,10 +89,10 @@ export function PhoneGate({ children }: { children: ReactNode }) {
   }, [hello?.phone]);
   if (hello?.phone && !hello.paired) return <PairScreen onPaired={() => setTick((n) => n + 1)} />;
   return (
-    <>
+    <OnPhone.Provider value={!!hello?.phone}>
       {hello?.phone && <div className="phone-ribbon" data-testid="phone-ribbon">폰 · 보기 전용 — 종목·보유·설정을 바꾸는 것은 PC에서 하세요</div>}
       {children}
-    </>
+    </OnPhone.Provider>
   );
 }
 
