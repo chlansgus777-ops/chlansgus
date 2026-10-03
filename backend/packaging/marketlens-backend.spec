@@ -23,7 +23,7 @@ a = Analysis(
     pathex=[str(ROOT / "backend")],
     datas=datas,
     hiddenimports=collect_submodules("marketlens") + collect_submodules("uvicorn") + collect_submodules("websockets") + collect_submodules("keyring.backends") + ["tzdata", "alembic", "sqlalchemy.dialects.sqlite"],
-    excludes=["tkinter", "matplotlib", "IPython", "cryptography", "playwright", "pytest", "PyInstaller"],
+    excludes=["tkinter", "matplotlib", "IPython", "playwright", "pytest", "PyInstaller"],
 )
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, a.binaries, a.datas, name="marketlens-backend", console=True, upx=False)

@@ -56,6 +56,9 @@ const dash = (rows: OppRow[], over: Record<string, unknown> = {}) => ({
 });
 
 describe("first screen: candidates", () => {
+  it("never assumes an omitted validity field means a current buy", () => {
+    expect(splitCandidates([row({ current_status: undefined, actionable_now: undefined })]).valid).toEqual([]);
+  });
   it("cards only for bullish, current, usable recommendations — at most five, never padded", () => {
     const rows = [
       row({ id: 1, ticker: "A1" }), row({ id: 2, ticker: "A2" }),
@@ -96,12 +99,21 @@ describe("first screen: candidates", () => {
     expect(screen.queryAllByTestId("candidate-card")).toHaveLength(0);
   });
 
-  it("no candidates chosen yet: says the app chooses them by itself (no scan button, owner 2026-09-29)", async () => {
+  it("no saved scan and no running job: reports the empty state without pretending analysis is running", async () => {
     serve([[/\/dashboard/, dash([], { scan: null })], [/\/scan\/status/, { state: null, coverage: null }]]);
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     const t = (await screen.findByTestId("state-not_scanned")).textContent!;
-    expect(t).toContain("후보를 고르는 중입니다");
+    expect(t).toContain("아직 후보 선정 결과가 없습니다");
+    expect(t).not.toContain("기다리세요");
+    expect(screen.getByRole("link", { name: "데이터·자동 분석 상태 확인 →" }).getAttribute("href")).toBe("/settings?tab=status");
     expect(screen.queryByRole("button", { name: /시장 스캔/ })).toBeNull();
+  });
+
+  it("a real running first scan shows analysis progress instead of the idle state", async () => {
+    serve([[/\/dashboard/, dash([], { scan: null })], [/\/scan\/status/, { state: { status: "RUNNING", scan_id: 1, saved: 3, total: 20, started_at: "2026-09-25T15:00:00Z" }, coverage: null }]]);
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect((await screen.findByTestId("state-analyzing")).textContent).toContain("분석하는 중입니다");
+    expect(screen.queryByTestId("state-not_scanned")).toBeNull();
   });
 
   it("LIVE provider failure is shown, never covered by other data", async () => {

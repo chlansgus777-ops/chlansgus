@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NotReady, type ReadinessInfo } from "./Readiness";
+import { NotReady, SyncControl, type ReadinessInfo } from "./Readiness";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -10,6 +10,54 @@ const r: ReadinessInfo = {
   mode: "LIVE", recommendation_readiness: "NOT READY", readiness_reasons: [], scanner_status: "SCANNER_NOT_READY",
   scanner_reasons: ["유니버스(종목 목록)가 아직 적재되지 않음"], progress: { price_history: 0 }, sync: { status: "NEVER_SYNCED" }, categories: [],
 };
+
+describe("sync start acknowledgement", () => {
+  it("does not announce latest data until the job is complete", async () => {
+    const job = { status: "RUNNING", round: 0, up_to_date: true, target_session: "2026-09-24" };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ job, target_session: "2026-09-24" }))));
+    render(<SyncControl />);
+    await screen.findByRole("button", { name: "데이터 받는 중…" });
+    expect(screen.queryByText(/새로 받을 데이터 없이 이미 최신입니다/)).toBeNull();
+  });
+  const done = { status: "DONE", round: 1, finished_at: "2026-09-29T12:00:00Z" };
+  it("shows a 200 refusal over the old completed job", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(
+      url.endsWith("/sync/start") ? { started: false, reason: "전체 시장 스캔이 진행 중입니다", job: done } : { job: done }))));
+    render(<SyncControl compact />);
+    fireEvent.click(await screen.findByRole("button", { name: "새 거래일 받기" }));
+    expect(await screen.findByText("전체 시장 스캔이 진행 중입니다")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "새 거래일 받기" })).toBeTruthy();
+  });
+  it("immediately disables duplicate clicks until acknowledgement", async () => {
+    let finish!: (r: Response) => void;
+    let posts = 0;
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (url.endsWith("/sync/start")) { posts++; return new Promise<Response>((r) => { finish = r; }); }
+      return Promise.resolve(new Response(JSON.stringify({ job: done })));
+    }));
+    render(<SyncControl compact />);
+    const button = await screen.findByRole("button", { name: "새 거래일 받기" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(posts).toBe(1);
+    finish(new Response(JSON.stringify({ started: false, reason: "이미 데이터를 준비하는 중", job: { status: "RUNNING", round: 1 } })));
+    expect(await screen.findByText("이미 데이터를 준비하는 중")).toBeTruthy();
+  });
+  it("recovers a job after a lost acknowledgement without another POST", async () => {
+    let started = false;
+    let posts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/sync/start")) { started = true; posts++; throw new TypeError("disconnected"); }
+      return new Response(JSON.stringify({ job: started ? { status: "RUNNING", round: 1 } : done }));
+    }));
+    render(<SyncControl compact />);
+    fireEvent.click(await screen.findByRole("button", { name: "새 거래일 받기" }));
+    expect(await screen.findByText(/서버에서 시작된 작업을 찾았습니다/)).toBeTruthy();
+    expect(posts).toBe(1);
+    expect((screen.getByRole("button", { name: "데이터 받는 중…" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
 
 describe("data preparation from the screen", () => {
   it("LIVE: the not-ready card has a button that starts the background sync and shows its progress", async () => {

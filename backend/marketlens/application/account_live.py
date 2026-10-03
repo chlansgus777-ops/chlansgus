@@ -19,39 +19,39 @@ In won, the Toss way (its API: "전체 자산을 현재 환율로 원화 환산�
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import math
 from typing import Any
 
 from marketlens.domain.enums import TradingSession
-from marketlens.domain.market_calendar import classify_session, is_trading_day, last_completed_session, previous_trading_day, to_ny
+from marketlens.domain.market_calendar import classify_session, last_completed_session, previous_trading_day, session_close_utc, to_ny
 
 
 def _f(v: Any) -> float | None:
     try:
-        return None if v is None else float(v)
+        out = None if v is None else float(v)
+        return out if out is not None and math.isfinite(out) else None
     except (TypeError, ValueError):
         return None
 
 
 def _prev_close(svc: Any, ticker: str, q: Any) -> float | None:
-    """The close the live price's session compares against: the day before in the pre-market and the session, that
-    day's own close after it. Exactly that close — a missing one is not replaced by an older (a two-day move)."""
+    """Today's total change always compares against the previous trading day's close, including after-hours.
+    A missing close is not replaced by an older one (which would turn it into a multi-day change)."""
     qday = to_ny(q.timestamp).date()
-    if q.session.value in ("PREMARKET", "REGULAR"):
-        want = previous_trading_day(qday)
-    else:
-        want = qday if is_trading_day(qday) else previous_trading_day(qday)
+    want = previous_trading_day(qday)
     bars = svc.store.bars(ticker, want, want) if getattr(svc, "store", None) is not None else (svc.data.bars(ticker, want - timedelta(days=7), want).value or [])
     return next((b.close for b in bars if b.day == want and b.close), None)
 
 
-def _close_move(svc: Any, ticker: str, day: Any) -> tuple[float | None, float | None]:
+def _close_move(svc: Any, ticker: str, day: Any) -> tuple[float | None, float | None, datetime | None]:
     """(close of ``day``, its change) from the stored closes — the last session's move when no session is open."""
     start = day - timedelta(days=14)
     bars = svc.store.bars(ticker, start, day) if getattr(svc, "store", None) is not None else (svc.data.bars(ticker, start, day).value or [])
     cl = [(b.day, b.close) for b in bars if b.day <= day and b.close]
     if len(cl) < 2 or cl[-1][0] != day:
-        return (cl[-1][1] if cl else None), None
-    return cl[-1][1], cl[-1][1] - cl[-2][1]
+        return (cl[-1][1] if cl else None), None, session_close_utc(cl[-1][0]) if cl else None
+    move = cl[-1][1] - cl[-2][1] if cl[-2][0] == previous_trading_day(day) else None
+    return cl[-1][1], move, session_close_utc(day)
 
 
 def build(svc: Any, now: datetime) -> dict[str, Any]:
@@ -73,13 +73,14 @@ def build(svc: Any, now: datetime) -> dict[str, Any]:
         t = toss.get(h.ticker) if h.source == "toss" else None
         row: dict[str, Any] = {"ticker": h.ticker, "quantity": h.quantity, "avg_price": h.cost_basis, "source": h.source}
         if t is not None:
-            qty, last = float(t["quantity"]), float(t["last_price"])
-            live = q is not None and taken is not None and q.timestamp > taken
+            qty, last = float(t["quantity"]), _f(t.get("last_price"))
+            live = q is not None and last is not None and taken is not None and q.timestamp > taken
             px = q.price if live else last
-            d = qty * (px - last)
+            d = qty * (px - last) if px is not None and last is not None else 0.0
             daily = _f(t.get("daily_pnl"))
+            value, pnl = _f(t.get("market_value")), _f(t.get("pnl"))
             row |= {"price": px, "price_at": (q.timestamp if live else taken).isoformat() if (live or taken) else None, "live": live, "basis": "TOSS",
-                    "purchase": _f(t["purchase_amount"]), "value": _f(t["market_value"]) + d, "pnl": _f(t["pnl"]) + d,  # type: ignore[operator]
+                    "purchase": _f(t.get("purchase_amount")), "value": value + d if value is not None else None, "pnl": pnl + d if pnl is not None else None,
                     "daily": (daily + d) if daily is not None and toss_fresh else None}
             if live:
                 live_at.append(q.timestamp)
@@ -90,11 +91,11 @@ def build(svc: Any, now: datetime) -> dict[str, Any]:
                 px, daily, at = q.price, (h.quantity * (q.price - prev) if prev else None), q.timestamp
                 live_at.append(q.timestamp)
             else:
-                close, move = _close_move(svc, h.ticker, day)
+                close, move, closed_at = _close_move(svc, h.ticker, day)
                 # no live price: the last completed session's own move once it is over; during the pre-market and the
                 # session today's change is unknown (never the last session's move shown as today's)
-                px, daily, at = close, (h.quantity * move if move is not None and not in_session else None), None
-            row |= {"price": px, "price_at": at.isoformat() if at else None, "live": at is not None, "basis": "PRICE", "purchase": cost,
+                px, daily, at = close, (h.quantity * move if move is not None and not in_session else None), closed_at
+            row |= {"price": px, "price_at": at.isoformat() if at else None, "live": q is not None, "basis": "PRICE", "purchase": cost,
                     "value": h.quantity * px if px else None, "pnl": h.quantity * px - cost if px else None, "daily": daily}
         v, p, dl = row["value"], row["purchase"], row["daily"]
         row["pnl_rate"] = row["pnl"] / p if row["pnl"] is not None and p else None
@@ -107,17 +108,20 @@ def build(svc: Any, now: datetime) -> dict[str, Any]:
     valued = [r for r in rows if r["value"] is not None]
     dailies = [r for r in rows if r["daily"] is not None]
     value = sum(r["value"] for r in valued)
-    purchase = sum(r["purchase"] or 0 for r in valued)
-    pnl = sum(r["pnl"] for r in valued)
+    profits = [r for r in rows if r["pnl"] is not None and r["purchase"] is not None]
+    purchase = sum(r["purchase"] for r in profits)
+    pnl = sum(r["pnl"] for r in profits)
     daily = sum(r["daily"] for r in dailies)
     dbase = sum(r["value"] - r["daily"] for r in dailies if r["value"] is not None)
     totals = {"count": len(rows), "valued": len(valued), "daily_count": len(dailies), "value": round(value, 2) if valued else None,
-              "purchase": round(purchase, 2) if valued else None, "pnl": round(pnl, 2) if valued else None,
-              "pnl_rate": pnl / purchase if valued and purchase else None, "daily": round(daily, 2) if dailies else None,
-              "daily_rate": daily / dbase if dailies and dbase > 0 else None}
+              "pnl_count": len(profits), "purchase": round(purchase, 2) if profits else None, "pnl": round(pnl, 2) if profits else None,
+              "pnl_rate": pnl / purchase if profits and purchase else None, "daily": round(daily, 2) if dailies else None,
+              "daily_rate": daily / dbase if dailies and all(r["value"] is not None for r in dailies) and dbase > 0 else None}
     if fx:
-        totals |= {"value_krw": round(value * fx) if valued else None, "pnl_krw": round(pnl * fx) if valued else None, "daily_krw": round(daily * fx) if dailies else None}
+        totals |= {"value_krw": round(value * fx) if valued else None, "pnl_krw": round(pnl * fx) if profits else None, "daily_krw": round(daily * fx) if dailies else None}
     notes = []
+    if len(valued) < len(rows) or len(profits) < len(rows):
+        notes.append(f"부분 합계: 평가금액 {len(valued)}/{len(rows)}종목, 손익 {len(profits)}/{len(rows)}종목 포함")
     if snap and not toss_fresh:
         notes.append("토스증권 동기화가 오래되어 오늘 손익은 빼고, 평가·손익만 최신 가격으로 계산했습니다")
     if len(dailies) < len(rows):

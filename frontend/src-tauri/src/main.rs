@@ -22,6 +22,13 @@ const EXIT_PORT_IN_USE: i32 = 3;
 const EXIT_ALREADY_RUNNING: i32 = 4;
 const EXIT_MIXED_DATABASE: i32 = 5; // database belongs to the other data mode (MOCK vs LIVE)
 
+fn is_app_url(url: &tauri::Url) -> bool {
+    matches!((url.scheme(), url.host_str(), url.port()),
+        ("http" | "https", Some("tauri.localhost"), None) |
+        ("tauri", Some("localhost"), None))
+        || (cfg!(debug_assertions) && url.origin().ascii_serialization() == "http://localhost:5173")
+}
+
 struct Backend {
     child: Mutex<Option<CommandChild>>,
     port: u16,
@@ -100,19 +107,25 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let port = free_port();
             let token = new_token();
             app.manage(Backend { child: Mutex::new(None), port, token: token.clone(), exiting: AtomicBool::new(false), restarts: AtomicU32::new(0) });
-            spawn_backend(app.handle())?;
             // the UI learns where the backend is and the token before any script runs
-            let init = format!("window.__MARKETLENS_API__ = 'http://127.0.0.1:{port}'; window.__MARKETLENS_TOKEN__ = '{token}';");
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let init = format!("if (location.hostname === 'tauri.localhost' || (location.protocol === 'tauri:' && location.hostname === 'localhost') || ({} && location.origin === 'http://localhost:5173')) {{ window.__MARKETLENS_API__ = 'http://127.0.0.1:{port}'; window.__MARKETLENS_TOKEN__ = '{token}'; }}", cfg!(debug_assertions));
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("desktop-start.html".into()))
                 .title("MarketLens")
                 .inner_size(1500.0, 950.0)
                 .min_inner_size(1100.0, 700.0)
                 .initialization_script(&init)
+                // External links use the scoped opener; don't expose the API token to remote pages.
+                .on_navigation(is_app_url)
                 .build()?;
+            if let Err(error) = spawn_backend(app.handle()) {
+                eprintln!("failed to start marketlens-backend: {error}");
+                let _ = window.eval("window.marketlensStartupFailure?.('앱 서버를 실행하지 못했습니다. 앱을 닫고 다시 실행해주세요. 계속 실패하면 데이터 폴더의 logs를 확인해주세요.');");
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -130,4 +143,21 @@ fn main() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_app_url;
+    #[test]
+    fn app_documents_can_navigate() {
+        for url in ["http://tauri.localhost/index.html#/stocks", "https://tauri.localhost/desktop-start.html", "tauri://localhost/index.html"] {
+            assert!(is_app_url(&url.parse().unwrap()));
+        }
+    }
+    #[test]
+    fn remote_and_local_server_documents_cannot_replace_the_app() {
+        for url in ["https://saveticker.com/news", "http://127.0.0.1:8765/", "https://tauri.localhost.attacker.example/", "file:///C:/Windows/explorer.exe", "http://tauri.localhost:8000/"] {
+            assert!(!is_app_url(&url.parse().unwrap()), "{url}");
+        }
+    }
 }

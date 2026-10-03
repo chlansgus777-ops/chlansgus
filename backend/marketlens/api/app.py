@@ -129,6 +129,24 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
         remote = ip not in LOCAL_CLIENTS  # the phone listener: anything that is not this PC
         request.state.remote = remote
         hostname = host.rsplit(":", 1)[0] if host.count(":") <= 1 else host
+        # A delegated key can ONLY deliver news on this one endpoint. It is never a desktop/phone credential.
+        news_bridge = request.method == "POST" and request.url.path == "/api/saveticker/browser/news" and not remote
+        if news_bridge:
+            if hostname not in ALLOWED_HOSTS:
+                return PlainTextResponse("Invalid host header", status_code=400)
+            source = request.headers.get("origin")
+            if source and not re.fullmatch(r"chrome-extension://[a-p]{32}", source):
+                return JSONResponse({"detail": "허용되지 않은 브라우저 확장 출처입니다."}, status_code=403)
+            service = request.app.state.service
+            bridge_key = request.headers.get("X-MarketLens-News-Bridge")
+            if not bridge_key:
+                return JSONResponse({"detail": "뉴스 전용 연결 키가 필요합니다."}, status_code=403)
+            if service is None or not service.saveticker_connection.browser_authorized(bridge_key):
+                return JSONResponse({"detail": "뉴스 전용 연결 키가 없거나 만료됐습니다."}, status_code=401)
+            response = await call_next(request)
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            return response
         if remote:
             phone = app.state.phone
             if phone is None or not phone.enabled:

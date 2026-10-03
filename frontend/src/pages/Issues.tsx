@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Card, Empty, Err, Loading } from "../components/ui";
+import { Card, Err, Loading } from "../components/ui";
 import { useApi, useSettling } from "../components/useApi";
 import { num, stamp, errKo } from "../format";
 import { HORIZON_KO } from "../i18n";
@@ -28,9 +28,9 @@ export default function Issues() {
   return (
     <div className="grid">
       {r.data.as_of ? <div className="caption" data-testid="issues-as-of">이슈 기준 시각 {stamp(r.data.as_of)}{r.data.refreshing ? " · 최신 뉴스로 다시 묶는 중(끝나면 바뀝니다)" : ""}</div> : null}
-      <div className="explain">뉴스를 헤드라인이 아니라 ‘사건’으로 묶었습니다. 왼쪽은 기사와 출처에 나온 사실, 오른쪽은 MarketLens가 계산한 해석입니다 — 해석은 인과관계를 확인한 것이 아니라 노출 경로에 따른 추정입니다. 행을 누르면 종목별 영향 경로를 봅니다.</div>
+      {r.data.issues.length ? <details className="explain"><summary>시장 이슈와 영향 점수 읽는 법</summary>왼쪽은 기사·출처의 사실, 오른쪽은 MarketLens가 계산한 해석입니다. 해석은 인과관계를 확인한 것이 아니라 노출 경로에 따른 추정입니다. 행을 누르면 종목별 영향 경로를 봅니다.</details> : null}
       {Object.keys(r.data.injection_flags).length > 0 && <div className="ribbon warn" role="note"><span className="cap">⚠ 외부 텍스트</span><div className="msg">기사 {Object.keys(r.data.injection_flags).length}건에서 프롬프트 주입 패턴이 발견되어 신뢰할 수 없는 외부 텍스트로만 취급했습니다.</div></div>}
-      <Card className="flush">
+      {r.data.issues.length ? <Card className="flush">
         {r.data.issues.length ? (
           <div className="scroll" style={{ padding: "4px 8px 8px" }}><table><thead>
             <tr><th colSpan={3} style={{ color: "var(--text-2)" }}>기사·출처에 나온 사실</th><th colSpan={5} style={{ color: "var(--lilac)", borderLeft: "1px solid var(--line)" }}>MarketLens 해석(계산값 — 기사 내용이 아님)</th></tr>
@@ -41,8 +41,8 @@ export default function Issues() {
                 <td style={{ whiteSpace: "normal", minWidth: 120 }} title={affected_sectors.join(", ")}>{affected_sectors.map((x) => (x === "Unknown" ? "업종 미확인" : x)).slice(0, 2).join(", ")}{affected_sectors.length > 2 ? <span className="caption"> 외 {affected_sectors.length - 2}</span> : null}</td>
                 <td style={{ whiteSpace: "normal" }}><div className="row tight">{affected_stocks.slice(0, 8).map((s) => <span key={s.ticker} className={`pill ${s.swing > 3 ? "tone-ok" : s.swing < -3 ? "tone-danger" : ""}`}>{s.ticker}{s.hops ? `(${s.hops}단계)` : ""} {s.swing > 0 ? "▲" : s.swing < 0 ? "▼" : "■"}{num(s.swing, 0)}</span>)}</div></td>
               </tr>))}</tbody></table></div>
-        ) : <div style={{ padding: 16 }}><Empty>현재 구조화된 이슈가 없습니다(뉴스 수집은 정상).</Empty></div>}
-      </Card>
+        ) : null}
+      </Card> : <div className="caption">현재 분류된 시장 이슈가 없습니다. 보조 뉴스는 아래에서 확인하세요.</div>}
       {sel && d.data && (
         <Card title={`영향 상세 — ${d.data.issue.title}`} sub>
           <div className="explain" style={{ marginBottom: 10 }}>직접 영향: {d.data.direct.join(", ") || "—"} · 간접 영향(노출 그래프 경유): {d.data.indirect.join(", ") || "—"}</div>

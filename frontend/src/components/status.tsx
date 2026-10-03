@@ -158,11 +158,11 @@ export function StatusBar() {
         <Item icon="⌖" testId="sb-analysed"><span className="k">분석</span><b>{stampEt(p.analysedAt)}</b><span className="k opt">· {ago(p.analysedAt, st.nowMs)}</span></Item>
       )}
       {sys?.mode === "LIVE" && (job?.status === "RUNNING" ? (
-        <Item tone="info" icon="⏳" to="/settings?tab=data" testId="sb-sync"><span className="k">데이터 수집</span><b>{job.progress ? `${job.progress.percent}%` : "받는 중"}</b></Item>
+        <Item tone="info" icon="⏳" to="/settings?tab=status" testId="sb-sync"><span className="k">데이터 수집</span><b>{job.progress ? `${job.progress.percent}%` : "받는 중"}</b></Item>
       ) : rd && rd.recommendation_readiness === "NOT READY" ? (
-        <Item tone="danger" icon="!" to="/settings?tab=data" testId="sb-sync"><span className="k">데이터 준비</span><b>안 됨</b>{job ? <span className="k">· 마지막 수집 {JOB_SHORT[job.status] ?? job.status}</span> : null}</Item>
+        <Item tone="danger" icon="!" to="/settings?tab=status" testId="sb-sync"><span className="k">데이터 준비</span><b>안 됨</b>{job ? <span className="k">· 마지막 수집 {JOB_SHORT[job.status] ?? job.status}</span> : null}</Item>
       ) : rd ? (
-        <Item tone={rd.recommendation_readiness === "FULL" ? "ok" : "warn"} icon={rd.recommendation_readiness === "FULL" ? "✓" : "!"} to="/settings?tab=data" testId="sb-sync"><span className="k">데이터 준비</span><b>{rd.recommendation_readiness === "FULL" ? "완료" : "일부"}</b></Item>
+        <Item tone={rd.recommendation_readiness === "FULL" ? "ok" : "warn"} icon={rd.recommendation_readiness === "FULL" ? "✓" : "!"} to="/settings?tab=status" testId="sb-sync"><span className="k">데이터 준비</span><b>{rd.recommendation_readiness === "FULL" ? "완료" : "일부"}</b></Item>
       ) : null)}
       {sys && sys.mode !== "MOCK" && (down.length ? (
         <Item tone="danger" icon="⛔" to="/settings?tab=status" testId="sb-providers" title={down.map((d) => `${d.kind}: ${d.last_error ?? ""}`).join("\n")}><span className="k">공급자</span><b>{down.length}곳 중단</b><span className="k">({down.map((d) => d.kind).join(", ")})</span></Item>
@@ -176,7 +176,7 @@ export function StatusBar() {
         {sys?.mode !== "MOCK" && <QuoteFeedStatus />}  {/* in MOCK the banner already says every price is simulated */}
         <AlertCenter />
         {/* only when it matters: data not ready, or practice (mock) data — never the "제한적 참고" ribbon (owner: "거슬려") */}
-        {rr && (rd?.recommendation_readiness === "NOT READY" || sys?.mode === "MOCK") && <Link to="/settings?tab=data" className={`readiness-link ${rr.tone}`} title={rr.help} data-testid="readiness-badge">추천 준비도 · {rr.label}</Link>}
+        {rr && (rd?.recommendation_readiness === "NOT READY" || sys?.mode === "MOCK") && <Link to="/settings?tab=status" className={`readiness-link ${rr.tone}`} title={rr.help} data-testid="readiness-badge">추천 준비도 · {rr.label}</Link>}
       </span>
     </div>
   );

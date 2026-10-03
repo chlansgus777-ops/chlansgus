@@ -15,10 +15,12 @@ export interface AccountLive {
     daily: number | null; daily_rate: number | null; value_krw?: number | null; pnl_krw?: number | null; daily_krw?: number | null };
 }
 
-export function useAccountLive(active = true) {
+export function useAccountLive(active = true, poll = true) {
   const a = useApi<AccountLive>(active ? "/portfolio/live" : null);
-  usePoll(a.reload, 1_000, active);  // every second (owner: "모든 정보는 실시간으로")
-  return a.data && Array.isArray(a.data.rows) && a.data.totals ? a.data : null;
+  usePoll(a.reload, 1_000, active && poll);  // one polling owner; row subscribers share its cached response
+  if (!a.data || !Array.isArray(a.data.rows) || !a.data.totals) return null;
+  return a.error ? { ...a.data, live: false, rows: a.data.rows.map((r) => ({ ...r, live: false })),
+    notes: [...a.data.notes, "연결을 확인할 수 없어 마지막 계좌 값을 표시합니다."] } : a.data;
 }
 
 export function kstClock(iso: string | null | undefined): string {
@@ -58,7 +60,7 @@ export function AccountLiveCard({ a }: { a: AccountLive }) {
       </div>
       <div className="caption">
         {toss ? "토스증권 계좌 종목은 토스증권이 계산한 매입금액·손익·오늘 손익에 그 뒤 가격 변화만 더했습니다(토스 앱과 같은 기준). " : ""}
-        {a.fx ? `원화는 지금 환율(${a.fx.source} ${a.fx.rate.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}원)로 환산 — 토스 앱의 원화 손익과 같은 방식입니다.` : "원화 환율이 없어 달러로만 표시합니다."}
+        {a.fx ? `원화 환산: ${a.fx.source} ${a.fx.rate.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}원 · 환율 기준 ${a.fx.at ? new Date(a.fx.at).toLocaleString("ko-KR") : "시각 미확인"}` : "원화 환율이 없어 달러로만 표시합니다."}
       </div>
       {a.notes.map((n, i) => <div key={i} className="caption warn">{n}</div>)}
     </section>

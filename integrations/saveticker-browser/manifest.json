@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "MarketLens SaveTicker 연결",
+  "version": "1.2.1",
+  "description": "로그인한 SaveTicker 브라우저에서 뉴스·일정·리포트를 MarketLens로 전달합니다. 비밀번호·쿠키를 읽거나 내보내지 않습니다.",
+  "permissions": ["storage", "alarms", "scripting"],
+  "host_permissions": ["https://saveticker.com/*", "http://127.0.0.1/*", "http://localhost/*"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "content_scripts": [
+    {"matches": ["https://saveticker.com/*"], "js": ["source.js"]},
+    {"matches": ["http://127.0.0.1/*", "http://localhost/*"], "js": ["local.js"]}
+  ]
+}

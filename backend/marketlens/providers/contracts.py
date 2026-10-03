@@ -42,6 +42,22 @@ class NotSupported(ProviderError):
 
 
 @dataclass(frozen=True, slots=True)
+class NewsMetadata:
+    provider: str
+    original_source: str | None = None
+    provider_url: str | None = None
+    collected_at: datetime | None = None
+    original_published_at: str | None = None
+    category: str | None = None
+    tags: tuple[str, ...] = ()
+    event_type: str = "unknown"
+    bullish_bearish_hint: str = "unknown"
+    view_count: int | None = None
+    provider_summary: str | None = None  # external provider text, never MarketLens AI analysis
+    detail_collected_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class NewsItem:
     news_id: str
     published_at: datetime
@@ -52,6 +68,8 @@ class NewsItem:
     source_type: str  # OFFICIAL | WIRE | COMMERCIAL | OTHER
     tickers: tuple[str, ...]
     body: str = ""  # UNTRUSTED external text
+    metadata: NewsMetadata | None = None
+    provenance: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

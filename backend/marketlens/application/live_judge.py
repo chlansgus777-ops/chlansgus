@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from marketlens.domain.enums import ACTION_KO, BULLISH_ACTIONS, Action, TradingSession
-from marketlens.domain.freshness import PlanCheck, RevalidationPolicy, _revalidate
+from marketlens.domain.freshness import PlanCheck, RevalidationPolicy, _revalidate, quote_current, recommendation_freshness
 from marketlens.domain.market_calendar import classify_session
 
 BUY_ZONE, ABOVE_MAX, RR_LOW, STOP_HIT, TARGET_HIT, HOLD_RANGE, NO_PLAN = (
@@ -51,6 +51,7 @@ class LivePlan:
     held_cost: float | None = None
     held_qty: float | None = None
     watched: bool = False
+    live_price: bool = False
 
 
 @dataclass
@@ -81,12 +82,16 @@ def judge(p: LivePlan, price: float, quote_ts: datetime | None, now: datetime, p
     age = (now - quote_ts).total_seconds() if quote_ts is not None else None
     # a quote can prove the plan only while it is current: within the quote age limit, or the final close once the
     # market is closed (the same rule as recommendation freshness)
-    current = age is not None and (age <= pol.max_quote_age.total_seconds() or session == TradingSession.CLOSED)
+    current = quote_current(quote_ts, now, timedelta(seconds=60) if p.live_price else pol.max_quote_age, allow_close=not p.live_price)
     rr = None
     if p.stop is not None and p.target1 is not None and price > p.stop:
         rr = (p.target1 - price) / (price - p.stop)
     plan = PlanCheck(p.rec_price, p.max_buy, p.stop, p.target1, p.min_rr, p.bullish)
     problems = _revalidate(plan, price, pol) if p.bullish else []
+    validity = recommendation_freshness(p.as_of, "FRESH" if p.data_ok else "STALE", now,
+                                       plan=plan, quote_price=price, quote_ts=quote_ts, policy=pol)
+    if not validity.actionable:
+        problems.append(validity.reason_ko)
     if p.stop is not None and price <= p.stop:
         zone = STOP_HIT
     elif p.target1 is not None and price >= p.target1:
@@ -177,7 +182,7 @@ class LiveJudge:
     def _event(self, p: LivePlan, j: dict[str, Any], zone: str, price: float, prev: str | None = None) -> None:
         t = p.ticker
         who = "보유 종목" if p.held else "관심 종목" if p.watched else "후보"
-        if zone == BUY_ZONE and p.bullish:
+        if zone == BUY_ZONE and j["valid_now"]:
             self.add(t, "BUY_ZONE", "positive", f"{t} 매수 구간 진입 — ${price:,.2f} (최대 매수가 ${p.max_buy:,.2f} 이하, 손익비 {j['rr_now']:.2f})", price, p.rec_id)
         elif zone == STOP_HIT:
             lvl = "danger" if p.held else "warning"

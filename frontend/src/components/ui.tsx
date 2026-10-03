@@ -239,7 +239,7 @@ export type StateKind = "collecting" | "analyzing" | "not_scanned" | "no_candida
 const STATE: Record<StateKind, { icon: string; tone: "info" | "warn" | "danger"; title: string; what: string; unknown: string; todo: string }> = {
   collecting: { icon: "⏳", tone: "info", title: "데이터를 모으는 중입니다", what: "무료 공급원에서 가격 이력·시가총액·재무 자료를 받고 있습니다.", unknown: "준비가 끝나기 전의 후보 목록은 시장 전체를 대표하지 않습니다.", todo: "앱을 켜 둔 채 기다리세요. 진행률은 설정 → 데이터 준비에서 볼 수 있습니다." },
   analyzing: { icon: "⟳", tone: "info", title: "분석하는 중입니다", what: "종목을 거르고 점수·가격 계획을 계산하고 있습니다.", unknown: "이번 분석에서 나올 새 후보는 끝나야 알 수 있습니다.", todo: "기다리세요. 이전 결과는 그 시각과 함께 계속 보입니다." },
-  not_scanned: { icon: "◎", tone: "info", title: "후보를 고르는 중입니다", what: "데이터 준비가 끝나면 앱이 스스로 후보를 고릅니다(버튼 없음).", unknown: "지금 검토할 후보.", todo: "기다리세요. 고른 뒤로는 실시간 가격으로 1초마다 다시 판정합니다." },
+  not_scanned: { icon: "◎", tone: "info", title: "아직 후보 선정 결과가 없습니다", what: "저장된 시장 분석이 없습니다. 분석이 실행 중인 상태와는 다릅니다.", unknown: "지금 검토할 후보.", todo: "설정에서 데이터 준비와 자동 분석 상태를 확인하세요. 결과가 생기면 수신한 시세로 판단을 갱신합니다." },
   no_candidates: { icon: "○", tone: "info", title: "지금은 매수 조건을 통과한 종목이 없습니다", what: "이번 스캔에서 점수·가격·손익비·위험 한도를 모두 통과한 종목이 없습니다.", unknown: "‘살 종목이 없다’는 확신은 아닙니다. 이번 기준을 통과한 종목이 없다는 뜻입니다.", todo: "대기·관찰 종목은 ‘종목’ 화면의 후보 목록에서 볼 수 있습니다. 빈자리를 점수 상위 종목으로 채워 보여주지 않습니다." },
   insufficient: { icon: "◌", tone: "warn", title: "자료가 부족해 판단하지 않았습니다", what: "핵심 자료(현재가·가격 이력·재무제표 등)가 없거나 오래되었습니다.", unknown: "이 종목이 좋은지 나쁜지. 자료가 없다는 것이 나쁘다는 뜻은 아닙니다.", todo: "부족한 자료가 채워진 뒤 ‘분석 다시하기’를 누르세요." },
   stale: { icon: "◷", tone: "warn", title: "오래된 판단입니다", what: "분석 이후 거래일이 지나 가격이 달라졌을 수 있습니다.", unknown: "지금 가격으로도 매수 조건을 통과하는지.", todo: "‘분석 다시하기’로 현재가 기준 판단을 확인하세요." },

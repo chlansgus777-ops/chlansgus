@@ -81,21 +81,32 @@ async function req<T>(method: string, path: string, body?: unknown, opts: Reques
     if (attempt > 0) await sleep(backoff * 2 ** (attempt - 1));
     if (opts.signal?.aborted) throw new ApiError(-1, "취소됨");
     let r: Response;
+    let payload: unknown;
+    const controller = new AbortController();
+    let timedOut = false;
+    const cancel = () => controller.abort();
+    opts.signal?.addEventListener("abort", cancel, { once: true });
+    const timeout = setTimeout(() => { timedOut = true; cancel(); }, 15_000);
     try {
-      r = await fetch(`${baseUrl()}/api${path}`, init);
+      r = await fetch(`${baseUrl()}/api${path}`, { ...init, signal: controller.signal });
+      try { payload = await r.json(); }
+      catch (e) { if (r.ok || controller.signal.aborted) throw e; }
     } catch {
       if (opts.signal?.aborted) throw new ApiError(-1, "취소됨"); // nobody waits for it any more: not an error to show
-      last = new ApiError(0, describeStatus(0));
+      last = new ApiError(0, timedOut ? "요청 시간이 초과되었습니다. 서버 작업 상태를 확인하세요." : describeStatus(0));
       continue; // network error → retry (backend may be starting)
+    } finally {
+      clearTimeout(timeout);
+      opts.signal?.removeEventListener("abort", cancel);
     }
     if (r.ok) {
-      const out = (await r.json()) as T;
+      const out = payload as T;
       if (method !== "GET") mutationListeners.forEach((f) => f(method, path));
       return out;
     }
     let detail: string | undefined;
     try {
-      const j = (await r.json()) as { detail?: unknown };
+      const j = payload as { detail?: unknown };
       detail = typeof j.detail === "string" ? j.detail : undefined;
     } catch {
       detail = undefined;

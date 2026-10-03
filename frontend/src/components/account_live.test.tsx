@@ -21,7 +21,7 @@ describe("the account now (owner 2026-09-29: '토스랑 수익이 안 맞아')",
     expect(screen.getByTestId("acct-daily").textContent).toContain("+5.21%");
     expect(screen.getByText(/토스증권 계좌 · 미국 주식/)).toBeTruthy();
     expect(screen.getByText(/실시간 23:29:59/)).toBeTruthy();  // 14:29:59 UTC = 23:29:59 KST
-    expect(screen.getByText(/토스 앱의 원화 손익과 같은 방식/)).toBeTruthy();
+    expect(screen.getByText(/원화 환산:.*환율 기준/)).toBeTruthy();
   });
   it("an unknown today's P&L is a dash with the reason, never a zero", () => {
     render(<AccountLiveCard a={{ ...A, totals: { ...A.totals, daily: null, daily_rate: null, daily_krw: null, daily_count: 0 }, notes: ["1종목은 지금 가격이 없어 오늘 손익에서 뺐습니다"] }} />);

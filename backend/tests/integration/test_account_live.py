@@ -17,6 +17,31 @@ def rows_of(acct: dict) -> dict[str, dict]:
     return {r["ticker"]: r for r in acct["rows"]}
 
 
+def test_received_yesterday_trade_never_marks_account_live(world):
+    c, svc, fake, _keys = world
+    assert connect(c, fake).status_code == 200
+    svc.quotes.ingest_poll("NVDA", 900, NOW - timedelta(days=1), "toss")
+    account = c.get("/api/portfolio/live").json()
+    assert not account["live"]
+    assert rows_of(account)["NVDA"]["price"] == 120.5
+
+
+def test_missing_broker_amounts_remain_unknown_and_partial(world, monkeypatch):
+    c, svc, fake, _keys = world
+    assert connect(c, fake).status_code == 200
+    snapshot = svc.broker.snapshot()
+    for h in snapshot["holdings"]:
+        if h["symbol"] == "NVDA":
+            h.update(market_value=None, pnl=None, purchase_amount=None)
+    monkeypatch.setattr(svc.broker, "snapshot", lambda: snapshot)
+    account = c.get("/api/portfolio/live").json()
+    assert rows_of(account)["NVDA"]["value"] is None
+    assert rows_of(account)["NVDA"]["pnl"] is None
+    assert account["totals"]["pnl_count"] == 1
+    assert account["totals"]["daily_rate"] is None
+    assert any("부분 합계" in note for note in account["notes"])
+
+
 def test_the_account_is_tosss_own_figures_moved_by_the_live_price(world):  # noqa: F811
     c, svc, fake, _keys = world
     assert connect(c, fake).status_code == 200

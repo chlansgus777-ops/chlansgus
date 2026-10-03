@@ -394,6 +394,7 @@ class QuoteHub:
         state = display_state(shown, now, session, self.streaming, self.connected, subscribed, over)
         base = {
             "ticker": st.ticker, "state": state, "session": session.value, "subscribed": subscribed, "version": st.version,
+            "evaluated_at": now.isoformat(),
             "price": None, "trade_time": None, "received_time": None, "source": None, "feed": None,
             "previous_close": st.previous_close, "change_pct": None, "error": st.snapshot_error,
         }

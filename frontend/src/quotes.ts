@@ -20,6 +20,7 @@ export interface QuoteRow {
   session: string;
   subscribed: boolean;
   version: number;
+  evaluated_at?: string;
   price: number | null;
   trade_time: string | null;
   received_time: string | null;
@@ -99,6 +100,17 @@ function setLink(l: Link) {
   if (l === link) return;
   link = l;
   linkSnap = { link, status };
+  if (l === "retrying") {
+    for (const [t, r] of rows) {
+      if (!r.judge) continue;
+      rows.set(t, { ...r, judge: { ...r.judge, quote_current: false, valid_now: false,
+        problems: ["시세 연결이 끊겨 현재 판단을 확인할 수 없습니다."] } });
+      emit(t);
+    }
+    allSnap = new Map(rows);
+    judgedSnap = [...rows.values()].filter((r) => r.judge);
+    batchListeners.forEach((f) => f());
+  }
   // every row's state word depends on the link (RECONNECTING while down)
   linkListeners.forEach((f) => f());
   globalListeners.forEach((f) => f());
@@ -129,7 +141,8 @@ export function applyRows(list: QuoteRow[], now = Date.now()) {
 function applyRowsInner(list: QuoteRow[], now: number) {
   for (const r of list) {
     const cur = rows.get(r.ticker);
-    if (cur && cur.version >= r.version) continue;
+    if (cur && (cur.version > r.version || (cur.version === r.version &&
+      (!r.evaluated_at || (cur.evaluated_at && cur.evaluated_at > r.evaluated_at))))) continue;
     rows.set(r.ticker, r);
     if (r.received_time && (!cur || cur.received_time !== r.received_time)) {
       const d = now - Date.parse(r.received_time);

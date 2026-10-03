@@ -90,11 +90,11 @@ def _stem(w: str) -> str:
 
 
 def _tokens(title: str) -> frozenset[str]:
-    return frozenset(_stem(w) for w in re.findall(r"[a-z0-9]+", title.lower()) if len(w) > 2 and w not in STOPWORDS)
+    return frozenset(_stem(w) for w in re.findall(r"[a-z0-9가-힣]+", title.lower()) if len(w) > 2 and w not in STOPWORDS)
 
 
 def _trigrams(title: str) -> frozenset[str]:
-    s = re.sub(r"[^a-z0-9 ]+", "", title.lower())
+    s = re.sub(r"[^a-z0-9가-힣 ]+", "", title.lower())
     s = re.sub(r"\s+", " ", s).strip()
     return frozenset(s[i : i + 3] for i in range(max(0, len(s) - 2)))
 
@@ -245,12 +245,20 @@ def dedupe(items: Sequence[NewsItem]) -> tuple[list[NewsItem], int]:
     kept: list[NewsItem] = []
     urls: set[str] = set()
     dropped = 0
+    def disputed(title: str) -> bool:
+        return bool(re.search(r"아닌|아니다|않|부인|취소|\bnot\b|\bden(?:y|ies|ied)\b|\brefut", title, re.I))
+
     for it in ranked:
         cu = canonical_url(it.url) if it.url else None
-        if cu and cu in urls:
-            dropped += 1
-            continue
-        if any(abs(it.published_at - k.published_at) <= CLUSTER_WINDOW and title_similarity(it.title, k.title) >= SYNDICATION_SIMILARITY for k in kept):
+        duplicate = next((k for k in kept if (cu and cu in urls and k.url and canonical_url(k.url) == cu)
+                          or (abs(it.published_at - k.published_at) <= CLUSTER_WINDOW
+                              and disputed(it.title) == disputed(k.title)
+                              and title_similarity(it.title, k.title) >= SYNDICATION_SIMILARITY)), None)
+        if duplicate is not None:
+            index = kept.index(duplicate)
+            kept[index] = replace(duplicate, tickers=tuple(sorted(set(duplicate.tickers) | set(it.tickers))),
+                                  provenance=tuple(sorted(set(duplicate.provenance or (duplicate.source,)) | set(it.provenance or (it.source,)))),
+                                  metadata=duplicate.metadata or it.metadata)
             dropped += 1
             continue
         kept.append(it)

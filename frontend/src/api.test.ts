@@ -19,11 +19,27 @@ const json = (body: unknown, status = 200) => () => new Response(JSON.stringify(
 const netErr = () => { throw new TypeError("Failed to fetch"); };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   delete (globalThis as { window?: Window }).window?.__MARKETLENS_TOKEN__;
 });
 
 describe("api client", () => {
+  it("bounds a stalled response body and never repeats a start command", async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn((_url: string, init: RequestInit) => Promise.resolve({
+      ok: true,
+      json: () => new Promise((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true })),
+    }));
+    vi.stubGlobal("fetch", fetch);
+    const pending = api.post("/sync/start").catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(15_001);
+    const error = await pending;
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).message).toContain("시간이 초과");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it("sends the CSRF client header on every request", async () => {
     const calls = mockFetch([json({ ok: 1 })]);
     await api.post("/watchlist/NVDA");

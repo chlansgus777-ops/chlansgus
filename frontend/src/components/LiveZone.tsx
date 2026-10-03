@@ -13,7 +13,7 @@ export function zoneView(j: Judge): { tone: "buy" | "warn" | "danger" | "info" |
     case "BUY_ZONE":
       return j.valid_now
         ? { tone: "buy", label: "지금 매수 구간", sub: [j.to_max_pct !== null ? `최대 매수가까지 ${pct(j.to_max_pct, 1, false)}` : "", rr].filter(Boolean).join(" · ") }
-        : { tone: "info", label: "매수 구간", sub: j.quote_current ? (j.problems[0] ?? "분석을 다시 확인하세요") : "현재가 확인 필요" };
+        : { tone: "info", label: "재확인 필요", sub: j.quote_current ? (j.problems[0] ?? "분석을 다시 확인하세요") : "현재가 확인 필요" };
     case "ABOVE_MAX":
       return { tone: "warn", label: "최대 매수가 초과", sub: j.to_max_pct !== null ? `${pct(-j.to_max_pct, 1, false)} 위 · 기다리기` : "기다리기" };
     case "RR_LOW":

@@ -69,7 +69,7 @@ function fetchInto(key: string, path: string): void {
   const gen = e.gen;
   const p = api
     .get<unknown>(path, { signal: ctrl.signal })
-    .then((d) => { if (e.gen === gen) { e.data = d; e.at = Date.now(); e.error = undefined; } })
+    .then((d) => { if (!ctrl.signal.aborted && e.gen === gen && e.inflight?.ctrl === ctrl) { e.data = d; e.at = Date.now(); e.error = undefined; } })
     .catch((err: unknown) => {
       if (ctrl.signal.aborted || (err instanceof ApiError && err.status === -1)) return;
       if (e.gen === gen) e.error = err instanceof Error ? err.message : String(err);
@@ -91,8 +91,9 @@ export function invalidateApi(prefixes?: string[]): void {
 
 /** What a successful change makes outdated (by the change's path). Quote subscriptions change nothing cached. */
 const AFFECTS: [RegExp, string[]][] = [
+  [/^\/saveticker\//, ["/saveticker/", "/news"]],
   [/^\/quotes\//, []],
-  [/^\/(portfolio|transactions)/, ["/portfolio", "/transactions", "/dashboard", "/stocks/"]],
+  [/^\/(portfolio|transactions)/, ["/portfolio", "/transactions", "/dashboard", "/stocks/", "/opportunities"]],
   [/^\/watchlist/, ["/watchlist", "/dashboard", "/stocks/"]],
   [/^\/scan/, ["/dashboard", "/opportunities", "/stocks/", "/watchlist", "/scan", "/performance", "/readiness", "/issues"]],
   [/^\/recommendations\//, ["/stocks/", "/dashboard", "/opportunities"]],
@@ -102,6 +103,10 @@ const AFFECTS: [RegExp, string[]][] = [
 ];
 
 onMutation((_method, path) => {
+  if (/^\/stocks\/[^/]+\/analysis$/.test(path)) {
+    invalidateApi([path]);
+    return;
+  }
   const hit = AFFECTS.find(([re]) => re.test(path));
   invalidateApi(hit ? hit[1] : undefined); // an unknown change (settings…) outdates everything
 });

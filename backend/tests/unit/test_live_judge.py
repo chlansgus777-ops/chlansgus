@@ -38,7 +38,10 @@ def test_buy_now_needs_a_current_quote_and_data():
     assert not judge(plan(action="WATCH", bullish=False), 100.0, NOW - timedelta(seconds=5), NOW)["valid_now"]
     # the market closed: the final close is the current price
     sat = datetime(2026, 9, 26, 15, 0, tzinfo=UTC)
-    assert judge(plan(), 100.0, datetime(2026, 9, 25, 20, 0, tzinfo=UTC), sat)["valid_now"]
+    close = datetime(2026, 9, 25, 20, 0, tzinfo=UTC)
+    assert judge(plan(), 100.0, close, sat)["quote_current"]
+    assert not judge(plan(), 100.0, close, sat)["valid_now"]  # the intraday recommendation itself aged
+    assert judge(plan(as_of=close), 100.0, close, sat)["valid_now"]
 
 
 def test_zone_changes_become_alerts_and_ask_for_a_reanalysis():

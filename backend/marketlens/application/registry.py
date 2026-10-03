@@ -28,6 +28,10 @@ class ProviderRegistry:
         for kind, ch in self.chains.items():
             for p in ch.providers:
                 out.append({"kind": kind, "provider": p.name, "mode": p.mode.value, "configured": getattr(p, "configured", True), "reason": getattr(p, "reason", None)})
+        supplement = self.extras.get("news_supplement")
+        if isinstance(supplement, ProviderChain):
+            out.extend({"kind": "news", "provider": p.name, "mode": p.mode.value, "configured": True, "optional": True}
+                       for p in supplement.providers)
         return out
 
 
@@ -86,7 +90,14 @@ def build_live_registry(settings: Settings, health: HealthRegistry | None = None
     chains = {k: ProviderChain(k, impl[k], DataMode.LIVE, health, **extra) for k in PROVIDER_KINDS}
     from marketlens.providers.live.nasdaq_symbols import NasdaqSymbolDirectory
 
-    return ProviderRegistry(DataMode.LIVE, health, chains, extras={"symbol_directory": NasdaqSymbolDirectory(transport=transport)})
+    extras = {"symbol_directory": NasdaqSymbolDirectory(transport=transport)}
+    if settings.saveticker_enabled:
+        from marketlens.providers.saveticker import SaveTickerNewsProvider
+        from marketlens.infrastructure.resilience import RetryConfig
+        extras["news_supplement"] = ProviderChain("news", [SaveTickerNewsProvider(transport=transport, email=settings.saveticker_email,
+                                                                              password=settings.saveticker_password)], DataMode.LIVE, health,
+                                                retry_cfg=RetryConfig(attempts=2), **extra)
+    return ProviderRegistry(DataMode.LIVE, health, chains, extras=extras)
 
 
 def build_registry(settings: Settings, health: HealthRegistry | None = None) -> ProviderRegistry:

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MarketLens",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.marketlens.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -18,8 +18,7 @@
   "bundle": {
     "active": true,
     "targets": [
-      "nsis",
-      "msi"
+      "nsis"
     ],
     "externalBin": [
       "binaries/marketlens-backend"
@@ -29,6 +28,12 @@
       "icons/icon.png"
     ],
     "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Korean", "English"],
+        "displayLanguageSelector": false,
+        "startMenuFolder": "MarketLens"
+      },
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
       }

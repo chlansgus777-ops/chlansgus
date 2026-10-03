@@ -88,5 +88,8 @@ def test_the_app_itself_still_reads_and_analyses(app_and_svc):
 
     app, _svc = app_and_svc
     with TestClient(app, headers={"X-MarketLens-Client": "web"}) as c:
-        r = c.get("/api/stocks/AMD?refresh=true")
+        assert c.get("/api/stocks/AMD?refresh=true").status_code == 405
+        assert c.post("/api/stocks/AMD/analysis").status_code == 202
+        _svc.analyses.wait("analysis:AMD", 10)
+        r = c.get("/api/stocks/AMD")
         assert r.status_code == 200 and r.json()["recommendation"]["ticker"] == "AMD"

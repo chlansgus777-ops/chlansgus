@@ -5,9 +5,11 @@ import { api } from "../api";
 import { CommitteeSummary, CommitteeView } from "../components/CommitteeView";
 import { IRefresh, IStar } from "../components/icons";
 import { LivePrice } from "../components/LivePrice";
+import { SaveTickerSupplement, SaveTickerNews } from "../components/SaveTickerSupplement";
 import { ReturnSignalsCard } from "../components/ReturnSignals";
 import { LivePlanLine, LiveZone, UnlessLive, zoneView } from "../components/LiveZone";
 import { refreshQuoteSubscriptions, useQuote, useViewQuotes } from "../quotes";
+import { useAnalysisJob } from "../components/useAnalysisJob";
 import { rememberStock } from "../components/QuickSearch";
 import { PlanChart } from "../components/PlanChart";
 import { Action, Bar, Card, Disclosure, Empty, Err, EvidenceChips, FreshnessTable, Loading, Metric, Notice, Quality, Ribbon, ScoreMeter, Section, StaleData, StatePanel, StatusBadge, Stmt, Term, isExpired } from "../components/ui";
@@ -146,8 +148,8 @@ function liveTime(iso: string): string {
 }
 
 function StockDetail({ ticker }: { ticker: string }) {
-  const [refreshTick, setRefreshTick] = useState(0);
-  const d = useApi<SD>(`/stocks/${ticker}${refreshTick ? "?refresh=true" : ""}`, [refreshTick]);
+  const d = useApi<SD>(`/stocks/${ticker}`);
+  const analysisJob = useAnalysisJob(ticker, d.reload);
   const st = useStatus();
   const [busy, setBusy] = useState<string | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
@@ -173,7 +175,12 @@ function StockDetail({ ticker }: { ticker: string }) {
   useEffect(() => { if (mineOk) rememberStock(ticker); }, [ticker, mineOk]);  // for 최근 본 종목 and the quick search
   usePageTime(mine ? { label: ticker, priceTs: mine.analysis.price_timestamp, priceSession: mine.analysis.session, quality: mine.analysis.price_quality, analysedAt: mine.recommendation.as_of } : null);
   if (d.state === "loading") return <Loading what={`${ticker} 분석`} steps={["가격·재무 데이터 확인", "업종 모델 적용", "이슈·거시 반영", "가격 계획 계산"]} />;
-  if (!d.data) return <Err error={d.error} retry={d.reload} />;
+  if (!d.data) return <section className="card"><h2>{ticker} 분석</h2>
+    <p>저장된 분석이 없습니다. 가격·재무 자료를 확인해 분석을 시작하세요.</p>
+    <button className="primary" disabled={analysisJob.busy} onClick={analysisJob.start}>{analysisJob.busy ? "분석 진행 중…" : analysisJob.verifyOnly ? "작업 상태 확인" : "분석 시작"}</button>
+    <p role="status">{analysisJob.phase}</p>
+    {(analysisJob.error || d.error) && <Err error={analysisJob.error || d.error} retry={d.reload} />}
+  </section>;
   if (d.data.analysis.ticker !== ticker) return <Loading what={`${ticker} 분석`} />;  // never render another stock's data
   const { recommendation: stored, analysis: a } = d.data;
   const brief: Brief | undefined = d.data.brief;
@@ -197,7 +204,7 @@ function StockDetail({ ticker }: { ticker: string }) {
   const e = lj && e0 ? { ...e0, max_buy: lj.max_buy ?? e0.max_buy, stop: lj.stop ?? e0.stop, target1: lj.target1 ?? e0.target1, target2: lj.target2 ?? e0.target2,
                          ideal_entry: lj.ideal_entry ?? e0.ideal_entry, rr_at_current: lj.rr ?? e0.rr_at_current } : e0;
   const finalAction = lj ? lj.action : com && !["UNAVAILABLE", "SKIPPED"].includes(com.status) ? com.final_action : rec.action;
-  const recStatus = lj ? "CURRENT" : rec.current_status;
+  const recStatus = lvj.error ? "UNVERIFIED" : lj ? lj.current_status ?? "NEEDS_REVALIDATION" : rec.current_status;
   const adv = advise({ action: finalAction, price: priceNow, maxBuy: e?.max_buy, idealEntry: e?.ideal_entry, stop: e?.stop, rr: e?.rr_at_current, eventRisk: a.event_risk.level, vetoes: lj ? lj.vetoes : a.decision.vetoes, sizeLimit: a.decision.size_limit, status: recStatus, sectorKnown: a.sector_known });
   const zone0 = priceZone({ action: finalAction, price: priceNow, maxBuy: e?.max_buy, stop: e?.stop });
   // the zone is computed from the analysis-time price: once the stored plan is no longer current, say so
@@ -290,7 +297,7 @@ function StockDetail({ ticker }: { ticker: string }) {
           {(rec.version ?? 1) > 1 && <span title={`추천 #${rec.supersedes_id}을 AI가 검토한 새 버전입니다. 원래 추천은 그대로 보존됩니다.`}>AI 검토본 v{rec.version} · 발행 {stamp(rec.issued_at ?? null)}</span>}
         </div>
         <div className="actions">
-          <button className="primary" disabled={!!busy} onClick={() => setRefreshTick((t) => t + 1)}><IRefresh />분석 다시하기</button>
+          <button className="primary" disabled={!!busy || analysisJob.busy} onClick={analysisJob.start}><IRefresh />{analysisJob.busy ? "분석 진행 중…" : analysisJob.verifyOnly ? "작업 상태 확인" : "분석 다시하기"}</button>
           {watched
             ? <button disabled={!!busy} aria-pressed onClick={() => run("watch", async () => { await api.del(`/watchlist/${a.ticker}`); wl.reload(); refreshQuoteSubscriptions(); setNote("관심 종목에서 뺐습니다."); })}><IStar />관심 종목에서 빼기</button>
             : <button disabled={!!busy} aria-pressed={false} onClick={() => run("watch", async () => { await api.post(`/watchlist/${a.ticker}`); wl.reload(); refreshQuoteSubscriptions(); setNote("관심 종목에 추가했습니다. 종목 → 관심 탭과 홈에서 볼 수 있습니다."); })}><IStar />관심 종목 추가</button>}
@@ -301,10 +308,13 @@ function StockDetail({ ticker }: { ticker: string }) {
       </section>
 
       <StaleData error={d.error} at={d.fetchedAt} retry={d.reload} nowMs={nowMs} />
+      {analysisJob.busy && <Notice tone="info">분석 진행 중… 기존 결과를 유지합니다. {analysisJob.phase}</Notice>}
+      {analysisJob.error && <Notice tone="neg">{analysisJob.error}</Notice>}
+      {(lj?.review_reason || rec.committee_status === "REVIEW_REQUIRED") && <Notice tone="warn">{lj?.review_reason || "이전 AI 보류·비중 제한을 유지합니다. AI 검토를 다시 실행하기 전까지 제한을 확대하지 않습니다."}</Notice>}
       {rec.current_status && rec.current_status !== "CURRENT" && finalAction !== "DATA INSUFFICIENT" && <UnlessLive ticker={a.ticker} recId={rec.id}>{/* the live verdict replaces the stored re-check */}{( /* no plan to execute: the card below says why */
         <StatePanel kind={rec.current_status === "PLAN_INVALIDATED" ? "out_of_range" : "stale"} title={`${STATUS_INFO[rec.current_status]?.label ?? rec.current_status} — 지금은 이 계획대로 실행하지 마세요`}
                     what={<>{STATUS_INFO[rec.current_status]?.help ?? ""}{rec.current_status_reason ? <div className="caption" style={{ marginTop: 4 }}>{rec.current_status_reason}</div> : null}</>}
-                    actions={<>{live?.newer !== undefined && <button onClick={d.reload}>최신 분석 보기</button>}<button className="primary" disabled={!!busy} onClick={() => setRefreshTick((t) => t + 1)}>분석 다시하기</button></>} />
+                    actions={<>{live?.newer !== undefined && <button onClick={d.reload}>최신 분석 보기</button>}<button className="primary" disabled={!!busy || analysisJob.busy} onClick={analysisJob.start}>{analysisJob.busy ? "분석 진행 중…" : analysisJob.verifyOnly ? "작업 상태 확인" : "분석 다시하기"}</button></>} />
       )}</UnlessLive>}
       {split !== 1 && a.entry && (
         <Ribbon tone="info" cap="분할 조정" testId="split-adjusted">
@@ -322,7 +332,7 @@ function StockDetail({ ticker }: { ticker: string }) {
               {a.decision.vetoes.includes("STALE_PRICE") && (
                 <div className="explain" style={{ marginTop: 10 }} data-testid="stale-price-why">
                   분석한 시각에 20분 안의 체결가가 없어(장 시작 전·시간외에는 흔함) 오래된 가격으로 판단하지 않았습니다. 정규장에 다시 분석하면 판단이 나옵니다.
-                  <div style={{ marginTop: 8 }}><button className="primary sm" disabled={!!busy} onClick={() => setRefreshTick((t) => t + 1)}>분석 다시하기</button></div>
+                  <div style={{ marginTop: 8 }}><button className="primary sm" disabled={!!busy || analysisJob.busy} onClick={analysisJob.start}>{analysisJob.verifyOnly ? "작업 상태 확인" : "분석 다시하기"}</button></div>
                 </div>
               )}
             </div>
@@ -397,7 +407,7 @@ function StockDetail({ ticker }: { ticker: string }) {
                 {brief.valuation.assumptions.map((t, i) => <div key={i} className="assume"><span className="kind k-ASSUME">가정</span><span>{t}</span></div>)}
               </div>
             )}
-            <PositionPlanView p={d.data.position_plan} shown={quantityShown(rec.current_status, stored.actionable_now)} why={rec.current_status_reason} live={{ ticker: a.ticker, recId: rec.id, stop: e?.stop }} />
+            <PositionPlanView p={d.data.position_plan} shown={quantityShown(recStatus, lj ? lj.actionable_now : stored.actionable_now)} why={lj?.current_status_reason || rec.current_status_reason} live={{ ticker: a.ticker, recId: rec.id, stop: e?.stop }} />
           </div>
           <div>
             <h3 className="t-card" style={{ marginBottom: 10 }}>가격은 어떻게 평가했나</h3>
@@ -455,6 +465,8 @@ function StockDetail({ ticker }: { ticker: string }) {
 
       {/* ⑥ 뉴스 · 이슈 · 일정 */}
       <Section no={6} title="뉴스 · 이슈 · 일정" />
+      <SaveTickerNews ticker={ticker} />
+      <SaveTickerSupplement resource="options" ticker={ticker} />
       <div className="split">
         <Card title="현재 이슈 영향" sub explain="MarketLens가 뉴스·사건을 이 종목에 연결해 계산한 해석(−100~+100)입니다. 기사에 적힌 사실이 아닙니다.">
           <div className="tiles" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>

@@ -48,16 +48,16 @@ export function MorningBriefing() {
   const b = useApi<Briefing>("/briefing");
   usePoll(b.reload, 3_000, true);  // it follows the live prices
   const refresh = async () => { try { await api.get("/briefing?refresh=true"); } finally { b.reload(); } };
-  return b.data ? <BriefingView x={b.data} onRefresh={refresh} /> : null;
+  return b.data ? <BriefingView x={b.data} onRefresh={refresh} showCandidates={false} /> : null;
 }
 
-export function BriefingView({ x, onRefresh }: { x: Briefing; onRefresh?: () => void }) {
+export function BriefingView({ x, onRefresh, showCandidates = true }: { x: Briefing; onRefresh?: () => void; showCandidates?: boolean }) {
   if (!x.date_kst || !x.market || !x.account) return null;  // an incomplete answer never breaks the home screen
   const acc = x.account;
   const refresh = () => onRefresh?.();
   const tone = (v: number | null | undefined) => (v == null ? "" : v > 0 ? "up" : v < 0 ? "down" : "");
   return (
-    <section className="brief enter" aria-label="오늘의 브리핑" data-testid="morning-briefing">
+    <section className={`brief enter${showCandidates ? "" : " home-brief"}`} aria-label="오늘의 브리핑" data-testid="morning-briefing">
       <div className="brief-head">
         <div className="brief-title">
           <span className="sun" aria-hidden>☀</span>
@@ -114,7 +114,7 @@ export function BriefingView({ x, onRefresh }: { x: Briefing; onRefresh?: () => 
             ))}
           </div>
         )}
-        {x.candidates.length > 0 && (
+        {showCandidates && x.candidates.length > 0 && (
           <div className="brief-col">
             <h3>지난 스캔의 매수 후보</h3>
             {x.candidates.map((c) => (
@@ -132,6 +132,7 @@ export function BriefingView({ x, onRefresh }: { x: Briefing; onRefresh?: () => 
         )}
       </div>
       {!x.live && x.notes.length > 0 && <div className="brief-notes">{x.notes.join(" · ")}</div>}
+      {acc.notes?.map((note, i) => <div className="brief-notes" key={i}>{note}</div>)}
     </section>
   );
 }

@@ -53,7 +53,7 @@ const BAD_QUALITY = new Set(["STALE", "MISSING", "CONFLICTING"]);
  * Everything else is listed separately — an old or out-of-range BUY never looks like a fresh one. */
 export function splitCandidates(rows: OppRow[]): { valid: OppRow[]; notValid: OppRow[] } {
   const bullish = rows.filter((r) => BULLISH.has(r.action));
-  const ok = (r: OppRow) => r.actionable_now !== false && (r.current_status ?? "CURRENT") === "CURRENT" && !BAD_QUALITY.has(r.data_quality) && !BAD_QUALITY.has(r.price_quality);
+  const ok = (r: OppRow) => r.actionable_now === true && r.current_status === "CURRENT" && !BAD_QUALITY.has(r.data_quality) && !BAD_QUALITY.has(r.price_quality);
   return { valid: bullish.filter(ok), notValid: bullish.filter((r) => !ok(r)) };
 }
 
@@ -77,12 +77,11 @@ function CandidateCard({ r, lead }: { r: OppRow; lead?: boolean }) {
   const zone = r.ideal_entry != null && r.max_buy != null ? `${price(r.ideal_entry)}–${num(r.max_buy, 2)}` : "자료 부족";  // one line in the tile
   const toMax = r.price != null && r.max_buy != null ? r.max_buy / r.price - 1 : null;
   return (
-    <Link to={`/stocks/${r.ticker}`} className={`cand${lead ? " lead" : ""}`} style={{ ["--rail" as string]: `var(--${actionTone(r.action)})` }} data-testid="candidate-card" aria-label={`${r.ticker} 상세 보기`}>
+    <Link to={`/stocks/${r.ticker}`} title={plain} className={`cand compact-candidate${lead ? " lead" : ""}`} style={{ ["--rail" as string]: `var(--${actionTone(r.action)})` }} data-testid="candidate-card" aria-label={`${r.ticker} 상세 보기`}>
       <div className="top">
         <div style={{ minWidth: 0 }}><div className="tk">{r.ticker}</div><div className="co">{r.company} · {r.sector_known === false ? "업종 불명확" : r.sector}</div></div>
         <span className="stack-tight" style={{ alignItems: "flex-end" }}><Action a={r.action} status={r.current_status} quality={r.data_quality} /><LiveZone ticker={r.ticker} recId={r.id} compact /></span>
       </div>
-      <div className="why">{plain}</div>
       {r.key_reason ? <div className="why"><b>핵심 이유 · </b>{r.key_reason}</div> : null}
       <div className="facts">
         <div title="최신 시세(앱 공용 스트림) — 아래 ‘분석 가격’과 다를 수 있습니다"><div className="t">현재가</div><div className="v"><CardPrice r={r} /></div></div>
@@ -104,9 +103,9 @@ function CandidateCard({ r, lead }: { r: OppRow; lead?: boolean }) {
  * cost — and whether the scan finished (an interrupted scan keeps what it saved). */
 /** What the live prices say right now, without a scan: names inside their buy zone with a current price, and held
  * names at their stop or target. Updates on every quote. */
-export function LiveSignals() {
+export function LiveSignals({ exclude = [] }: { exclude?: string[] }) {
   const rows = useJudgedRows();
-  const buy = rows.filter((r) => r.judge?.valid_now).sort((a, b) => (b.judge?.rr_now ?? 0) - (a.judge?.rr_now ?? 0));
+  const buy = rows.filter((r) => r.judge?.valid_now && !exclude.includes(r.ticker) && !r.judge?.held).sort((a, b) => (b.judge?.rr_now ?? 0) - (a.judge?.rr_now ?? 0));
   const held = rows.filter((r) => r.judge?.held && (r.judge.zone === "STOP_HIT" || r.judge.zone === "TARGET_HIT"));
   const near = rows.filter((r) => r.judge?.bullish && r.judge.zone === "ABOVE_MAX" && (r.judge.to_max_pct ?? -1) > -0.02);
   return (
@@ -200,13 +199,14 @@ export default function Dashboard() {
   const notReady = x.readiness?.scanner_status === "SCANNER_NOT_READY";
   const nowMs = st?.nowMs ?? Date.now();
   const scope = scopeLine(ss, sysMode);
-  const headline = !x.scan ? "후보를 고르는 중입니다" : shown.length ? "개 종목이 지금 매수 조건을 통과했습니다" : notReady ? "데이터 준비가 끝나지 않아 후보를 계산하지 못했습니다" : "지금은 매수 조건을 통과한 종목이 없습니다";
+  const choosing = ss?.state?.status === "RUNNING";
+  const headline = !x.scan ? choosing ? "후보를 고르는 중입니다" : "아직 후보 선정 결과가 없습니다" : shown.length ? "개 종목이 지금 매수 조건을 통과했습니다" : notReady ? "데이터 준비가 끝나지 않아 후보를 계산하지 못했습니다" : "지금은 매수 조건을 통과한 종목이 없습니다";
   return (
     <div className="grid">
       <div className="page-head enter">
         <div>
           <h1>오늘</h1>
-          <div className="t-sub">{x.scan ? <>{lv.at ? <><span className="live-dot" aria-hidden />실시간 판정 · 1초 · </> : null}후보 선정 {stampEt(x.scan.as_of)} ({ago(x.scan.as_of, nowMs)}){scope ? ` · ${scope}` : ""}</> : "데이터 준비가 끝나면 앱이 스스로 후보를 고르고, 실시간 가격으로 1초마다 다시 판정합니다."}</div>
+          <div className="t-sub">{x.scan ? <>{lv.at ? <><span className="live-dot" aria-hidden />실시간 판정 · 1초 · </> : null}후보 선정 {stampEt(x.scan.as_of)} ({ago(x.scan.as_of, nowMs)}){scope ? ` · ${scope}` : ""}</> : choosing ? "시장 분석을 실행 중입니다. 준비된 결과부터 표시합니다." : "데이터 준비와 자동 분석 상태는 설정에서 확인할 수 있습니다."}</div>
         </div>
         <div className="actions">
           {sysMode === "LIVE" && <button data-testid="goto-data-prep" onClick={() => document.getElementById("data-prep")?.scrollIntoView({ behavior: "smooth", block: "start" })}><IDownload />데이터 준비</button>}
@@ -220,9 +220,9 @@ export default function Dashboard() {
                     actions={<Link to="/settings?tab=status">원인 보기 →</Link>} />
       )}
 
+      <MorningBriefing />
       <div className="home-grid">
         <div className="home-main">
-          <MorningBriefing />
           {/* the first five seconds: how many names pass right now, the market's mood, the biggest risk, the next event */}
           <section className="today enter" aria-label="오늘의 요약">
             <div className="big">
@@ -249,7 +249,7 @@ export default function Dashboard() {
                 explain="매수 조건을 통과하고 지금 다시 확인해도 유효한 종목만, 최대 5개까지 보여줍니다.">
             {shown.length ? <div className="cands">{shown.map((r, i) => <CandidateCard key={r.id} r={r} lead={i === 0 && shown.length !== 2 && shown.length !== 4} />)}</div>
               : notReady && x.readiness ? <NotReady r={x.readiness} onChange={d.reload} />
-              : !x.scan ? <StatePanel kind="not_scanned" />
+              : !x.scan ? <StatePanel kind={choosing ? "analyzing" : "not_scanned"} actions={choosing ? undefined : <Link to="/settings?tab=status">데이터·자동 분석 상태 확인 →</Link>} />
               : <StatePanel kind="no_candidates" actions={<Link to="/stocks?tab=candidates">대기·관찰 종목 보기 →</Link>} />}
             {shown.length > 0 && shown.length < 3 && (
               <div className="explain" style={{ marginTop: 12 }} data-testid="few-candidates">매수 조건을 통과한 종목이 {shown.length}개뿐입니다. 빈자리를 점수 상위 종목으로 채우지 않았습니다. 대기·관찰 종목은 ‘전체 후보 보기’에서 볼 수 있습니다.</div>
@@ -279,7 +279,7 @@ export default function Dashboard() {
         </div>
 
         <aside className="home-rail" aria-label="보조 정보">
-          <LiveSignals />
+          <LiveSignals exclude={shown.map((r) => r.ticker)} />
           <div className="rail-card">
             <div className="head"><h2><IEvent />다가오는 일정</h2><Link to="/market?tab=calendar">전체 →</Link></div>
             {x.upcoming_catalysts.length ? x.upcoming_catalysts.slice(0, 5).map((e) => (

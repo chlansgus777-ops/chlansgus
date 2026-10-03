@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { stamp, stampEt } from "../format";
@@ -77,7 +77,7 @@ export function ProgressBars({ p }: { p: Record<string, number | null> }) {
 export interface SyncJob {
   status: "RUNNING" | "DONE" | "FAILED" | "PAUSED" | "INTERRUPTED" | "NEEDS_SETUP" | "INCOMPLETE"; round: number;
   bar_days_remaining?: number; fundamentals_pending?: number; errors?: string[]; missing?: string[]; started_at?: string; finished_at?: string;
-  reasons?: string[]; failures?: string[]; retry_at?: string; progress?: SyncProgress | null;
+  reasons?: string[]; failures?: string[]; retry_at?: string; progress?: SyncProgress | null; up_to_date?: boolean; target_session?: string;
 }
 export interface SyncProgress {
   percent: number; eta_seconds?: number | null; current?: string | null; current_for_seconds?: number | null;
@@ -133,9 +133,16 @@ const JOB_KO: Record<SyncJob["status"], string> = {
 /** LIVE: the button that fills the local data store (SEC list and filings, Polygon daily prices), with its progress.
  * Without it an installed app had no way to leave "NOT READY". */
 export function SyncControl({ onChange, compact = false }: { onChange?: () => void; compact?: boolean }) {
-  const st = useApi<{ job: SyncJob | null }>("/sync/status");
+  const st = useApi<{ job: SyncJob | null; target_session?: string }>("/sync/status");
   const [err, setErr] = useState<string | null>(null);
-  const job = st.data?.job ?? null;
+  const [requesting, setRequesting] = useState(false);
+  const [uncertain, setUncertain] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const sending = useRef(false);
+  const [answer, setAnswer] = useState<SyncJob | null>(null);
+  useEffect(() => { setAnswer(null); }, [st.data]);
+  const job = answer ?? st.data?.job ?? null;
+  const targetSession = st.data?.target_session ?? job?.target_session;
   const running = job?.status === "RUNNING";
   useEffect(() => {
     if (!running) return;
@@ -146,9 +153,42 @@ export function SyncControl({ onChange, compact = false }: { onChange?: () => vo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running]);
   const start = async () => {
+    if (sending.current || running) return;
+    sending.current = true;
+    setRequesting(true);
     setErr(null);
-    try { await api.post("/sync/start"); st.reload(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    setMessage(null);
+    try {
+      if (uncertain) {
+        const recovered = await api.get<{ job: SyncJob | null }>("/sync/status");
+        setAnswer(recovered.job);
+        setUncertain(false);
+        setMessage(recovered.job?.status === "RUNNING" ? "이미 시작된 데이터 준비를 확인했습니다." : "작업 상태를 확인했습니다. 필요하면 다시 시작하세요.");
+      } else {
+        const result = await api.post<{ started: boolean; reason?: string; job?: SyncJob | null }>("/sync/start");
+        setAnswer(result.job ?? null);
+        setMessage(result.started ? "다운로드 작업을 시작했습니다." : result.reason ?? "시작되지 않았습니다. 작업 상태를 확인하세요.");
+      }
+      st.reload();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setUncertain(true);
+      try {
+        const recovered = await api.get<{ job: SyncJob | null }>("/sync/status");
+        setAnswer(recovered.job);
+        if (recovered.job?.status === "RUNNING") {
+          setUncertain(false);
+          setMessage("응답은 끊겼지만 서버에서 시작된 작업을 찾았습니다. 진행 상황을 이어서 표시합니다.");
+        }
+      } catch { /* keep the last result; never automatically repeat a POST */ }
+    } finally { sending.current = false; setRequesting(false); }
   };
+  const feedback = <div aria-live="polite" role="status">
+    {requesting && <span>시작 요청 중…</span>}
+    {message && <Notice tone="warn">{message}</Notice>}
+    {(err || st.error) && <Notice tone="neg">{err || st.error}</Notice>}
+    {uncertain && <span>서버의 작업 시작 여부를 확인해야 합니다. 다시 누르면 상태만 조회합니다.</span>}
+  </div>;
   const [open, setOpen] = useState(false);
   if (compact && job?.status === "DONE" && !job.missing?.length && !open) {
     // finished: one line (when, what next) instead of a finished checklist taking half the home screen
@@ -156,22 +196,24 @@ export function SyncControl({ onChange, compact = false }: { onChange?: () => vo
       <div className="row" data-testid="sync-done">
         <span className="pos" aria-hidden>✓</span>
         <span>준비 완료{job.finished_at ? ` · ${stamp(job.finished_at)}` : ""}</span>
-        <span className="t-sub">하루 한 번 누르면 새 거래일만 받습니다.</span>
+        <span className="t-sub">일봉·재무 데이터{job.target_session ? ` · 받은 기준 ${job.target_session}` : ""}{targetSession ? ` · 최신 기준 ${targetSession}` : ""}</span>
         <span style={{ flex: 1 }} />
         <button className="ghost sm" onClick={() => setOpen(true)}>자세히</button>
-        <button className="sm" onClick={start}>새 거래일 받기</button>
-        {err && <Notice tone="neg">{err}</Notice>}
+        <button className="sm" disabled={requesting} onClick={start}>{uncertain ? "작업 상태 확인" : requesting ? "시작 요청 중…" : "새 거래일 받기"}</button>
+        {feedback}
       </div>
     );
   }
   return (
     <div className="sync-control">
       <div className="row">
-        <button className="primary" disabled={running} onClick={start}>{running ? "데이터 받는 중…" : "데이터 준비 시작"}</button>
+        <button className="primary" disabled={running || requesting} onClick={start}>{requesting ? "시작 요청 중…" : running ? "데이터 받는 중…" : uncertain ? "작업 상태 확인" : "데이터 준비 시작"}</button>
         {job && <span className="t-sub">상태: {JOB_KO[job.status] ?? job.status} · {job.round}회차
           {job.bar_days_remaining !== undefined && ` · 남은 가격 거래일 ${job.bar_days_remaining}`}
           {job.fundamentals_pending !== undefined && ` · 재무 대기 ${job.fundamentals_pending}종목`}</span>}
       </div>
+      <p className="caption">일봉 가격 이력·종목 목록·재무 자료를 받습니다. 실시간 시세 연결은 별도입니다.{targetSession && ` 최신 기준 거래일: ${targetSession}`}{job?.status === "DONE" && job.up_to_date && job.target_session === targetSession && " · 새로 받을 데이터 없이 이미 최신입니다."}</p>
+      {feedback}
       {job?.progress ? <SyncProgressView p={job.progress} running={running} /> : null}
       <div className="explain">무료 API 요청 한도를 지키며 받기 때문에 처음 한 번은 1시간 안팎 걸릴 수 있습니다. 앱을 켜 둔 채 기다리세요.
         중간에 꺼도 받은 데이터는 남고, 다시 누르면 이어서 받습니다. 그 뒤로는 하루 한 번 누르면 새 거래일만 받습니다.</div>
@@ -190,7 +232,6 @@ export function SyncControl({ onChange, compact = false }: { onChange?: () => vo
         </Notice>
       ) : null}
       {job?.errors?.length ? <ul className="list">{job.errors.map((x, i) => <li key={i}><span className="dot warn">!</span><span>{x}</span></li>)}</ul> : null}
-      {err && <Notice tone="neg">{err}</Notice>}
     </div>
   );
 }

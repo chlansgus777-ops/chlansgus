@@ -40,7 +40,9 @@ def test_a_name_analysed_again_shows_that_analysis_in_the_list(client):  # noqa:
     rows = c.get("/api/opportunities").json()["rows"]
     t, rank = rows[-1]["ticker"], rows[-1]["rank"]
     svc._clock["t"] = svc._clock["t"] + timedelta(minutes=10)
-    assert c.get(f"/api/stocks/{t}?refresh=true", headers={"X-MarketLens-Client": "test"}).status_code == 200
+    assert c.post(f"/api/stocks/{t}/analysis", headers={"X-MarketLens-Client": "test"}).status_code == 202
+    svc.analyses.wait(f"analysis:{t}", 10)
+    assert c.get(f"/api/stocks/{t}").status_code == 200
     after = {r["ticker"]: r for r in c.get("/api/opportunities").json()["rows"]}
     row = after[t]
     assert row["rank"] == rank and row["reanalyzed_at"] and row["id"] != rows[-1]["id"]

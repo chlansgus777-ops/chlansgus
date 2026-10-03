@@ -21,6 +21,9 @@ class HttpClient:
     def get_text(self, path: str, params: dict[str, Any] | None = None) -> str:
         return self._request(path, params).text
 
+    def close(self) -> None:
+        self._client.close()
+
     def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
         r = self._request(path, params)
         try:

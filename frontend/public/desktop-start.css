@@ -1,0 +1,15 @@
+:root { color-scheme: dark; font-family: "Segoe UI", "Malgun Gothic", sans-serif; background: #0b101b; color: #eff3fa; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(ellipse at 50% 40%, #182238, #0b101b 65%); }
+main { text-align: center; width: min(440px, calc(100vw - 48px)); }
+.brand { font-size: 16px; letter-spacing: .08em; margin-top: 22px; color: #aebde0; }
+h1 { font-size: clamp(26px, 4vw, 36px); font-weight: 600; letter-spacing: -.04em; margin: 18px 0; }
+p { color: #a9b4c7; font-size: 14px; line-height: 1.8; min-height: 50px; }
+#progress { width: 180px; height: 3px; background: #283147; border-radius: 3px; overflow: hidden; margin: 22px auto; }
+#progress span { display: block; width: 40%; height: 100%; background: #69dcc0; border-radius: 3px; animation: ready 1.5s ease-in-out infinite alternate; }
+button { border: 1px solid #62748f; background: #1c2a40; color: #eff3fa; padding: 11px 18px; border-radius: 8px; cursor: pointer; margin: 12px 0; }
+button:hover { background: #283953; }
+button:focus-visible { outline: 2px solid #69dcc0; outline-offset: 3px; }
+small { display: block; margin-top: 36px; color: #7d8ba2; font-size: 12px; }
+[hidden] { display: none !important; }
+@keyframes ready { from { transform: translateX(-25%); } to { transform: translateX(175%); } }
+@media (prefers-reduced-motion: reduce) { #progress span { animation: none; width: 100%; } }

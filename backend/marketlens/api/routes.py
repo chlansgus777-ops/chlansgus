@@ -134,8 +134,11 @@ def _overlay_live(row: dict[str, Any], live: dict[str, Any] | None) -> None:
                 "stop": live["stop"], "target": live["target1"], "target2": live["target2"], "rr": live["rr"], "downside": live["downside"],
                 "buy_zone_low": live["buy_zone_low"], "buy_zone_high": live["buy_zone_high"], "live_at": live["at"]})
     bullish = live["action"] in {a.value for a in BULLISH_ACTIONS}
-    row["actionable_now"] = (live["data_quality"] in ("FRESH", "DELAYED")) if bullish else None
-    row["current_status"], row["current_status_reason"] = "CURRENT", "실시간 가격으로 다시 판정"
+    row["actionable_now"] = live.get("actionable_now", False) if bullish else None
+    row["current_status"] = live.get("current_status", "NEEDS_REVALIDATION")
+    row["current_status_reason"] = live.get("current_status_reason", "현재가 재확인 필요")
+    row["review_reason"] = live.get("review_reason")
+    row["size_limit"] = live.get("size_limit")
 
 
 def _scan_rows(s: MarketLensService, ss: Any) -> tuple[Any, list[dict[str, Any]], dict[int, dict[str, Any]]]:
@@ -203,6 +206,16 @@ def run_scan(req: Request, committee: bool = True) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- stock detail
+@router.post("/stocks/{ticker}/analysis", status_code=202)
+def start_stock_analysis(req: Request, ticker: str) -> dict[str, Any]:
+    return svc(req).start_analysis(_ticker(ticker))
+
+
+@router.get("/stocks/{ticker}/analysis")
+def stock_analysis_status(req: Request, ticker: str) -> dict[str, Any]:
+    return svc(req).analysis_status(_ticker(ticker))
+
+
 @router.get("/scan/status")
 def scan_status(req: Request) -> dict[str, Any]:
     """The last scan: progress (COMPLETE / RUNNING / INTERRUPTED with how many results were saved) and coverage —
@@ -214,30 +227,19 @@ def scan_status(req: Request) -> dict[str, Any]:
 def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
     s = svc(req)
     t = _ticker(ticker)
-    # analysing stores a recommendation: a GET may do that only for the app itself (the client header a cross-site
-    # image, link or no-cors fetch cannot send) — round 10 security invariant; without it the stored result is read
-    may_write = req.headers.get("x-marketlens-client") is not None
-    if refresh and not may_write:
-        raise HTTPException(403, "재분석은 앱 화면에서만 요청할 수 있습니다(X-MarketLens-Client 헤더 필요)")
+    # Reads never store analyses. Mutations use the command route and the server's local/paired-device policy.
     if refresh:
-        s.analyze(t, run_committee=False, persist=True)
+        raise HTTPException(405, "조회로 분석을 저장할 수 없습니다. POST /stocks/{ticker}/analysis를 사용하세요.")
     with s.sf() as ss:
         row = s.latest_company_recommendation(ss, t)
-        if row is None and not may_write:
-            raise HTTPException(404, f"{t}: 저장된 분석이 없습니다 — 앱 화면에서 분석을 요청하세요")
         if row is None:
-            try:
-                s.analyze(t, run_committee=False, persist=True)
-            except KeyError:
-                raise HTTPException(404, f"{t}: 분석 시점의 유니버스에 없는 종목") from None
-            row = s.latest_company_recommendation(ss, t)
-        if row is None:
-            raise HTTPException(404, f"{t}: 분석 결과 없음")
+            raise HTTPException(404, f"{t}: 저장된 분석이 없습니다 — 분석 시작을 누르세요")
         com = repo.committee_for(ss, row.id)
         history = [{"id": h.id, "as_of": h.as_of.isoformat(), "score": h.score, "action": h.final_action} for h in s.company_recommendations(ss, t, limit=30, light=True)]
         bars = (row.inputs or {}).get("bars") or []
         quote_pending = s.quote_soon(t, wait=STORE_FIRST_WAIT)  # the current-price re-check never holds the page longer
         summary = _row_summary(row, s) | {"quote_pending": quote_pending}
+        _overlay_live(summary, s.rejudged(row.id))
         return {
             "recommendation": summary,
             # the five-question reading of this analysis, on today's share basis (product overhaul 2026-09-28)
@@ -267,9 +269,9 @@ def _position_plan(s: MarketLensService, ss: Any, row: Any, summary: dict[str, A
     """Dollars and whole shares for a buy recommendation, from the user's portfolio value (cash + holdings at the
     last close). Without an entered portfolio the screen says so instead of guessing an account size."""
     from marketlens.domain.portfolio import position_plan
-    from marketlens.domain.sizing import recommendation_size_cap
+    from marketlens.domain.sizing import recommendation_size_cap, tightest
 
-    if row.final_action not in {a.value for a in BULLISH_ACTIONS}:
+    if summary.get("action", row.final_action) not in {a.value for a in BULLISH_ACTIONS}:
         return {"available": False, "reason": "매수 판정이 아니어서 매수 수량을 계산하지 않음"}
     # an order-sized quantity only for a recommendation that holds NOW (independent review 2026-09-28 F04): an expired,
     # re-judged or unchecked plan is a record of the analysis, not something to buy — the screen shows why instead
@@ -287,8 +289,8 @@ def _position_plan(s: MarketLensService, ss: Any, row: Any, summary: dict[str, A
     nav = snap.nav if snap is not None else None
     price = summary.get("revalidated_price") or summary.get("price")  # the re-checked current price when there is one
     current = next((h.quantity * price for h in pf.holdings if h.ticker == row.ticker), 0.0) if price else 0.0
-    size_cap = recommendation_size_cap(row)  # every limit: decision, portfolio review, AI portfolio manager (review 2026-09-28 F01/F05)
-    p = position_plan(row.final_action, size_cap, nav, price, summary.get("stop"), current, s.model_config().portfolio)  # stop on today's share basis
+    size_cap = tightest(recommendation_size_cap(row), summary.get("size_limit"))
+    p = position_plan(summary.get("action", row.final_action), size_cap, nav, price, summary.get("stop"), current, s.model_config().portfolio)
     if p is None:
         why = ("포트폴리오(현금·보유 종목)를 입력하면 매수 금액과 수량을 계산합니다" if not nav
                else "비중 한도(WATCH)로 새 매수 금액이 없음" if size_cap == "WATCH" else "현재가가 없어 계산하지 않음")
@@ -337,6 +339,11 @@ def _ctx(s: MarketLensService) -> tuple[Any, bool]:
     """The newest shared market context at once; an older one than CONTEXT_MAX_AGE is rebuilt in the background
     (review 2026-09-28 F06) and the answer says so — the screen never waits for the news collection."""
     return s.context_view(wait=VIEW_FIRST_WAIT)
+
+
+@router.get("/news")
+def latest_news(req: Request, ticker: str | None = None) -> dict[str, Any]:
+    return svc(req).news_view(_ticker(ticker) if ticker else None)
 
 
 @router.get("/issues")
@@ -655,7 +662,7 @@ def set_portfolio(req: Request, body: PortfolioIn) -> dict[str, Any]:
         for h in body.holdings:
             repo.upsert_holding(ss, _ticker(h.ticker), h.quantity, h.cost_basis)
         ss.commit()
-    s.invalidate_live_plans()  # held flags / costs of the live verdicts
+    s.portfolio_changed()  # invalidate account-dependent decisions
     return portfolio(req)
 
 
@@ -665,7 +672,7 @@ def remove_holding(req: Request, ticker: str, trades_only: bool = False, securit
     (``trades_only``: the trade records only — "delete all records" in the ledger keeps an entered line)."""
     s = svc(req)
     out = s.remove_holding(_ticker(ticker), keep_manual=trades_only, security=security)
-    s.invalidate_live_plans()
+    s.portfolio_changed()
     return out
 
 
@@ -718,7 +725,7 @@ def add_transaction(req: Request, body: TradeIn) -> dict[str, Any]:
         tid = s.add_transaction(_ticker(body.ticker), body.day, body.kind, body.quantity, body.price, body.fees, body.amount, body.split_from, body.split_to, body.note)
     except LedgerError as e:
         raise HTTPException(400, str(e)) from None
-    s.invalidate_live_plans()
+    s.portfolio_changed()
     return {"added": tid}
 
 
@@ -733,7 +740,7 @@ def delete_transaction(req: Request, tid: int) -> dict[str, Any]:
         raise HTTPException(404, str(e)) from None
     except LedgerError as e:
         raise HTTPException(400, str(e)) from None
-    s.invalidate_live_plans()
+    s.portfolio_changed()
     return {"deleted": tid}
 
 
@@ -850,6 +857,74 @@ class SetupIn(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
 
 
+@router.get("/saveticker/connection")
+def saveticker_status(req: Request) -> dict[str, Any]:
+    return svc(req).saveticker_connection.status()
+
+
+@router.post("/saveticker/browser")
+def saveticker_browser_start(req: Request) -> dict[str, Any]:
+    try:
+        return svc(req).saveticker_connection.start_browser()
+    except ValueError as ex:
+        raise HTTPException(409, str(ex)) from None
+
+
+@router.delete("/saveticker/browser")
+def saveticker_browser_stop(req: Request) -> dict[str, Any]:
+    return svc(req).saveticker_connection.stop_browser()
+
+
+@router.post("/saveticker/browser/news")
+async def saveticker_browser_news(req: Request) -> dict[str, Any]:
+    key = req.headers.get("X-MarketLens-News-Bridge", "")
+    connection = svc(req).saveticker_connection
+    if not connection.browser_authorized(key):
+        raise HTTPException(401, "브라우저 연결 키가 없거나 만료됐습니다.")
+    data = bytearray()
+    async for chunk in req.stream():
+        if len(data) + len(chunk) > 256 * 1024:
+            raise HTTPException(413, "뉴스 응답이 너무 큽니다.")
+        data.extend(chunk)
+    import json
+    from marketlens.providers.contracts import ProviderDataError
+    try:
+        body = json.loads(data)
+        if not isinstance(body, dict):
+            raise ValueError("invalid body")
+        return connection.receive_browser(key, body)
+    except PermissionError:
+        raise HTTPException(401, "브라우저 연결 키가 만료됐습니다.") from None
+    except (ValueError, ProviderDataError):
+        raise HTTPException(422, "뉴스 응답 형식·발행 시각 검증에 실패했습니다.") from None
+
+
+@router.get("/saveticker/browser/news")
+def saveticker_browser_news_no_get() -> None:
+    raise HTTPException(405, "브라우저 뉴스 전달은 인증된 POST 요청만 허용합니다.")
+
+
+@router.get("/saveticker/supplement")
+def saveticker_supplement(req: Request) -> dict[str, Any]:
+    return svc(req).saveticker_connection.supplement_view()
+
+
+@router.post("/saveticker/connection")
+async def saveticker_connect(req: Request) -> dict[str, Any]:
+    # Pydantic validation responses can echo invalid input: handle this sensitive body explicitly.
+    try:
+        body = await req.json()
+    except ValueError:
+        raise HTTPException(400, "올바른 연결 요청이 아닙니다.") from None
+    if (not isinstance(body, dict) or not isinstance(body.get("email"), str)
+            or not isinstance(body.get("password"), str) or type(body.get("remember", False)) is not bool):
+        raise HTTPException(400, "이메일·비밀번호와 저장 여부를 확인하세요.")
+    try:
+        return svc(req).saveticker_connection.connect(body["email"], body["password"], body.get("remember", False))
+    except ValueError as ex:
+        raise HTTPException(422, str(ex)) from None
+
+
 @router.put("/settings/setup")
 def save_setup(req: Request, body: SetupIn) -> dict[str, Any]:
     """First-run setup from the screen (no file editing). Values are stored, never returned; the running backend
@@ -861,6 +936,8 @@ def save_setup(req: Request, body: SetupIn) -> dict[str, Any]:
     svc(req)  # the service must exist (and the CSRF guard has already checked the client header)
     if {"TOSS_CLIENT_ID", "TOSS_CLIENT_SECRET"} & set(body.values):
         raise HTTPException(status_code=422, detail="토스증권 키는 '토스증권 연결'에서 입력하세요 — 저장하기 전에 연결을 확인합니다")
+    if {"SAVETICKER_EMAIL", "SAVETICKER_PASSWORD"} & set(body.values):
+        raise HTTPException(422, "SaveTicker 계정은 'SaveTicker 연결'에서 입력하세요 — 로그인과 수집을 확인한 뒤 저장합니다.")
     try:
         where = _save(body.values)
     except ValueError as e:

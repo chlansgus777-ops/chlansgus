@@ -5,7 +5,7 @@ import { Card, ConfirmButton, Donut, Empty, Err, Loading, Notice, Ribbon, StaleD
 import { Ledger } from "../components/Ledger";
 import { DomesticHoldings, TossCard, TossFills, type TossView } from "../components/TossConnect";
 import { KrwReturn, type KrwView } from "../components/KrwReturn";
-import { AccountLiveCard, signedWon, useAccountLive, type AccountRow } from "../components/AccountLive";
+import { AccountLiveCard, signedWon, useAccountLive } from "../components/AccountLive";
 import { LivePrice } from "../components/LivePrice";
 import { LiveZone } from "../components/LiveZone";
 import { ITrash } from "../components/icons";
@@ -60,7 +60,6 @@ export function nyToday(now: Date = new Date()): string {
 
 export default function Portfolio() {
   const p = useApi<Pf>("/portfolio");
-  const acct = useAccountLive(!!p.data?.holdings?.length);  // the account now, every second (as the Toss app counts it)
   // prices the store lacked, or the purchase-day exchange rates, are being fetched in the background: ask again shortly
   usePoll(p.reload, 3_000, !!p.data?.history_pending?.length || !!p.data?.krw?.loading);
   const [params] = useSearchParams();
@@ -115,7 +114,7 @@ export default function Portfolio() {
       <div className="page-head"><div><h1>내 포트폴리오</h1><div className="t-sub">{x.note}</div></div></div>
       <StaleData error={p.error} at={p.fetchedAt} retry={p.reload} />
       {x.broker?.enabled && <TossCard view={x.broker} compact onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />}
-      {acct && !empty && <AccountLiveCard a={acct} />}
+      {!empty && <LiveAccount />}
       {(x.history_pending?.length ?? 0) > 0 && <Notice tone="info">가격 이력을 받는 중: {x.history_pending?.join(", ")} — 받는 대로 평가금액을 다시 계산합니다.</Notice>}
       {x.missing_prices.length > 0 && (
         <Ribbon tone="warn" cap="가격 없음" testId="missing-prices">
@@ -148,7 +147,7 @@ export default function Portfolio() {
 <div className="scroll"><table><thead><tr><th>종목</th><th className="num">수량</th><th className="num">매입 단가</th><th className="num">종가(기준일)</th><th>현재가</th><th className="num" title="지금 가격 기준 — 토스증권 계좌 종목은 토스증권이 계산한 손익에 그 뒤 가격 변화만 더한 값">지금 손익</th><th className="num" title="오늘 손익 — 오늘 산 주식은 산 가격부터 계산(토스 앱과 같은 기준)">오늘</th><th className="num">평가액(종가)</th><th className="num">평가손익(종가)</th><th className="num">비중</th><th>섹터</th><th className="row-actions"><span className="sr-only">정리</span></th></tr></thead>
             <tbody>{x.holdings.map((h) => <tr key={h.ticker} className="nowrap-row"><td><Link to={`/stocks/${h.ticker}`}><b>{h.ticker}</b></Link></td><td className="num">{shares(h.quantity)}{h.source === "toss" ? <div className="caption src-toss" title="토스증권 계좌의 수량·평균 매입가 (자동 동기화)">토스 계좌</div> : null}{h.outside_broker ? <div className="caption warn" title="토스증권 계좌에 없는 종목 — 다른 증권사 보유면 그대로, 판 종목이면 삭제">토스에 없음</div> : null}{h.source === "ledger" ? <div className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}>거래 기록 기준</div> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td className="num">{price(h.cost_basis)}</td><td className="num">{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)}<div className="caption">{day(h.price_day)}</div></>}</td>
               <td><LivePrice ticker={h.ticker} size="sm" /><div style={{ marginTop: 4 }}><LiveZone ticker={h.ticker} compact /></div></td>
-              <LiveCells r={acct?.rows.find((a) => a.ticker === h.ticker)} />
+              <LiveCells ticker={h.ticker} />
               <td className="num">{h.market_value === null ? "—" : price(h.market_value)}</td><td className={`num ${h.unrealized_pnl === null ? "" : h.unrealized_pnl >= 0 ? "pos" : "neg"}`}>{h.unrealized_pnl === null ? "계산 안 함" : <>{h.unrealized_pnl >= 0 ? "▲" : "▼"} {price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</>}</td><td className="num">{h.weight === null ? "—" : pct(h.weight, 1, false)}</td><td className="wrap" style={{ minWidth: 110 }}>{h.sector}</td>
               <td className="row-actions">{h.source === "toss" ? <span className="caption" title="토스증권에서 사고팔면 자동으로 바뀝니다">자동</span> : <div className="row tight" style={{ flexWrap: "nowrap", justifyContent: "flex-end" }}>
                 {h.source === "ledger"
@@ -158,7 +157,7 @@ export default function Portfolio() {
                   confirm={h.source === "ledger" ? <>{h.ticker} 거래 기록을 모두 지울까요? <span className="caption">판 것이면 ‘매도 기록’이 맞습니다</span></> : <>{h.ticker} {shares(h.quantity)}주를 뺄까요?</>}
                   onConfirm={() => void removeHolding(h.ticker)} />
               </div>}</td></tr>)}</tbody></table></div>
-          {x.correlations.length > 0 && <div className="caption" style={{ marginTop: 8 }}><Term k="correlation">상관계수</Term>: {x.correlations.map(([a, b, c]) => `${a}↔${b} ${num(c, 2)}`).join(" · ")}</div>}
+          {x.correlations.length > 0 && <details className="caption" style={{ marginTop: 8 }}><summary>종목별 상관계수 · {x.correlations.length}쌍</summary><div style={{ marginTop: 8 }}><Term k="correlation">상관계수</Term>: {x.correlations.map(([a, b, c]) => `${a}↔${b} ${num(c, 2)}`).join(" · ")}</div></details>}
         </Card>
       )}
       {!empty && <KrwReturn k={x.krw} />}
@@ -209,7 +208,14 @@ export default function Portfolio() {
 }
 
 /** The account view's row of a holding: P&L now and today's, in dollars with the won value (the Toss app's figures). */
-function LiveCells({ r }: { r: AccountRow | undefined }) {
+function LiveAccount() {
+  const acct = useAccountLive();
+  return acct ? <AccountLiveCard a={acct} /> : null;
+}
+
+function LiveCells({ ticker }: { ticker: string }) {
+  const acct = useAccountLive(true, false);
+  const r = acct?.rows.find((row) => row.ticker === ticker);
   if (!r) return <><td className="num muted">—</td><td className="num muted">—</td></>;
   const cls = (v: number | null) => (v == null ? "" : v > 0 ? "pos" : v < 0 ? "neg" : "");
   const arrow = (v: number | null) => (v == null ? "" : v > 0 ? "▲ " : v < 0 ? "▼ " : "");

@@ -131,11 +131,13 @@ def live_quote(hub: Any, ticker: str, max_age_s: float = 90.0) -> Quote | None:
     """The newest Toss price of ``ticker`` as a Quote for an analysis, when the feed answered it recently — the same
     price the screens show, in every session Toss quotes. None otherwise (the analysis asks its providers)."""
     age = hub.poll_age(ticker)
-    if age is None or age > max_age_s:
+    if age is None or not 0 <= age <= max_age_s:
         return None
     st = hub._states.get(ticker.upper())
     tr = getattr(st, "poll", None)
     if tr is None:
+        return None
+    if not 0 <= (hub._now() - tr.trade_ts).total_seconds() <= max_age_s:
         return None
     return Quote(ticker=ticker.upper(), price=tr.price, timestamp=tr.trade_ts, session=classify_session(tr.trade_ts), source=SOURCE, mode=DataMode.LIVE,
                  previous_close=getattr(st, "previous_close", None), is_realtime=True)

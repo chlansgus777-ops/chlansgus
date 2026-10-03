@@ -1,6 +1,7 @@
 import { Card, Empty, Err, Loading } from "../components/ui";
 import { useSettling } from "../components/useApi";
 import { day, num, pct, stamp, errKo } from "../format";
+import { SaveTickerSupplement } from "../components/SaveTickerSupplement";
 
 interface Ev { event_id: string; event_type: string; event_date: string; title: string; affected: string[]; importance: number; expected_move: number | null; days_until: number; source: string }
 
@@ -10,6 +11,10 @@ const TYPE_KO: Record<string, string> = {
 };
 
 export default function CalendarPage() {
+  return <><PrimaryCalendar /><SaveTickerSupplement resource="calendar" /></>;
+}
+
+function PrimaryCalendar() {
   const c = useSettling<{ available: boolean; pending?: boolean; refreshing?: boolean; fetched_at?: string | null; refresh_error?: string | null; reason: string | null; events: Ev[] }>("/calendar?days=60");
   if (c.state === "loading" || c.data?.pending) return <Loading what="일정" rows={2} />;
   if (!c.data) return <Err error={c.error} retry={c.reload} />;

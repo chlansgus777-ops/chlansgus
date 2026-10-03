@@ -18,8 +18,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Mapping
 
-from marketlens.domain.enums import DataQuality
-from marketlens.domain.market_calendar import last_completed_session, market_active_between, to_ny, trading_days_between
+from marketlens.domain.enums import DataQuality, TradingSession
+from marketlens.domain.market_calendar import classify_session, last_completed_session, market_active_between, to_ny, trading_days_between
 
 SESSIONS = "sessions"
 DAYS = "days"
@@ -164,6 +164,17 @@ class RevalidationPolicy:
     max_move: float = 0.03  # a price move larger than this since the analysis → the analysis is out of date
 
 
+def quote_current(timestamp: datetime | None, now: datetime, max_age: timedelta, allow_close: bool = True) -> bool:
+    """Validate the original trade time, never its arrival time or the connection state."""
+    from marketlens.domain.market_calendar import session_close_utc
+    if timestamp is None or timestamp > now:
+        return False
+    if now - timestamp <= max_age:
+        return True
+    return bool(allow_close and classify_session(now) == TradingSession.CLOSED
+                and timestamp >= session_close_utc(last_completed_session(now)) - timedelta(minutes=1))
+
+
 STATUS_KO = {
     "CURRENT": "현재 유효", "NEEDS_REVALIDATION": "현재가 재확인 필요", "PLAN_INVALIDATED": "가격 조건 이탈",
     "AGING": "오래됨", "EXPIRED": "만료",
@@ -228,7 +239,7 @@ def recommendation_freshness(
         return RecommendationFreshness("NEEDS_REVALIDATION", recorded_quality, n, f"{when}; 분석 이후 중요한 새 이슈 발생({', '.join(new_major_events[:3])}) — 재분석 필요")
     age = now - as_of
     minutes = int(age.total_seconds() // 60)
-    quote_ok = quote_price is not None and quote_ts is not None and timedelta(0) <= now - quote_ts <= pol.max_quote_age
+    quote_ok = quote_price is not None and quote_current(quote_ts, now, pol.max_quote_age)
     # A plan that does not hold at its own analysis price is never actionable (independent review F01: a stored
     # BUY above its max buy price read as CURRENT right after it was made).
     if plan is not None and plan.bullish and plan.rec_price:
@@ -244,7 +255,7 @@ def recommendation_freshness(
     # the analysis price is itself a quote taken at ``as_of``: it proves the plan only as long as any quote would
     # (``max_quote_age``). After that, while the market has traded, a newer quote is required — listings that
     # show only cached quotes must say "check the price" instead of calling an unchecked BUY actionable.
-    if not market_active_between(as_of, now) or age <= pol.max_quote_age:
+    if quote_current(analysis_price_ts or as_of, now, pol.max_quote_age):
         if not market_active_between(as_of, now):
             return RecommendationFreshness("CURRENT", recorded_quality, n, f"{when}; 분석 {minutes}분 경과, 이후 가격 변동 가능 시간 없음")
         limit = int(pol.max_quote_age.total_seconds() // 60)

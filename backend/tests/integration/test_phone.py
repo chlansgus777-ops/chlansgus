@@ -52,6 +52,14 @@ def test_a_phone_is_let_in_with_the_code_and_can_only_look(world):
     r = phone.put("/api/portfolio", json={"holdings": []}, headers=H)
     assert r.status_code == 403 and r.json()["read_only"] is True
     assert phone.post("/api/watchlist/NVDA", headers=H).status_code == 403
+    assert phone.post("/api/stocks/NVDA/analysis", headers=H).status_code == 403
+    assert phone.post("/api/saveticker/connection", json={"email": "test@example.test", "password": "fixture-password"}, headers=H).status_code == 403
+    assert phone.post("/api/saveticker/browser", json={}, headers=H).status_code == 403
+    assert phone.post("/api/saveticker/browser/news", json={"news": {}}, headers=H | {"X-MarketLens-News-Bridge": "fake"}).status_code == 403
+    assert pc.get("/api/saveticker/connection").json()["status"] == "IDLE"
+    assert phone.get("/api/stocks/NVDA?refresh=true", headers=H).status_code == 405
+    assert phone.get("/api/stocks/NVDA", headers=H).status_code == 404
+    assert pc.get("/api/stocks/NVDA/analysis").json()["status"] == "IDLE"
     # the PC's own settings: never from a phone, even a paired one
     assert phone.get("/api/phone").status_code == 403
     assert phone.put("/api/phone", json={"enabled": False}, headers=H).status_code == 403

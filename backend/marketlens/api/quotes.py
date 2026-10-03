@@ -28,6 +28,11 @@ HEARTBEAT_S = 15.0
 STATUS_EVERY_S = 5.0
 
 
+def _validity_signature(row: dict[str, Any]) -> tuple[Any, ...]:
+    j = row.get("judge") or {}
+    return (row["state"], j.get("valid_now"), j.get("quote_current"), j.get("action"), j.get("as_of"))
+
+
 class ViewIn(BaseModel):
     tickers: list[str] = Field(default_factory=list, max_length=60)
 
@@ -86,7 +91,7 @@ async def stream(req: Request) -> StreamingResponse:
     async def gen() -> AsyncIterator[bytes]:
         v = hub.version
         first = hub.rows()
-        sent_state = {r["ticker"]: r["state"] for r in first}
+        sent_state = {r["ticker"]: _validity_signature(r) for r in first}
         last_alert = judge.last_alert_id
         last_app = await asyncio.to_thread(s.app_state)
         yield _sse("app", last_app)
@@ -103,7 +108,7 @@ async def stream(req: Request) -> StreamingResponse:
                 rows = hub.rows(since=v)
                 v = nv
                 if rows:
-                    sent_state.update({r["ticker"]: r["state"] for r in rows})
+                    sent_state.update({r["ticker"]: _validity_signature(r) for r in rows})
                     yield _sse("quotes", {"version": v, "rows": rows, "sent_at": time.time()})
             if judge.last_alert_id != last_alert:
                 new = judge.alerts(after=last_alert)
@@ -120,9 +125,9 @@ async def stream(req: Request) -> StreamingResponse:
                     last_app = app
                     yield _sse("app", app)
                 # states that change with the clock alone (실시간 → 최근 체결 없음, the session bell)
-                aged = [r for r in hub.rows() if sent_state.get(r["ticker"]) != r["state"]]
+                aged = [r for r in hub.rows() if sent_state.get(r["ticker"]) != _validity_signature(r)]
                 if aged:
-                    sent_state.update({r["ticker"]: r["state"] for r in aged})
+                    sent_state.update({r["ticker"]: _validity_signature(r) for r in aged})
                     yield _sse("quotes", {"version": v, "rows": aged, "sent_at": time.time()})
                 yield _sse("status", hub.status())
             if now - last_beat >= HEARTBEAT_S:

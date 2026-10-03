@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>MarketLens · SaveTicker 브라우저 연결</title>
+<style>body{background:#0b1020;color:#e6ebf6;font:16px/1.65 system-ui,sans-serif;margin:0;padding:32px}main{max-width:720px;margin:6vh auto;padding:28px;border:1px solid #303b54;border-radius:18px;background:#121a2e}h1{font-size:25px;letter-spacing:-.6px}p,li{color:#b5c0d5}button,a{font:inherit;color:#fff}button{background:#7766e6;border:0;border-radius:10px;padding:12px 18px;cursor:pointer}button:disabled{opacity:.45;cursor:default}a{color:#c1b5ff}#status{padding:12px;border-radius:10px;background:#202c44}.note{font-size:13px;color:#93a5bf}</style></head>
+<body><main><h1>로그인한 브라우저로 시장 정보 연결</h1>
+<p>SaveTicker 비밀번호를 MarketLens에 입력하지 않습니다. 이 브라우저의 정상 로그인으로 받은 뉴스·요약·실적·일정·리포트 목록·옵션 집계를 전달합니다.</p>
+<div id="status" role="status">MarketLens 확장을 확인하는 중…</div>
+<ol><li><a href="saveticker-browser.zip" download>확장 파일 내려받기</a> → 압축 풀기</li>
+<li>Chrome의 <b>chrome://extensions</b> 또는 Edge의 <b>edge://extensions</b> → 개발자 모드 → 압축해제된 확장 로드 → 방금 푼 폴더 선택</li>
+<li>이 페이지를 새로고침한 뒤 아래 버튼을 누릅니다. 열린 SaveTicker 탭에서 필요하면 정상 로그인합니다.</li></ol>
+<button id="pair" disabled>이 브라우저와 연결</button> <a href="https://saveticker.com/news" target="_blank" rel="noopener noreferrer">SaveTicker 열기</a>
+<p class="note">Chrome·Edge용입니다. 앱의 내부 브라우저에는 확장을 설치할 수 없으므로 이 주소를 Chrome·Edge에서 열어주세요. 뉴스는 약 2분, 기타 자료는 약 10분 간격으로 확인하며 SaveTicker 탭이 열려 있어야 합니다. 리포트 본문과 옵션 체인·IV·그릭스는 미확인입니다. 계좌·주문 변경 권한은 없습니다. 앱 재시작 또는 24시간 후에는 MarketLens 설정에서 다시 연결합니다.</p>
+</main><script src="saveticker-bridge-page.js"></script></body></html>

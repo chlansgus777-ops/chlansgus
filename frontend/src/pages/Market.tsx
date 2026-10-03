@@ -4,6 +4,7 @@ import { ago, num, pct, stamp, errKo } from "../format";
 import { REGIME_KO, ko } from "../i18n";
 import CalendarPage from "./Calendar";
 import Issues from "./Issues";
+import { SaveTickerSupplement, SaveTickerNews } from "../components/SaveTickerSupplement";
 import { MACRO_SERIES, MARKET_SERIES, SERIES_KO, SeriesTable, useMacro } from "./Macro";
 
 type Tab = "issues" | "calendar" | "macro" | "indices";
@@ -54,7 +55,7 @@ export default function Market() {
         <Tabs<Tab> label="시장 정보" value={tab} onChange={(v) => setParams(v === "issues" ? {} : { tab: v }, { replace: true })}
               items={[["issues", "이슈"], ["calendar", "일정"], ["macro", "거시 지표"], ["indices", "지수·시장 폭"]]} />
       </div>
-      {tab === "issues" ? <Issues /> : tab === "calendar" ? <CalendarPage /> : !d ? null : !d.available ? null : tab === "macro" ? (
+      {tab === "issues" ? <><Issues /><SaveTickerNews /><SaveTickerSupplement resource="reports" /><SaveTickerSupplement resource="options" /></> : tab === "calendar" ? <CalendarPage /> : !d ? null : !d.available ? null : tab === "macro" ? (
         <div className="grid">
           <section className="card flush"><div style={{ padding: "6px 8px 8px" }}><SeriesTable data={d} ids={MACRO_SERIES} /></div></section>
           <div className="caption">장단기 금리차(10년−2년): {num(d.yield_curve_2s10s ?? null)}%p · 월간·분기 지표는 발표 시각이 없어 전일 기준 공개값(ALFRED 빈티지)만 사용합니다.</div>

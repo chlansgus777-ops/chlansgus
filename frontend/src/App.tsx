@@ -1,19 +1,31 @@
-import type { ReactElement } from "react";
+import { Component, lazy, Suspense, type ReactElement, type ReactNode } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { ModeBanner, StatePanel } from "./components/ui";
+import { Loading, ModeBanner, StatePanel } from "./components/ui";
 import { QuickSearch } from "./components/QuickSearch";
 import { PhoneGate } from "./components/Phone";
 import { StatusBar, StatusProvider, useStatus } from "./components/status";
 import { BrandMark, IHelp, IHome, IMarket, IPerf, IPortfolio, ISettings, IStocks } from "./components/icons";
 import type { SystemInfo } from "./types";
 import Dashboard from "./pages/Dashboard";
-import Stocks from "./pages/Stocks";
-import StockDetail from "./pages/StockDetail";
-import Portfolio from "./pages/Portfolio";
-import Market from "./pages/Market";
-import Performance from "./pages/Performance";
-import Settings from "./pages/Settings";
-import Guide from "./pages/Guide";
+const Stocks = lazy(() => import("./pages/Stocks"));
+const StockDetail = lazy(() => import("./pages/StockDetail"));
+const Portfolio = lazy(() => import("./pages/Portfolio"));
+const Market = lazy(() => import("./pages/Market"));
+const Performance = lazy(() => import("./pages/Performance"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Guide = lazy(() => import("./pages/Guide"));
+
+/** A replaced build or a failed page must leave navigation and a recovery action visible. */
+export class PageBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  override state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  override render() {
+    return this.state.failed
+      ? <StatePanel kind="disconnected" what="화면을 불러오지 못했습니다. 앱이 갱신되었거나 연결이 끊겼을 수 있습니다."
+          actions={<button onClick={() => window.location.reload()}>화면 다시 열기</button>} />
+      : this.props.children;
+  }
+}
 
 /** Five destinations named after what the user wants to do (product overhaul 2026-09-28): today's view, finding and
  * judging a stock, my account, the market, and whether the recommendations worked. Settings and help sit apart. */
@@ -67,7 +79,7 @@ function Shell() {
           </div>
         )}
         <main className="main" key={loc.pathname.split("/").slice(0, 2).join("/")}>
-          <Routes>
+          <PageBoundary key={loc.pathname}><Suspense fallback={<Loading what="화면" rows={2} />}><Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/stocks" element={<Stocks />} />
             <Route path="/stocks/:ticker" element={<StockDetail />} />
@@ -85,7 +97,7 @@ function Shell() {
             <Route path="/health" element={<Navigate to="/settings?tab=status" replace />} />
             <Route path="/committee" element={<Navigate to="/stocks" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          </Routes></Suspense></PageBoundary>
         </main>
       </div>
     </div>

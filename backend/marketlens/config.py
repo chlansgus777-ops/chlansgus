@@ -53,6 +53,8 @@ SECRET_ENV_KEYS = (
     "FINRA_API_SECRET",
     "TOSS_CLIENT_ID",  # 토스증권 오픈API (read-only portfolio sync); the id is kept like a secret too
     "TOSS_CLIENT_SECRET",
+    "SAVETICKER_EMAIL",
+    "SAVETICKER_PASSWORD",
 )
 
 SCHEMA_VERSION = "schema-2"
@@ -97,8 +99,8 @@ def _load_dotenv() -> None:
 
 # what the setup screen may write (nothing else: no path or code setting is reachable from the UI; the only URL is a
 # LOCAL model server — loopback only, so the screen can never point the app at another host)
-SETUP_KEYS = SECRET_ENV_KEYS + ("SEC_USER_AGENT", "MARKETLENS_MODE", "LLM_PROVIDER", "MARKETLENS_SCHEDULER", "OPENAI_BASE_URL", "FAST_MODEL", "DEEP_MODEL", "LLM_BUDGET_USD", "AI_COMMITTEE_ON_SCHEDULE", "LLM_PRICE_INPUT_PER_M", "LLM_PRICE_OUTPUT_PER_M")
-_SETUP_VALUE = {"MARKETLENS_MODE": ("MOCK", "LIVE"), "LLM_PROVIDER": ("none", "anthropic", "openai", "openai_compatible"), "MARKETLENS_SCHEDULER": ("0", "1"), "AI_COMMITTEE_ON_SCHEDULE": ("0", "1")}
+SETUP_KEYS = SECRET_ENV_KEYS + ("SEC_USER_AGENT", "MARKETLENS_MODE", "LLM_PROVIDER", "MARKETLENS_SCHEDULER", "OPENAI_BASE_URL", "FAST_MODEL", "DEEP_MODEL", "LLM_BUDGET_USD", "AI_COMMITTEE_ON_SCHEDULE", "LLM_PRICE_INPUT_PER_M", "LLM_PRICE_OUTPUT_PER_M", "SAVETICKER_ENABLED")
+_SETUP_VALUE = {"MARKETLENS_MODE": ("MOCK", "LIVE"), "LLM_PROVIDER": ("none", "anthropic", "openai", "openai_compatible"), "MARKETLENS_SCHEDULER": ("0", "1"), "AI_COMMITTEE_ON_SCHEDULE": ("0", "1"), "SAVETICKER_ENABLED": ("0", "1")}
 _LOCAL_URL = r"http://(?:127\.0\.0\.1|localhost)(?::\d{1,5})?(?:/[A-Za-z0-9._/-]*)?"
 _MODEL_NAME = r"[A-Za-z0-9._:/-]{1,100}"
 
@@ -111,7 +113,7 @@ def validate_setup(values: dict[str, str]) -> dict[str, str]:
     for k, v in values.items():
         if k not in SETUP_KEYS:
             raise ValueError(f"{k}: 설정 화면에서 바꿀 수 없는 항목입니다")
-        v = (v or "").strip()
+        v = (v or "") if k == "SAVETICKER_PASSWORD" else (v or "").strip()
         if not v:
             continue  # empty = leave unchanged
         if any(c in v for c in "\r\n\x00") or len(v) > 300:
@@ -137,7 +139,10 @@ def validate_setup(values: dict[str, str]) -> dict[str, str]:
         elif k == "SEC_USER_AGENT":
             if not _re.fullmatch(r"[^@\s]+(?: [^@\s]+)* [^@\s]+@[^@\s]+\.[^@\s]+", v):
                 raise ValueError("SEC_USER_AGENT: '이름 이메일' 형식이어야 합니다 (예: Hong Gildong hong@example.com). SEC가 요구합니다")
-        elif _re.search(r"\s", v):
+        elif k == "SAVETICKER_EMAIL":
+            if not _re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", v):
+                raise ValueError("SAVETICKER_EMAIL: 올바른 이메일 주소를 입력하세요")
+        elif k != "SAVETICKER_PASSWORD" and _re.search(r"\s", v):
             raise ValueError(f"{k}: API 키에는 공백이 들어갈 수 없습니다")
         out[k] = v
     return out
@@ -275,9 +280,12 @@ class Settings:
     ai_committee_on_schedule: bool = False  # the automatic hourly scan runs WITHOUT the AI committee unless this is on
     live_quotes: bool = True  # the app-wide quote stream (application/live_quotes.py)
     quote_stream_max_symbols: int = 50  # the stream's concurrent symbol limit (Finnhub free: 50 — verify on the account)
+    saveticker_enabled: bool = False  # optional news supplement, LIVE only
+    saveticker_email: str | None = field(repr=False, default=None)
+    saveticker_password: str | None = field(repr=False, default=None)
 
     def secrets(self) -> list[str]:
-        return [s for s in (self.finnhub_api_key, self.fred_api_key, self.polygon_api_key, self.alphavantage_api_key, self.finra_api_key, self.finra_api_secret, self.anthropic_api_key, self.openai_api_key, self.toss_client_id, self.toss_client_secret) if s]
+        return [s for s in (self.finnhub_api_key, self.fred_api_key, self.polygon_api_key, self.alphavantage_api_key, self.finra_api_key, self.finra_api_secret, self.anthropic_api_key, self.openai_api_key, self.toss_client_id, self.toss_client_secret, self.saveticker_email, self.saveticker_password) if s]
 
 
 def _bool(v: str | None, default: bool) -> bool:
@@ -330,6 +338,9 @@ def load_settings() -> Settings:
         ai_committee_on_schedule=_bool(os.environ.get("AI_COMMITTEE_ON_SCHEDULE"), False),
         live_quotes=_bool(os.environ.get("MARKETLENS_LIVE_QUOTES"), True),
         quote_stream_max_symbols=max(1, int(os.environ.get("QUOTE_STREAM_MAX_SYMBOLS", "50"))),
+        saveticker_enabled=_bool(os.environ.get("SAVETICKER_ENABLED"), False),
+        saveticker_email=_secret("SAVETICKER_EMAIL"),
+        saveticker_password=_secret("SAVETICKER_PASSWORD"),
     )
 
 

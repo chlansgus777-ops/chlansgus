@@ -238,6 +238,15 @@ class MarketLensService:
         self.quotes, self._quote_stream = self._build_quotes()
         # screen reads never wait for a provider or a market-wide recount: last good result + one background refresh
         self.refresher = Refresher(workers=3, wall=self.now)
+        self.realtime = Refresher(workers=1, wall=self.now)
+        self.accounts = Refresher(workers=1, wall=self.now)
+        self.analyses = Refresher(workers=2, wall=self.now)
+        self.data.supplemental_news = lambda: self.supplemental_news_view().value or []
+        from marketlens.application.saveticker_connection import SaveTickerConnection
+        self.saveticker_connection = SaveTickerConnection(self)
+        self._rejudge_constraints: dict[int, dict[str, Any]] = {}
+        with self.sf() as s:
+            self._account_changed_at = repo.get_setting(s, "account_changed_at", "") or ""
         # the price-dependent verdict on every quote (buy zone, stop, target, live reward/risk) + alerts
         self.judge = LiveJudge(now=self.now)
         self.quotes.annotate = self.judge.annotate
@@ -310,7 +319,72 @@ class MarketLensService:
         self.quotes.stop()
 
     def stop_background(self) -> None:
+        self.saveticker_connection.close()
         self.refresher.shutdown()
+        self.realtime.shutdown()
+        self.accounts.shutdown()
+        self.analyses.shutdown()
+        optional = self.registry.extras.get("news_supplement")
+        if optional:
+            for provider in optional.providers:
+                provider.close()
+
+    def analysis_status(self, ticker: str) -> dict[str, Any]:
+        snapshot = self.analyses.peek(f"analysis:{ticker}")
+        return {"status": "RUNNING" if snapshot.refreshing else "FAILED" if snapshot.error else "DONE" if snapshot.ready else "IDLE",
+                "error": snapshot.error, "result": snapshot.value,
+                "finished_at": snapshot.computed_at.isoformat() if snapshot.computed_at else None,
+                "phase": "가격·재무 자료 확인 및 분석" if snapshot.refreshing else None}
+
+    def supplemental_news_view(self) -> Snapshot:
+        chain = self.registry.extras.get("news_supplement")
+        if chain is None:
+            return Snapshot(None, None, None, False)
+        return self.refresher.get("news-supplement", lambda: chain.call("get_latest_news").value,
+                                  max_age=120, retry_after=600)
+
+    def news_view(self, ticker: str | None = None) -> dict[str, Any]:
+        """Read-only cached news supplement and diagnostics, independent of provider availability."""
+        from marketlens.application.issue_engine import dedupe, relevance
+        enabled = self.registry.extras.get("news_supplement") is not None
+        if not enabled:
+            return {"enabled": False, "rows": []}
+        snap = self.supplemental_news_view()
+        chain = self.registry.extras["news_supplement"]
+        provider = chain.providers[0]
+        context = self.last_scan_context
+        base = list(context.issues.articles.values()) if context and context.issues else []
+        extra = [n for n in (snap.value or []) if 0 <= (self.now() - n.published_at).total_seconds() <= 48 * 3600]
+        rows, dropped = dedupe([n for n in base + extra if 0 <= (self.now() - n.published_at).total_seconds() <= 48 * 3600])
+        # This area supplements the existing issues UI; it must not repeat the primary news on an outage.
+        rows = [n for n in rows if n.metadata and n.metadata.provider == provider.name]
+        if ticker:
+            rows = [n for n in rows if ticker in n.tickers]
+        elif context and context.issues:
+            shown_titles = {issue.title for issue in context.issues.issues}
+            rows = [n for n in rows if n.title not in shown_titles]
+        from marketlens.application.codec import encode
+        result = []
+        for n in sorted(rows, key=lambda n: n.published_at, reverse=True)[:20]:
+            age = max(0, (self.now() - n.published_at).total_seconds())
+            result.append(encode(n) | {"freshness_score": round(max(0, 1 - age / (48 * 3600)), 3),
+                                      "relevance_score": relevance(n, ticker) if ticker else None,
+                                      "impact_score": None})  # unknown impact; never manufactured from views
+        browser_mode = getattr(provider, "transport_mode", "http") == "browser"
+        collected_at = provider.received_at if browser_mode else snap.computed_at
+        source_error = self.saveticker_connection.status().get("error") if browser_mode else None
+        return {"enabled": True, "authenticated": provider.authenticated, "transport_mode": getattr(provider, "transport_mode", "http"), "rows": result, "pending": snap.refreshing and not snap.ready,
+                "refreshing": snap.refreshing, "error": source_error or snap.error, "last_success": collected_at.isoformat() if collected_at else None,
+                "cache_age_s": (self.now() - collected_at).total_seconds() if collected_at else None, "items_fetched": provider.items_fetched, "items_normalized": provider.items_normalized,
+                "duplicates_removed": dropped}
+
+    def start_analysis(self, ticker: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            _result, _committee, rec_id = self.analyze(ticker, run_committee=False, persist=True)
+            self.invalidate_live_plans()
+            return {"recommendation_id": rec_id}
+        self.analyses.get(f"analysis:{ticker}", run, max_age=2.0, retry_after=0.0)
+        return self.analysis_status(ticker)
 
     # ------------------------------------------------------------------ screen reads (stale-while-revalidate)
     def macro_view(self, wait: float = 0.0) -> Snapshot:
@@ -518,7 +592,7 @@ class MarketLensService:
     def _broker_changed(self) -> None:
         """Holdings or cash in the account changed (or it was connected / disconnected): the live verdicts' held flags,
         the quote subscriptions and the open screens (app event ``broker``) follow."""
-        self.invalidate_live_plans()
+        self.portfolio_changed()
         self.quotes.refresh_pinned()
 
     def _live_quote(self, ticker: str) -> Any:
@@ -602,7 +676,7 @@ class MarketLensService:
         """Keep the account current in the background — called by the quote stream's status tick and the portfolio
         routes; the refresher runs at most one sync at a time and backs off after a failure."""
         if self.broker.due():  # the schedule is the broker's own (wall clock): one sync in flight at most
-            self.refresher.get("broker:toss", self.broker.sync, max_age=0.0, retry_after=0.0)
+            self.accounts.get("broker:toss", self.broker.sync, max_age=0.0, retry_after=0.0)
 
     BRIEFING_AGE = 3.0  # seconds a built briefing is reused (it follows the live prices; the screen asks every few seconds)
 
@@ -637,6 +711,26 @@ class MarketLensService:
         self.refresher.invalidate("live-plans")
         self._pool_cache = None  # holdings / watchlist changed: the live pool follows at the next round
 
+    def portfolio_changed(self) -> None:
+        """An account change requires a new concentration review; a price tick cannot clear it."""
+        self._account_changed_at = repo.now().isoformat()
+        with self.sf() as s:
+            repo.set_setting(s, "account_changed_at", self._account_changed_at)
+            s.commit()
+        self.invalidate_live_plans()
+        self._briefing = None
+        self.judge.set_plans([])  # do not keep issuing signals based on the previous account
+        self.quotes.touch_all()
+
+    def _account_needs_review(self, issued_at: datetime | None) -> bool:
+        if not self._account_changed_at:
+            return False
+        if issued_at is None:
+            return True
+        if issued_at.tzinfo is None:
+            issued_at = issued_at.replace(tzinfo=timezone.utc)
+        return issued_at < datetime.fromisoformat(self._account_changed_at)
+
     def _load_live_plans(self) -> int:
         with self.sf() as s:
             pf = self.portfolio(s)
@@ -657,6 +751,9 @@ class MarketLensService:
                     rows.insert(0, r)  # a name's own newest analysis wins over its scan row
             rows.sort(key=lambda r: r.as_of, reverse=True)
             plans = plans_from_rows(rows, self.levels_now, self.base_cfg.decision.min_rr, held, watched)
+            from dataclasses import replace
+            blocked = {r.id for r in rows if self._account_needs_review(r.created_at)}
+            plans = [replace(p, data_ok=False) if p.rec_id in blocked else p for p in plans]
         plans = [self._live_plan(p) for p in plans]  # the live re-judgement's decision and levels, where there is one
         self.judge.set_plans(plans)
         bullish = sorted((p for p in plans if p.bullish and not p.held), key=lambda p: p.as_of, reverse=True)
@@ -682,7 +779,7 @@ class MarketLensService:
         if q is not None:
             return q
         tr = self.quotes.latest(ticker)
-        if tr is None or tr.feed != "stream" or (self.now() - tr.trade_ts).total_seconds() > self.LIVE_QUOTE_MAX_AGE:
+        if tr is None or tr.feed != "stream" or not 0 <= (self.now() - tr.trade_ts).total_seconds() <= self.LIVE_QUOTE_MAX_AGE:
             return None
         return Quote(ticker=ticker, price=tr.price, timestamp=tr.trade_ts, session=classify_session(tr.trade_ts), source=tr.source, mode=self.mode,
                      is_realtime=True)
@@ -716,6 +813,11 @@ class MarketLensService:
             with self.sf() as s:
                 for row in s.scalars(select(RecommendationRow).where(RecommendationRow.id.in_(need))):
                     self._rejudge_inputs[row.id] = decode(AnalysisInputs, row.inputs)
+                    from marketlens.domain.sizing import recommendation_size_cap
+                    self._rejudge_constraints[row.id] = {
+                        "as_of": row.as_of, "issued_at": row.created_at, "action": row.final_action, "size": recommendation_size_cap(row),
+                        "committee": row.committee_status not in ("NOT_RUN", "SKIPPED", "UNAVAILABLE", None),
+                    }
         for rid, t, _sc in head + rest:
             q = self._fresh_quote(t)
             inp = self._rejudge_inputs.get(rid)
@@ -743,11 +845,25 @@ class MarketLensService:
                 log.info("live re-judge %s: %s", inp.ticker, type(e).__name__)
                 continue
             p = res.entry
-            if prev is None or prev["action"] != res.decision.action.value or prev["max_buy"] != (p.max_buy if p else None) or prev["stop"] != (p.stop if p else None):
+            constraint = self._rejudge_constraints[rid]
+            from marketlens.domain.sizing import tightest
+            size_limit = tightest(constraint["size"], res.decision.size_limit)
+            action = res.decision.action.value
+            review_reason = None
+            if action in {a.value for a in BULLISH_ACTIONS}:
+                if size_limit == "WATCH" or (constraint["committee"] and constraint["action"] not in {a.value for a in BULLISH_ACTIONS}):
+                    action = constraint["action"] if constraint["action"] not in {a.value for a in BULLISH_ACTIONS} else "WATCH"
+                    review_reason = "AI·포트폴리오 보류 유지 — 가격 변경만으로 해제하지 않음"
+                elif size_limit in ("HALF", "SMALL") or constraint["action"] == "BUY SMALL":
+                    action = "BUY SMALL"
+                    review_reason = "기존 비중 제한 유지 — 재검토 전까지 확대하지 않음"
+            if prev is None or prev["action"] != action or prev["max_buy"] != (p.max_buy if p else None) or prev["stop"] != (p.stop if p else None):
                 changed = True
             self._rejudged[rid] = {
                 "at": now.isoformat(), "quote_ts": q.timestamp.isoformat(), "price": res.price, "source": q.source,
-                "session": q.session.value, "price_quality": res.price_quality.value, "action": res.decision.action.value, "score": res.scorecard.total,
+                "session": q.session.value, "price_quality": res.price_quality.value, "action": action, "score": res.scorecard.total,
+                "ticker": inp.ticker, "analysed_at": constraint["as_of"].isoformat(), "size_limit": size_limit,
+                "review_reason": review_reason,
                 "data_quality": res.data_quality.overall.value, "vetoes": [v.value for v in res.decision.vetoes],
                 "max_buy": p.max_buy if p else None, "ideal_entry": p.ideal_entry if p else None, "stop": p.stop if p else None,
                 "target1": p.target1 if p else None, "target2": p.target2 if p else None, "rr": p.rr_at_current if p else None,
@@ -757,7 +873,9 @@ class MarketLensService:
         if len(self._rejudge_inputs) > 3 * self.LIVE_POOL:  # rows of older scans
             keep = {rid for rid, _i, _q in todo}
             self._rejudge_inputs = {k: v for k, v in self._rejudge_inputs.items() if k in keep}
+            self._rejudge_constraints = {k: v for k, v in self._rejudge_constraints.items() if k in keep}
             self._rejudged = {k: v for k, v in self._rejudged.items() if k in keep}
+            self._rejudge_constraints = {k: v for k, v in self._rejudge_constraints.items() if k in keep}
         if changed:
             self.invalidate_live_plans()  # the tick-by-tick verdict follows the new decision and levels
         return done
@@ -765,12 +883,12 @@ class MarketLensService:
     def _live_plan(self, p: Any) -> Any:
         from dataclasses import replace as _replace
 
-        lj = self._rejudged.get(p.rec_id)
+        lj = self.rejudged(p.rec_id)
         if not lj:
             return p
         return _replace(p, action=lj["action"], bullish=lj["action"] in {a.value for a in BULLISH_ACTIONS},
-                        data_ok=lj["data_quality"] in ("FRESH", "DELAYED"), max_buy=lj["max_buy"], stop=lj["stop"], target1=lj["target1"],
-                        ideal_entry=lj["ideal_entry"])
+                        data_ok=lj["current_status"] == "CURRENT", max_buy=lj["max_buy"], stop=lj["stop"], target1=lj["target1"],
+                        ideal_entry=lj["ideal_entry"], live_price=True)
 
     LIVE_POOL_AGE = 30.0  # seconds the pool list is reused (a new selection or a single re-analysis shows within this)
 
@@ -812,10 +930,26 @@ class MarketLensService:
 
     def live_rejudge_tick(self) -> None:
         """Called by the quote stream's status tick: a round in the background at most every LIVE_REJUDGE_EVERY."""
-        self.refresher.get("live-rejudge", self.live_rejudge, max_age=self.LIVE_REJUDGE_EVERY, retry_after=30.0)
+        self.realtime.get("live-rejudge", self.live_rejudge, max_age=self.LIVE_REJUDGE_EVERY, retry_after=30.0)
 
     def rejudged(self, rec_id: int) -> dict[str, Any] | None:
-        return self._rejudged.get(rec_id)
+        raw = self._rejudged.get(rec_id)
+        if raw is None:
+            return None
+        bullish = raw["action"] in {a.value for a in BULLISH_ACTIONS}
+        plan = PlanCheck(raw["price"], raw["max_buy"], raw["stop"], raw["target1"], self.base_cfg.decision.min_rr, bullish)
+        status = recommendation_freshness(datetime.fromisoformat(raw["analysed_at"]), raw["data_quality"], self.now(),
+                                         plan=plan, quote_price=raw["price"], quote_ts=datetime.fromisoformat(raw["quote_ts"]),
+                                         analysis_price_ts=datetime.fromisoformat(raw["quote_ts"]),
+                                         new_major_events=self._major_events_since(raw["ticker"], datetime.fromisoformat(raw["analysed_at"])))
+        current = self._fresh_quote(raw["ticker"]) is not None
+        state = status.status if current or status.status in ("EXPIRED", "AGING") else "NEEDS_REVALIDATION"
+        reason = status.reason_ko if current else "새 체결가를 확인하지 못함 — 마지막 가격은 참고용"
+        if self._account_needs_review(self._rejudge_constraints.get(rec_id, {}).get("issued_at")):
+            state, reason = "NEEDS_REVALIDATION", "계좌가 변경되어 비중·집중도 재검토가 필요합니다. 종목을 다시 분석하세요."
+        return raw | {"current_status": state, "current_status_reason": reason,
+                      "actionable_now": bool(bullish and current and state == "CURRENT"),
+                      "checked_at": self.now().isoformat()}
 
     def live_for(self, ticker: str) -> dict[str, Any] | None:
         """The live re-judgement of ``ticker``'s newest analysis (the stock page, every second) — starts a round when due."""
@@ -825,14 +959,14 @@ class MarketLensService:
             rid, as_of = (row.id, row.as_of) if row is not None else (None, None)
         if rid is None:
             return None
-        lj = self._rejudged.get(rid)
+        lj = self.rejudged(rid)
         return None if lj is None else lj | {"rec_id": rid, "analysed_at": as_of.isoformat()}
 
     def live_board(self) -> dict[str, Any]:
         """The live re-judgements of the list (for the screens' 1-second refresh): rec id → decision, score, price and
         plan; starts a round when due (never waits for it)."""
         self.live_rejudge_tick()
-        return {"at": self.now().isoformat(), "every_s": self.LIVE_REJUDGE_EVERY, "rows": {str(k): v for k, v in self._rejudged.items()}}
+        return {"at": self.now().isoformat(), "every_s": self.LIVE_REJUDGE_EVERY, "rows": {str(k): self.rejudged(k) for k in list(self._rejudged)}}
 
     def shown_scan(self, s: Session) -> ScanRunRow | None:
         """The scan the screens show: the newest one — except while it is still being saved, when the previous
@@ -989,12 +1123,22 @@ class MarketLensService:
                     self._adopt_context(self.scanner(self.model_config(), s).build_context(self.now()))
         return self.last_scan_context  # type: ignore[return-value]
 
+    def _major_events_since(self, ticker: str, as_of: datetime) -> tuple[str, ...]:
+        ctx = self.last_scan_context
+        if ctx is None or ctx.issues is None:
+            return ()
+        return tuple(i.title for i in ctx.issues.issues
+                     if i.importance >= self.base_cfg.major_issue_importance
+                     and i.publish_time > as_of and ticker in i.affected_companies)
+
     def recommendation_status(self, row: RecommendationRow, fetch_quote: bool = False, levels: dict[str, Any] | None = None) -> RecommendationFreshness:
         """Is this stored recommendation still current NOW (not just: was it fresh when it was made)?
 
         Same-session recommendations are re-checked against a current quote (max buy, stop, reward/risk,
         move since analysis). Listings only use an already cached quote; the stock page may fetch one.
         ``levels``: this row's ``levels_now`` when the caller already has them."""
+        if self._account_needs_review(getattr(row, "created_at", None)):
+            return RecommendationFreshness("NEEDS_REVALIDATION", row.data_quality, 0, "계좌가 변경되어 비중·집중도 재검토가 필요합니다. 종목을 다시 분석하세요.")
         lv = levels if levels is not None else self.levels_now(row)
         bullish = row.final_action in {a.value for a in BULLISH_ACTIONS}
         plan = PlanCheck(lv["price"], lv["max_buy"], lv["stop"], lv["target1"], self.base_cfg.decision.min_rr, bullish)
@@ -1008,27 +1152,35 @@ class MarketLensService:
             q_price, q_ts = live.price, live.trade_ts
         else:
             q_price, q_ts = getattr(q, "price", None), getattr(q, "timestamp", None)
-        majors: tuple[str, ...] = ()
-        ctx = self.last_scan_context
-        if ctx is not None and ctx.issues is not None:
-            cut = self.base_cfg.major_issue_importance
-            majors = tuple(i.title for i in ctx.issues.issues if i.importance >= cut and i.publish_time > row.as_of and row.ticker in i.affected_companies)
         return recommendation_freshness(row.as_of, row.data_quality, self.now(), plan=plan,
-                                        quote_price=q_price, quote_ts=q_ts, new_major_events=majors, analysis_price_ts=row.price_timestamp)
+                                        quote_price=q_price, quote_ts=q_ts, new_major_events=self._major_events_since(row.ticker, row.as_of), analysis_price_ts=row.price_timestamp)
 
     # ------------------------------------------------------------------ persistence
     def _persist(self, s: Session, r: AnalysisResult, inp: AnalysisInputs, cfg: ModelConfig, scan_id: int | None, rank: int | None, committee: CommitteeResult | None) -> RecommendationRow:
         ok = committee is not None and committee.status in COMMITTEE_OK
         final_action = committee.final_action if ok and committee else r.decision.action.value
         final_conf = committee.final_confidence if ok and committee else r.decision.confidence
+        from marketlens.domain.sizing import recommendation_size_cap, tightest
+        previous_limit = None
+        review_required = False
+        if committee is None:
+            prior = self.latest_company_recommendation(s, r.ticker)
+            if prior is not None and prior.committee_status in (*COMMITTEE_OK, "REVIEW_REQUIRED"):
+                previous_limit = recommendation_size_cap(prior)
+                if final_action in {a.value for a in BULLISH_ACTIONS}:
+                    if prior.final_action not in {a.value for a in BULLISH_ACTIONS}:
+                        final_action, review_required = prior.final_action, True
+                    elif previous_limit in ("WATCH", "SMALL", "HALF"):
+                        final_action = "WATCH" if previous_limit == "WATCH" else "BUY SMALL"
+                        review_required = True
         models = sorted({c.model for c in committee.calls if c.model not in ("?", "cache")}) if committee else []
         row = RecommendationRow(
             scan_run_id=scan_id, ticker=r.ticker, as_of=r.as_of, rank=rank, mode=r.mode.value, session=r.session,
             price=r.price, price_source=r.price_source, price_timestamp=r.price_timestamp, price_quality=r.price_quality.value,
             score=r.scorecard.total, confidence=final_conf, deterministic_action=r.decision.action.value, final_action=final_action,
-            size_class=stored_size_class(r, committee),
+            size_class=tightest(stored_size_class(r, committee), previous_limit),
             sector=r.security.sector, sector_model=r.sector_model_id, regime=r.primary_regime, data_quality=r.data_quality.overall.value,
-            committee_status=committee.status if committee else "NOT_RUN", result=encode(r), inputs=encode(inp),
+            committee_status=committee.status if committee else "REVIEW_REQUIRED" if review_required else "NOT_RUN", result=encode(r), inputs=encode(inp),
             model_config_snapshot=config_snapshot(CONFIG_DIR, dict(cfg.scoring_model.weights), cfg.scoring_model.version),
             input_fingerprint=r.input_fingerprint, scoring_model_version=cfg.scoring_model.version,
             decision_model_version=cfg.decision_model_version, agent_prompt_version=AGENT_PROMPT_VERSION,
@@ -1270,6 +1422,9 @@ class MarketLensService:
             s.flush()
             s.add(CommitteeRow(recommendation_id=new.id, status=c.status, payload=c.as_dict(), consensus=c.consensus_pct, divergence=c.divergence, prompt_version=c.prompt_version, created_at=repo.now()))
             s.commit()
+            self.invalidate_live_plans()
+            self.judge.set_plans([])
+            self._briefing = None
             return c.as_dict() | {"recommendation_id": new.id, "supersedes_id": cur.id}
 
     def replay_recommendation(self, rec_id: int) -> ReplayOutcome:
@@ -1318,10 +1473,12 @@ class MarketLensService:
             return {"started": False, "reason": "MOCK 모드는 데이터 준비가 필요 없음"}
         with self._jobs_guard:
             if self._lock.locked():
-                return {"started": False, "reason": "전체 시장 스캔이 진행 중입니다 — 스캔이 끝난 뒤 데이터 준비를 시작하세요", **self.sync_status()}
+                return {"started": False, "code": "SCAN_RUNNING", "reason": "전체 시장 스캔이 진행 중입니다 — 스캔이 끝난 뒤 데이터 준비를 시작하세요", **self.sync_status()}
             if not self._sync_lock.acquire(blocking=False):
-                return {"started": False, "reason": "이미 데이터를 준비하는 중", **self.sync_status()}
-        state: dict[str, Any] = {"status": "RUNNING", "round": 0, "started_at": self.now().isoformat()}
+                return {"started": False, "code": "ALREADY_RUNNING", "reason": "이미 데이터를 준비하는 중", **self.sync_status()}
+        from marketlens.domain.market_calendar import last_completed_session
+        state: dict[str, Any] = {"status": "RUNNING", "round": 0, "started_at": self.now().isoformat(),
+                                 "target_session": last_completed_session(self.now()).isoformat(), "up_to_date": False}
         self._sync_progress = {}
         try:
             self._sync_state(state)
@@ -1338,6 +1495,7 @@ class MarketLensService:
 
     def _sync_rounds(self, max_rounds: int, state: dict[str, Any]) -> None:
         """Runs holding ``_sync_lock`` (taken by :meth:`start_sync`)."""
+        no_progress = True
         try:
             for i in range(max_rounds):
                 out = self.sync_market(progress=self._on_sync_progress)
@@ -1346,6 +1504,7 @@ class MarketLensService:
                     break
                 progressed = bool(out["bar_days_loaded"] or out["bar_days_empty"] or out["fundamentals_ingested"] or out["profiles_updated"]
                                   or out.get("shares_looked_up"))
+                no_progress = no_progress and not progressed
                 state.update(round=i + 1, bar_days_remaining=out["bar_days_remaining"], fundamentals_pending=out["fundamentals_pending"],
                              errors=out["errors"][:3], missing=out.get("missing", []), updated_at=self.now().isoformat())
                 state["failures"] = list(dict.fromkeys(state.get("failures", []) + out.get("failures", [])))[:3]
@@ -1363,9 +1522,10 @@ class MarketLensService:
                 state["status"] = "PAUSED"  # round cap reached; pressing the button again continues where it stopped
             state["progress"] = self._progress_summary()
             self._settle_sync(state)
+            state["up_to_date"] = no_progress and state["status"] == "DONE"
         except Exception as e:  # the job must end with a visible state; the error is logged with its traceback
             log.exception("background sync failed")
-            state.update(status="FAILED", errors=[f"{type(e).__name__}: {e}"])
+            state.update(status="FAILED", errors=[redact_text(f"{type(e).__name__}: {e}")])
         finally:
             self._sync_last = state  # kept in memory too: shown when the database refused the final write
             try:
@@ -1455,20 +1615,22 @@ class MarketLensService:
 
     def sync_status(self) -> dict[str, Any]:
         """The background data preparation's progress. RUNNING while no job holds the lock = the app was closed mid-way."""
+        from marketlens.domain.market_calendar import last_completed_session
         if self.store is None:
             return {"job": None}
+        target = last_completed_session(self.now()).isoformat()
         with self.sf() as s:
             job = json.loads(repo.get_setting(s, "sync_job", "") or "null")
         if job and job.get("status") == "RUNNING" and not self._sync_lock.locked():
             last = getattr(self, "_sync_last", None)
             if last is not None and last.get("started_at") == job.get("started_at"):
-                return {"job": {**last, "note": "마지막 상태를 저장하지 못해 메모리의 결과를 보여 줌"}}
+                return {"job": {**last, "note": "마지막 상태를 저장하지 못해 메모리의 결과를 보여 줌"}, "target_session": target}
             job["status"] = "INTERRUPTED"
         if job and job.get("status") == "RUNNING":
             live = self._progress_summary()  # item by item, not only at the end of a round
             if live is not None:
                 job["progress"] = live
-        return {"job": job}
+        return {"job": job, "target_session": target}
 
     def _readiness_key(self, today: date, sync_state: str | None, verified_s: str | None) -> tuple[Any, ...]:
         return (today, sync_state, verified_s, self.store.data_fingerprint() if self.store is not None else None)

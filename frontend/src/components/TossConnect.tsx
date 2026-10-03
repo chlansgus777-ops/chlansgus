@@ -65,7 +65,7 @@ export function TossCard({ view, onChange, compact = false }: { view: TossView |
       );
     }
     return (
-      <Card title="토스증권 계좌 연결" testId="toss-card" explain="연결하면 모든 시간대의 미국 주식 시세를 1초마다 받고, 보유·예수금이 자동으로 맞춰집니다. MarketLens는 조회만 합니다 — 주문·정정·취소 기능은 코드에 없습니다.">
+      <Card title="토스증권 계좌 연결" testId="toss-card" explain="공급자가 제공하는 시세를 약 1초 간격으로 확인하고, 보유·예수금을 자동 갱신합니다. 새 체결이 없거나 지연·휴장이면 가격은 그대로 유지됩니다. 주문 기능은 없습니다.">
         <ol className="steps">
           <li>토스증권 <b>PC 웹(WTS)</b>에 로그인 → <b>설정 &gt; Open API</b>에서 <b>client_id</b>와 <b>client_secret</b>을 발급받습니다. 권한을 고를 수 있으면 <b>조회만</b> 고르세요.</li>
           <li>같은 화면의 <b>허용 IP 관리</b>에 <b>이 PC의 공인 IP</b>를 등록합니다. (집 인터넷 IP가 바뀌면 다시 등록)</li>

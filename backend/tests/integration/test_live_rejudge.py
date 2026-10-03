@@ -53,7 +53,9 @@ def test_a_held_name_outside_the_list_and_the_stock_page_are_live_too(client):  
     listed = {r["ticker"] for r in c.get("/api/opportunities").json()["rows"]}
     other = next(sec.ticker for sec in svc.data.securities().value if sec.ticker not in listed and not sec.is_etf)
     h = {"X-MarketLens-Client": "test"}
-    assert c.get(f"/api/stocks/{other}?refresh=true", headers=h).status_code == 200  # its own analysis
+    assert c.post(f"/api/stocks/{other}/analysis", headers=h).status_code == 202
+    svc.analyses.wait(f"analysis:{other}", 10)
+    assert c.get(f"/api/stocks/{other}").status_code == 200
     c.put("/api/portfolio", json={"holdings": [{"ticker": other, "quantity": 5, "cost_basis": 50}]})
     assert c.get(f"/api/stocks/{other}/live").json()["live"] is None  # no live price yet
     svc.quotes.ingest_poll(other, 123.45, svc.now() - timedelta(seconds=1), "toss")

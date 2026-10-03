@@ -79,6 +79,7 @@ class DataAccess:
         self.store = store
         self.now_fn = now_fn or (lambda: datetime.now(timezone.utc))
         self.live_quote: Callable[[str], Any] | None = None  # set by the service: the real-time feed's price, when fresh
+        self.supplemental_news: Callable[[], list[NewsItem]] | None = None  # cached optional news; never waits for HTTP
         # set by the service: ask the real-time feed for many names in ONE request before they are analysed (a scan);
         # one request per name hit the broker's rate limit and left most of a pre-market scan without a price
         self.prefetch_quotes: Callable[[list[str]], None] | None = None
@@ -410,7 +411,16 @@ class DataAccess:
 
     def news(self, since: datetime, tickers: Sequence[str] | None) -> Fetched:
         key = f"{since:%Y%m%d%H}:{','.join(sorted(tickers)) if tickers else '*'}"
-        return self._get("news", "news", "get_news", key, since, list(tickers) if tickers else None)
+        base = self._get("news", "news", "get_news", key, since, list(tickers) if tickers else None)
+        if self.supplemental_news is None:
+            return base
+        extra = [n for n in self.supplemental_news() if since <= n.published_at <= self.now_fn()
+                 and (not tickers or set(tickers).intersection(n.tickers))]
+        if not extra:
+            return base
+        from marketlens.application.issue_engine import dedupe
+        rows, _ = dedupe(list(base.value or []) + extra)
+        return Fetched(rows, base.provider or "news supplement", None, base.conflicts)
 
     def macro_snapshot(self, as_of: datetime) -> tuple[MacroSnapshot | None, str | None]:
         f = self.macro(as_of)

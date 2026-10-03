@@ -23,7 +23,8 @@ function row(over: Partial<OppRow> = {}): OppRow {
 
 function serve(sequence: (() => Response)[]) {
   let i = 0;
-  vi.stubGlobal("fetch", () => {
+  vi.stubGlobal("fetch", (url: string) => {
+    if (String(url).endsWith("/opportunities/live")) return Promise.resolve(ok({ at: "", every_s: 1, rows: {} })());
     const f = sequence[Math.min(i, sequence.length - 1)]!;
     i += 1;
     return Promise.resolve(f());

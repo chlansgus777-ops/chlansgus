@@ -18,9 +18,20 @@ const row = (v: number, judge: Judge | null): QuoteRow => ({ ticker: "NVDA", sta
   received_time: null, source: "finnhub", feed: "stream", previous_close: null, change_pct: null, error: null, judge });
 
 describe("the live zone", () => {
+  it("expires a judgment without a new trade and rejects an older evaluation", () => {
+    render(<MemoryRouter><LiveZone ticker="NVDA" recId={7} /></MemoryRouter>);
+    const original = { ...row(1, J()), evaluated_at: "2026-09-25T15:00:00Z" };
+    act(() => applyRows([original]));
+    expect(screen.getByTestId("zone-NVDA").textContent).toContain("지금 매수 구간");
+    act(() => applyRows([{ ...original, evaluated_at: "2026-09-25T15:02:00Z", judge: J({ valid_now: false, quote_current: false }) }]));
+    expect(screen.getByTestId("zone-NVDA").textContent).not.toContain("지금 매수 구간");
+    act(() => applyRows([original]));
+    expect(screen.getByTestId("zone-NVDA").textContent).not.toContain("지금 매수 구간");
+  });
   it("words each zone, and a buy needs a current quote", () => {
     expect(zoneView(J())!.label).toBe("지금 매수 구간");
     expect(zoneView(J({ valid_now: false, quote_current: false }))!.sub).toBe("현재가 확인 필요");
+    expect(zoneView(J({ valid_now: false, quote_current: false }))!.label).toBe("재확인 필요");
     expect(zoneView(J({ zone: "STOP_HIT", held: true }))!.sub).toContain("매도 검토");
     expect(zoneView(J({ zone: "ABOVE_MAX", to_max_pct: -0.013 }))!.sub).toContain("1.3%");
     expect(zoneView(J({ zone: "NO_PLAN" }))).toBeNull();

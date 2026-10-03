@@ -93,6 +93,11 @@ def test_stock_screen_shows_the_plan_or_asks_for_the_portfolio():
         p = c.get(f"/api/stocks/{t}").json()["position_plan"]
         assert p["available"] is False and "포트폴리오" in p["reason"]
         c.put("/api/portfolio", json={"cash": 100000, "holdings": []})
+        stale = c.get(f"/api/stocks/{t}").json()
+        assert not stale["position_plan"]["available"]
+        assert not stale["recommendation"]["actionable_now"]
+        assert c.post(f"/api/stocks/{t}/analysis").status_code == 202
+        svc.analyses.wait(f"analysis:{t}", 10)
         p = c.get(f"/api/stocks/{t}").json()["position_plan"]
         assert p["available"] is True and p["shares"] > 0 and p["amount"] <= 0.05 * 100000 + 1e-6 and p["nav"] == pytest.approx(100000)
 

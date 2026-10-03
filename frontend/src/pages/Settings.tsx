@@ -8,6 +8,7 @@ import { clientLatency, useQuoteStatus } from "../quotes";
 import Health from "./Health";
 import { useApi } from "../components/useApi";
 import { PhoneSettings } from "../components/Phone";
+import { SaveTickerConnect } from "../components/SaveTickerConnect";
 
 /** First-run setup without editing files: values are sent once, stored by the backend (OS keychain or the
  * private .env of this installation) and never shown again. */
@@ -227,6 +228,7 @@ export default function Settings() {
       {tab === "data" && (
         <>
           <TossSettings />
+          <SaveTickerConnect mode={d.mode} />
           <SetupCard configured={d.keys_configured} mode={d.mode} onSaved={s.reload} />
           <Card title="모드 · API 키"><div>모드: <b>{d.mode === "MOCK" ? "모의 데이터(MOCK)" : "실데이터(LIVE)"}</b></div>{kv(Object.fromEntries(Object.entries(d.keys_configured).map(([k, v]) => [k, v ? "설정됨" : "없음"])))}<div className="muted">{d.note}</div></Card>
         </>
