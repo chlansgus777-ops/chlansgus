@@ -52,7 +52,7 @@ def test_fresh_workers_every_week_give_the_same_results(world, tmp_path):  # noq
 
 # ------------------------------------------------------------------------------------------ the final phase in legs
 def _spy(data):  # noqa: ANN001, ANN202
-    return next((ln for ln in data.lineages if ln.labels and ln.labels[-1] == "SPY" and ln.cik is None), None)
+    return data.benchmark()
 
 
 def _until_done(f):  # noqa: ANN001, ANN202

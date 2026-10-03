@@ -6,7 +6,7 @@ Securities (Polygon-shaped reference records):
 - OLDC → NEWC: one company (CIK 1046179) renamed on RENAME_DAY (the old ticker's record is delisted then, the new
   ticker trades from that session on);
 - GONE: CIK 999001, stops trading after GONE_LAST (a delisting);
-- SPY: the benchmark ETF (no CIK).
+- SPY: the benchmark ETF (no CIK; ``build(spy_cik=884394)``: with the CIK the real records give it).
 Prices are deterministic smooth paths (as traded, unadjusted); FRED answers come from the live fixture, recorded
 through the collector's RecordingTransport exactly as a real collection records them.
 """
@@ -96,7 +96,8 @@ def quarters(rev0: float, g: float, gm: float, om: float, shares: float) -> list
     return out
 
 
-def build(path: str, fred: bool = True) -> str:
+def build(path: str, fred: bool = True, spy_cik: int | None = None) -> str:
+    """``spy_cik``: the SPDR trust's CIK as the real reference records carry it (884394); None as before."""
     from marketlens.application.market_store import MarketStore
     from marketlens.infrastructure.db.session import make_session_factory
     from tests.live_fixtures import live_transport
@@ -110,7 +111,7 @@ def build(path: str, fred: bool = True) -> str:
             {"ticker": "OLDC", "seq": 0, "active": False, "cik": 1046179, "type": "CS", "name": "OLD CO", "exchange": "XNYS", "delisted": RENAME_DAY},
             {"ticker": "NEWC", "seq": 0, "active": True, "cik": 1046179, "type": "CS", "name": "NEW CO", "exchange": "XNYS", "delisted": None},
             {"ticker": "GONE", "seq": 0, "active": False, "cik": 999001, "type": "CS", "name": "GONE INC", "exchange": "XNAS", "delisted": GONE_LAST + timedelta(days=1)},
-            {"ticker": "SPY", "seq": 0, "active": True, "cik": None, "type": "ETF", "name": "SPDR S&P 500", "exchange": "ARCX", "delisted": None},
+            {"ticker": "SPY", "seq": 0, "active": True, "cik": spy_cik, "type": "ETF", "name": "SPDR S&P 500", "exchange": "ARCX", "delisted": None},
         ])
         c.execute(insert(bt_dividends), [{"ticker": "BBB", "ex_date": DIV_DAY, "seq": 0, "cash_amount": 1.4, "currency": "USD", "dividend_type": "CD",
                                           "declaration_date": DIV_DAY - timedelta(days=20), "pay_date": DIV_DAY + timedelta(days=10)}])

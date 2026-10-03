@@ -239,6 +239,15 @@ jobs:
           name: backtest-results
           path: bt-out
           retention-days: 90
+      - name: The finished status for the later legs
+        # without it the next leg found only the checkpoint before the last and ran the last leg again (2026-10-03:
+        # five copies of the results, one per leg, until the run was cancelled)
+        if: steps.leg.outputs.finished == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bt-cp-${{ matrix.leg }}
+          path: bt-out/status.json
+          retention-days: 7
   repro:
     if: inputs.task == 'run'
     runs-on: ubuntu-latest
@@ -327,6 +336,15 @@ jobs:
           name: backtest-repro
           path: bt-out-repro
           retention-days: 90
+      - name: The finished status for the later legs
+        # without it the next leg found only the checkpoint before the last and ran the last leg again (2026-10-03:
+        # five copies of the results, one per leg, until the run was cancelled)
+        if: steps.leg.outputs.finished == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bt-repro-cp-${{ matrix.leg }}
+          path: bt-out-repro/status.json
+          retention-days: 7
   compare:
     # also after a leg that failed (a lost runner): a later leg went on from the checkpoint before it
     if: always() && inputs.task == 'run'

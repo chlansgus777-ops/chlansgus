@@ -154,6 +154,12 @@ class BacktestData:
         first_day, ln = min(later, key=lambda x: x[0])
         return ln if self.interval(ticker, first_day) == iv else None
 
+    def benchmark(self, ticker: str = "SPY") -> Lineage | None:
+        """The benchmark's history: the security that traded as ``ticker`` last. Not "the SPY without a CIK" — the
+        real reference records give the SPDR trust its CIK (884394), and the first 7-year run (2026-10-03) found no
+        benchmark that way: 0 weeks of data, no SPY return, §12/§13 never attempted."""
+        return self.lineage_of(ticker, self.last_session) if self.last_session is not None else None
+
     def _join_renames(self, listings: list[Lineage]) -> list[Lineage]:
         by_cik: dict[int, list[Lineage]] = {}
         for ln in listings:

@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
             return _unfinished(a.out, {"done": False, "weeks_done": len(weeks), "weeks_total": len(times), "next": times[len(weeks)].isoformat()})
         from marketlens.backtest.apply import data_verdict, data_weeks
 
-        spy_ln = next((ln for ln in data.lineages if ln.labels and ln.labels[-1] == "SPY" and ln.cik is None), None)
+        spy_ln = data.benchmark()
         verdict = data_verdict(data_weeks(spy_ln.days if spy_ln else []))
         # the final phase (holdout reruns, leak checks) runs under the same budget: what is finished stays in --out and
         # the next process goes on from there (the 7-year run: three reruns of ~150 weeks would not fit one runner)

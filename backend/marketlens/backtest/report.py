@@ -92,7 +92,7 @@ def build(results: Engine, data: BacktestData, bt: Engine, signals_state: Any, p
 
     series = load_series(bt)
     data_end = data.last_session
-    spy_ln = next((ln for ln in data.lineages if ln.labels and ln.labels[-1] == "SPY" and ln.cik is None), None)
+    spy_ln = data.benchmark()
     with results.connect() as c:
         # plain namespaces: a SQLAlchemy Row's ``.t`` is its typed-tuple accessor, not the column
         from types import SimpleNamespace
