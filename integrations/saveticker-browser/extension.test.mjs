@@ -49,11 +49,16 @@ test("supplemental calendar and details use fixed read endpoints without account
       return {ok:true,status:200,json:async()=>body};
     }};
   vm.runInNewContext(sourceText,context);
-  const read=resource=>new Promise(done=>handler({type:"READ_SAVETICKER_EXTRA",resource},{id:"extension"},done));
+  const read=(resource,symbols)=>new Promise(done=>handler({type:"READ_SAVETICKER_EXTRA",resource,symbols},{id:"extension"},done));
   const calendar=await read("calendar");const detail=await read("details");
   assert.equal(calendar.payload.events.length,1);
   assert.equal(detail.payload.details[0].translations.translated.ko_KR.summary[0].content,"provider summary");
-  const options=await read("options");
+  // options only for the symbols MarketLens names (its candidates), never the article's tickers (owner 2026-10-03)
+  const unasked=paths.length;
+  assert.equal((await read("options")).error,"FORMAT");
+  assert.equal((await read("options",["NVDA","bad symbol"])).error,"FORMAT");
+  assert.equal(paths.length,unasked);
+  const options=await read("options",["MU"]);
   assert.equal(paths.at(-1),"/api/stocks/api/v1/tickers/MU/options");
   assert.equal(options.payload.options[0].snapshotIsPriorDay,true);
   assert.equal(options.payload.options[0].referencePrice,1065.11);
@@ -114,7 +119,8 @@ test("supplement cadence survives a cold MV3 worker and repeated pairing", async
     }},scripting:{executeScript:async()=>{}}
   };
   const oldFetch=globalThis.fetch;
-  globalThis.fetch=async(_url,opts)=>{const message=JSON.parse(opts.body);if(!message.resource||message.resource==="options")delivered?.();return {status:200};};
+  globalThis.fetch=async(_url,opts)=>{const message=JSON.parse(opts.body);if(!message.resource||message.resource==="options")delivered?.();
+    return {status:200,ok:true,json:async()=>message.resource?{accepted:true}:{accepted:true,option_symbols:["NVDA"]}};};
   const code=await readFile(new URL("background.js",import.meta.url),"utf8");
   const load=async tag=>import("data:text/javascript;base64,"+Buffer.from(code+"\n//"+tag).toString("base64"));
   const settle=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
@@ -146,5 +152,38 @@ test("supplement cadence survives a cold MV3 worker and repeated pairing", async
     alarmHandler({name:"marketlens-saveticker-news"});
     await complete;await settle();
     assert.equal(extras,8);
+  } finally {globalThis.fetch=oldFetch;delete globalThis.chrome;}
+});
+
+test("options are read for the symbols the app names, and not at all when it names none", async () => {
+  let alarmHandler;
+  const sent=[];let reply={accepted:true,option_symbols:["NVDA","AMD","bad symbol",7]};
+  const state={pair:{endpoint:"http://127.0.0.1:8769/api/saveticker/browser/news",key:"f".repeat(64)}};
+  globalThis.chrome={
+    runtime:{id:"extension",onMessage:{addListener:()=>{}}},
+    storage:{session:{get:async()=>({...state}),set:async v=>{Object.assign(state,v);},remove:async()=>{}}},
+    alarms:{create:async()=>{},clear:async()=>{},onAlarm:{addListener:h=>{alarmHandler=h;}}},
+    tabs:{query:async()=>[{id:1,url:"https://saveticker.com/news",active:true}],sendMessage:async(_id,m)=>{
+      sent.push(m);
+      return m.type==="READ_SAVETICKER_NEWS"?{news:{news_list:[]}}:{resource:m.resource,payload:{}};
+    }},scripting:{executeScript:async()=>{}}
+  };
+  const oldFetch=globalThis.fetch;
+  globalThis.fetch=async(_url,opts)=>{const m=JSON.parse(opts.body);return {status:200,ok:true,json:async()=>m.resource?{accepted:true}:reply};};
+  const code=await readFile(new URL("background.js",import.meta.url),"utf8");
+  const settle=async()=>{for(let i=0;i<60;i++)await Promise.resolve();};
+  try {
+    const module=await import("data:text/javascript;base64,"+Buffer.from(code+"\n//names").toString("base64"));
+    assert.deepEqual(module.wantedSymbols({option_symbols:["A","b",null,"BRK.B"]}),["A","BRK.B"]);
+    assert.deepEqual(module.wantedSymbols({}),[]);
+    alarmHandler({name:"marketlens-saveticker-news"});await settle();
+    const asked=sent.filter(m=>m.resource==="options");
+    assert.equal(asked.length,1);
+    assert.deepEqual(asked[0].symbols,["NVDA","AMD"]);
+    // the app names nothing (every candidate already has today's figures): no options read
+    sent.length=0;reply={accepted:true,option_symbols:[]};state.supplement.at=Date.now()-600_001;
+    alarmHandler({name:"marketlens-saveticker-news"});await settle();
+    assert.equal(sent.filter(m=>m.resource==="options").length,0);
+    assert.equal(sent.filter(m=>m.resource==="calendar").length,1);
   } finally {globalThis.fetch=oldFetch;delete globalThis.chrome;}
 });

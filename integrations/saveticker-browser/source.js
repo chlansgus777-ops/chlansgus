@@ -1,7 +1,9 @@
 // Runs in the browser's isolated content-script world, on the one approved source origin.
 // fetch uses the browser's existing session automatically; no credential/session API is read.
-let supplementTickers = [];
-async function readMarketResource(resource) {
+const SYMBOL = /^[A-Z0-9][A-Z0-9.\-]{0,14}$/;
+// Options are read for the symbols MarketLens asks for (its candidates), never for names it did not choose.
+const validSymbols = (list) => Array.isArray(list) && list.length <= 10 && list.every((s) => typeof s === "string" && SYMBOL.test(s));
+async function readMarketResource(resource, symbols) {
   const cancel = new AbortController();
   const timer = setTimeout(() => cancel.abort(), 35_000);
   const read = async (path) => {
@@ -38,8 +40,9 @@ async function readMarketResource(resource) {
       return {resource,payload:{reports}};
     }
     if (resource === "options") {
+      if (!validSymbols(symbols)) throw new Error("FORMAT");
       const options=[];
-      for (const symbol of supplementTickers.slice(0,3)) {
+      for (const symbol of symbols) {
         const r=await read("/api/stocks/api/v1/tickers/"+encodeURIComponent(symbol)+"/options");
         if (!r || typeof r!=="object") throw new Error("FORMAT");
         const selected={};
@@ -71,7 +74,6 @@ async function readMarketResource(resource) {
         extra:r.extra?{source_url:r.extra.source_url,source_created_at:r.extra.source_created_at}:null,
         vote_stats:r.vote_stats?{vote_counts:r.vote_stats.vote_counts}:null});
     }
-    supplementTickers=[...new Set(details.flatMap(r=>r.tickers.map(t=>t.symbol)).filter(s=>typeof s==="string"&&/^[A-Z0-9][A-Z0-9.\-]{0,14}$/.test(s)))].slice(0,3);
     return {resource,payload:{details}};
   } catch (e) { return {resource,error:["AUTH_REQUIRED","ACCESS_DENIED","FORMAT"].includes(e.message)?e.message:"NETWORK"}; }
   finally { clearTimeout(timer); }
@@ -82,7 +84,7 @@ if (!globalThis.__marketlensSourceInstalled) {
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== chrome.runtime.id) return;
     if (message?.type === "READ_SAVETICKER_EXTRA") {
-      readMarketResource(message.resource).then(respond);
+      readMarketResource(message.resource, message.symbols).then(respond);
       return true;
     }
     if (message?.type !== "READ_SAVETICKER_NEWS") return;

@@ -7,6 +7,14 @@ export function validPair(endpoint, key) {
   try { return Number(new URL(endpoint).port || "80") <= 65535; } catch { return false; }
 }
 
+const SYMBOL = /^[A-Z0-9][A-Z0-9.\-]{0,14}$/;
+// The app's answer to a news delivery names the symbols whose options it wants (its candidates still missing today's
+// figures, at most 10). Anything else is ignored: the extension never chooses symbols itself.
+export function wantedSymbols(reply) {
+  const list = reply?.option_symbols;
+  return Array.isArray(list) ? list.filter((s) => typeof s === "string" && SYMBOL.test(s)).slice(0, 10) : [];
+}
+
 async function deliver(pair, message, canReportFormat=true) {
   const cancel = new AbortController();
   const timer = setTimeout(() => cancel.abort(), 8_000);
@@ -21,6 +29,10 @@ async function deliver(pair, message, canReportFormat=true) {
     if (canReportFormat && [413,422].includes(r.status)) {
       await deliver(pair,message.resource?{resource:message.resource,error:"FORMAT"}:{error:"FORMAT"},false);
     }
+    if (r.ok && typeof r.json === "function") {
+      try { return await r.json(); } catch { return null; }
+    }
+    return null;
   } finally { clearTimeout(timer); }
 }
 
@@ -44,7 +56,7 @@ async function collect() {
     // A newer pairing supersedes this read: never send an old browser result into a new app connection.
     const latest = (await chrome.storage.session.get("pair")).pair;
     if (latest?.key !== pair.key) return;
-    await deliver(pair, result);
+    const symbols = wantedSymbols(await deliver(pair, result));
     if ((await chrome.storage.session.get("pair")).pair?.key!==pair.key) return;
     const lastSupplement=supplement?.key===pair.key&&supplement.endpoint===pair.endpoint&&Number.isFinite(supplement.at)&&supplement.at<=Date.now()?supplement.at:0;
     if (result.news && Date.now()-lastSupplement>10*60_000) {
@@ -52,7 +64,8 @@ async function collect() {
       // so a cold worker cannot repeat every supplemental request at the news cadence.
       await chrome.storage.session.set({supplement:{key:pair.key,endpoint:pair.endpoint,at:Date.now()}});
       for (const resource of ["calendar","details","reports","options"]) {
-        const extra=await chrome.tabs.sendMessage(tab.id,{type:"READ_SAVETICKER_EXTRA",resource});
+        if (resource==="options" && !symbols.length) continue; // nothing the app asked for: no options request at all
+        const extra=await chrome.tabs.sendMessage(tab.id,resource==="options"?{type:"READ_SAVETICKER_EXTRA",resource,symbols}:{type:"READ_SAVETICKER_EXTRA",resource});
         const current=(await chrome.storage.session.get("pair")).pair;
         if (current?.key!==pair.key) return;
         if (extra?.resource===resource) await deliver(pair,extra);

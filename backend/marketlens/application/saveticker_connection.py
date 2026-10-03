@@ -1,10 +1,12 @@
 """Normal, opt-in SaveTicker login, with asynchronous feedback and no browser session export."""
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import secrets
 import hmac
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from marketlens.config import save_setup, validate_setup
@@ -18,7 +20,13 @@ if TYPE_CHECKING:
     from marketlens.application.services import MarketLensService
 
 
+log = logging.getLogger("marketlens.saveticker")
+
+
 class SaveTickerConnection:
+    OPTION_SYMBOLS = 10  # names per option read (the extension reads them one by one)
+    OPTIONS_FRESH_S = 6 * 3600  # the aggregates are the prior day's: a name is read again after six hours
+
     def __init__(self, service: MarketLensService):
         self.service = service
         self._lock = threading.RLock()
@@ -41,9 +49,24 @@ class SaveTickerConnection:
                 return {"key": self._browser_key, "expires_in_s": max(0, int(self._browser_deadline - time.monotonic()))}
             self._browser_key = secrets.token_hex(32)
             self._browser_deadline = time.monotonic() + 24 * 3600
-            self._browser = BrowserNewsProvider(self.service.now)
+            self._browser = BrowserNewsProvider(self.service.now, history_dir=Path(self.service.settings.data_dir) / "saveticker")
             self._browser_error = self._error = None
             return {"key": self._browser_key, "expires_in_s": 24 * 3600}
+
+    def option_symbols(self) -> list[str]:
+        """The names whose option aggregates the extension should read next (owner 2026-10-03: the candidates, never
+        the names an article happened to mention): the candidate list in its live order, those without a reading in
+        the last six hours, at most ten. Told to the extension in the answer to each news delivery."""
+        browser = self._browser
+        if browser is None or self._browser_key is None:
+            return []
+        try:
+            universe = self.service.option_universe()
+        except Exception as e:  # noqa: BLE001 - the news delivery must never fail on this; next delivery asks again
+            log.warning("saveticker option symbols: %s", type(e).__name__)
+            return []
+        read = browser.options_read_within(self.OPTIONS_FRESH_S)
+        return [t for t in universe if t not in read][: self.OPTION_SYMBOLS]
 
     def browser_authorized(self, key: str | None) -> bool:
         with self._lock:
@@ -86,11 +109,24 @@ class SaveTickerConnection:
         if previous and previous.providers[0] is not browser:
             for old in previous.providers:
                 self.service.refresher.get(f"saveticker-retire:{id(old)}", old.close, max_age=float("inf"))
-        return {"accepted": True, "items_fetched": browser.items_fetched, "items_normalized": browser.items_normalized}
+        return {"accepted": True, "items_fetched": browser.items_fetched, "items_normalized": browser.items_normalized,
+                "option_symbols": self.option_symbols()}
 
     def supplement_view(self) -> dict:
         with self._lock:
-            return self._browser.supplement_view() if self._browser else {"enabled": False, "resources": {}}
+            view = self._browser.supplement_view() if self._browser else {"enabled": False, "resources": {}}
+        options = view.get("resources", {}).get("options")
+        if options is not None:  # only the candidates' (and the stocks on screen), in the candidate list's order
+            try:
+                order = self.service.option_universe()
+            except Exception as e:  # noqa: BLE001 - shown without the order rather than not at all
+                log.warning("saveticker option order: %s", type(e).__name__)
+                order = []
+            rank = {t: i for i, t in enumerate(order)}
+            ticker = lambda r: r["related_companies"][0]["ticker"]  # noqa: E731
+            options["rows"] = sorted((r for r in options["rows"] if ticker(r) in rank), key=lambda r: rank[ticker(r)])
+            options["candidates"] = order
+        return view
 
     def stop_browser(self) -> dict:
         with self._lock:

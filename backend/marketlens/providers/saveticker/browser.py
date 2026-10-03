@@ -1,15 +1,22 @@
 """News received by the user's normal browser. No cookies, passwords or source session export."""
 from __future__ import annotations
 
+import json
+import logging
 import threading
 import copy
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from marketlens.domain.enums import DataMode
 from marketlens.providers.contracts import NewsItem, NewsMetadata, ProviderUnavailable, ProviderDataError
 from .parser import parse_news, classify_title
 from .supplement import PARSERS
+
+
+log = logging.getLogger("marketlens.saveticker")
+OPTIONS_KEEP_S = 3 * 24 * 3600  # an option aggregate not read again for three days is dropped from the screens
 
 
 class BrowserNewsProvider:
@@ -19,7 +26,7 @@ class BrowserNewsProvider:
     authenticated = False  # collecting a news response does not prove the user's identity
     transport_mode = "browser"
 
-    def __init__(self, now):
+    def __init__(self, now, history_dir: Path | None = None):
         self.now = now
         self._lock = threading.Lock()
         self._rows: list[NewsItem] = []
@@ -27,6 +34,12 @@ class BrowserNewsProvider:
         self.items_fetched = self.items_normalized = 0
         self._closed = False
         self._supplement = {name: {"rows": [], "last_success": None, "error": None} for name in PARSERS}
+        # option aggregates by symbol: each read brings the few names MarketLens asked for, the screens show them all
+        self._options: dict[str, dict] = {}
+        # dated copies of what was received, for measuring later whether it helps the return estimates (owner
+        # 2026-10-03: "수익계산에 도움이 된다면 계산법에 포함") — nothing is scored from it before that
+        self.history_dir = history_dir
+        self._recorded: dict[str, set[str]] = {}
 
     def update_supplement(self, resource: str, body: dict) -> dict:
         if not isinstance(resource, str) or resource not in PARSERS:
@@ -45,8 +58,52 @@ class BrowserNewsProvider:
             except (ValueError, ProviderDataError):
                 state["error"] = "FORMAT"
                 raise
+            received = len(rows)
+            if resource == "options":
+                self._record("options", rows, lambda r: f"{r['related_companies'][0]['ticker']}|{r['dates'].get('snapshotDate') or r['dates'].get('batchDate')}")
+                for r in rows:
+                    self._options[r["related_companies"][0]["ticker"]] = r
+                cutoff = self.now() - timedelta(seconds=OPTIONS_KEEP_S)
+                self._options = {k: v for k, v in self._options.items() if datetime.fromisoformat(v["collected_at"]) >= cutoff}
+                rows = list(self._options.values())
+            elif resource == "details":
+                self._record("earnings", [r for r in rows if r.get("earnings")], lambda r: str(r["news_id"]))
             self._supplement[resource] = {"rows": rows, "last_success": self.now().isoformat(), "error": None}
-            return {"accepted": True, "resource": resource, "items_normalized": len(rows)}
+            return {"accepted": True, "resource": resource, "items_normalized": received}
+
+    def options_read_within(self, seconds: float) -> set[str]:
+        """The symbols whose option aggregate was received less than ``seconds`` ago."""
+        with self._lock:
+            now = self.now()
+            return {k for k, v in self._options.items() if (now - datetime.fromisoformat(v["collected_at"])).total_seconds() < seconds}
+
+    def _record(self, kind: str, rows: list[dict], key) -> None:  # noqa: ANN001
+        """Append each new row to ``<history_dir>/<kind>_history.jsonl`` (its own key once per file). A failed write is
+        logged and collection goes on: the screens never depend on it."""
+        if self.history_dir is None or not rows:
+            return
+        path = self.history_dir / f"{kind}_history.jsonl"
+        try:
+            seen = self._recorded.get(kind)
+            if seen is None:
+                seen = set()
+                if path.exists():
+                    for line in path.read_text(encoding="utf-8").splitlines():
+                        try:
+                            seen.add(json.loads(line)["key"])
+                        except (ValueError, KeyError, TypeError):
+                            log.warning("saveticker history %s: an unreadable line kept as is", kind)
+                self._recorded[kind] = seen
+            new = [r for r in rows if key(r) not in seen]
+            if not new:
+                return
+            self.history_dir.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                for r in new:
+                    f.write(json.dumps({"key": key(r), "recorded_at": self.now().isoformat(), "row": r}, ensure_ascii=False, sort_keys=True) + "\n")
+                    seen.add(key(r))
+        except OSError as e:
+            log.warning("saveticker history %s not written: %s", kind, type(e).__name__)
 
     def supplement_view(self) -> dict:
         with self._lock:

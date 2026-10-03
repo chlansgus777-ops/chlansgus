@@ -193,7 +193,7 @@ def parse_options(payload, at: datetime) -> list[dict]:
     """Aggregate cards only. No option contracts, implied volatility, Greeks, or current-price authority."""
     rows = []
     names = ("maxPain", "volume", "putCallRatioVolume", "putCallRatioOpenInterest", "referencePrice", "netGammaExposure", "gammaPer1Pct", "callWall", "putWall", "gammaFlip")
-    for r in items(payload, "options", 5):
+    for r in items(payload, "options", 10):  # the extension reads at most 10 names MarketLens asked for
         symbol = required(r, "symbol")
         if not re.fullmatch(r"[A-Z0-9][A-Z0-9.\-]{0,14}", symbol): raise SaveTickerParseError("invalid option symbol")
         if any(type(r.get(k)) is not bool for k in ("optionable", "snapshotIsPriorDay", "batchIsPriorDay")):

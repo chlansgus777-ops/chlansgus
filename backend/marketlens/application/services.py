@@ -970,6 +970,28 @@ class MarketLensService:
         self._pool_cache = ((sid, views), time.monotonic(), pool)
         return pool
 
+    OPTION_UNIVERSE = 30  # names whose SaveTicker option aggregates are read and shown
+
+    def option_universe(self, limit: int | None = None) -> list[str]:
+        """The names whose SaveTicker option aggregates are read and shown (owner 2026-10-03: "종목후보들의 옵션 정보"):
+        the stocks open on screen, then the candidate list in its live order — buys first, then by live score. Never
+        a name only because an article mentioned it."""
+        pool = self._live_pool()
+        cand = [p for p in pool if p[0] not in self._pool_mine]
+        actions: dict[int, str] = {}
+        if cand:
+            with self.sf() as s:
+                actions = {rid: act for rid, act in s.execute(select(RecommendationRow.id, RecommendationRow.final_action)
+                                                               .where(RecommendationRow.id.in_([p[0] for p in cand])))}
+        bullish = {a.value for a in BULLISH_ACTIONS}
+
+        def order(p: tuple[int, str, float]) -> tuple[bool, float, str]:
+            raw = self._rejudged.get(p[0])
+            return ((raw["action"] if raw else actions.get(p[0])) not in bullish, -(raw["score"] if raw else p[2]), p[1])
+
+        names = [*sorted(self.quotes.viewed()), *(t for _rid, t, _sc in sorted(cand, key=order))]
+        return list(dict.fromkeys(names))[: limit or self.OPTION_UNIVERSE]
+
     def live_rejudge_tick(self) -> None:
         """Called by the quote stream's status tick: a round in the background at most every LIVE_REJUDGE_EVERY."""
         self.realtime.get("live-rejudge", self.live_rejudge, max_age=self.LIVE_REJUDGE_EVERY, retry_after=30.0)
