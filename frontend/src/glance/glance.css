@@ -30,18 +30,33 @@ body:has(.glance):not(:has(.glance.desk)) { background: #07070b; }
   font-family: var(--font, "Pretendard Variable", system-ui, sans-serif); font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
   user-select: none; -webkit-user-select: none; overflow: hidden;
 }
-/* the lattice: fine glass grid lines with brighter crossings, fading out from the top */
-.glance::before {
-  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit;
-  background-image:
-    radial-gradient(circle, rgba(200, 190, 255, 0.22) 0.9px, transparent 1.3px),
-    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 22px 22px, 22px 22px, 22px 22px;
-  background-position: -11px -11px, -1px -1px, -1px -1px;
-  -webkit-mask-image: radial-gradient(140% 90% at 30% 0%, #000 30%, rgba(0, 0, 0, 0.4) 68%, transparent 100%);
-  mask-image: radial-gradient(140% 90% at 30% 0%, #000 30%, rgba(0, 0, 0, 0.4) 68%, transparent 100%);
-}
+/* the background pattern, chosen in the menu (data-bg on .glance): every variant is a static, masked layer that is
+   brightest at the top and fades out downwards, under a soft spotlight; nothing here moves. */
+.gl-bg { position: absolute; inset: 0; z-index: -1; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.gl-bg i { position: absolute; inset: 0; display: block; }
+.gl-bg::before { content: ""; position: absolute; left: -20%; right: -20%; top: -150px; height: 330px;
+  background: radial-gradient(closest-side, rgba(163, 149, 255, 0.24), rgba(110, 160, 255, 0.07) 55%, transparent); }
+.gl-grid { -webkit-mask-image: radial-gradient(135% 85% at 30% 0%, #000 30%, rgba(0, 0, 0, 0.4) 66%, transparent 100%);
+  mask-image: radial-gradient(135% 85% at 30% 0%, #000 30%, rgba(0, 0, 0, 0.4) 66%, transparent 100%); }
+/* 1. glass tiles — fine lines with a bright dot on each crossing */
+.glance[data-bg="glass"] .gl-grid {
+  background-image: radial-gradient(circle, rgba(205, 195, 255, 0.30) 0.9px, transparent 1.4px),
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 22px 22px; background-position: -11px -11px, -1px -1px, -1px -1px; }
+/* 2. dots — a soft dot matrix */
+.glance[data-bg="dots"] .gl-grid {
+  background-image: radial-gradient(circle, rgba(210, 200, 255, 0.34) 1px, transparent 1.6px);
+  background-size: 16px 16px; background-position: 8px 8px; }
+/* 3. lattice — a diagonal (diamond) mesh */
+.glance[data-bg="lattice"] .gl-grid {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.055) 0 1px, transparent 1px 17px),
+    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.055) 0 1px, transparent 1px 17px); }
+/* 4. aurora grid — wider cells, lines tinted violet → cyan, glowing crossings */
+.glance[data-bg="aurora"] .gl-grid {
+  background-image: radial-gradient(circle, rgba(170, 200, 255, 0.55) 1px, rgba(163, 149, 255, 0.18) 2.4px, transparent 3.6px),
+    linear-gradient(rgba(170, 150, 255, 0.11) 1px, transparent 1px), linear-gradient(90deg, rgba(120, 190, 255, 0.11) 1px, transparent 1px);
+  background-size: 30px 30px; background-position: -15px -15px, -1px -1px, -1px -1px; }
+.glance[data-bg="none"] .gl-grid { display: none; }
 /* a soft diagonal sheen across the glass */
 .glance::after {
   content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit;
@@ -84,7 +99,7 @@ body:has(.glance):not(:has(.glance.desk)) { background: #07070b; }
 
 /* popovers (menu, holdings) share one look */
 .gl-menu, .gl-holdings { border-radius: 16px; border: 1px solid var(--g-edge); background: var(--g-pop); box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.9); }
-.gl-menu { position: absolute; right: 10px; top: 40px; z-index: 4; display: grid; gap: 12px; width: 220px; padding: 14px; }
+.gl-menu { position: absolute; right: 10px; top: 40px; z-index: 4; display: grid; gap: 12px; width: 268px; padding: 14px; }
 .gl-opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--g-2); font-size: 12.5px; }
 .gl-opt button[role="switch"] { position: relative; width: 32px; height: 18px; border-radius: 999px; background: var(--g-s2); border: 1px solid var(--g-edge); transition: background 160ms ease; }
 .gl-opt button i { position: absolute; left: 1px; top: 1px; width: 14px; height: 14px; border-radius: 50%; background: var(--g-2); transition: transform 160ms ease, background 160ms ease; }
@@ -244,3 +259,17 @@ body:has(.glance):not(:has(.glance.desk)) { background: #07070b; }
 .gl-loading .gl-market { margin-bottom: 4px; }
 
 @media (prefers-reduced-motion: reduce) { .glance *, .glance { transition: none !important; } .gl-waves svg { animation: none !important; } }
+
+/* an open list (holdings, sectors) owns the lower half: the change line and the candidates step back */
+.gl-changes, .gl-others { transition: opacity 160ms ease, visibility 160ms; }
+.glance:has(.gl-holdings, .gl-sectors) :is(.gl-changes, .gl-others) { opacity: 0; visibility: hidden; }
+
+/* background pattern chips in the menu: each chip shows its own pattern */
+.gl-bgopt > div { display: flex; gap: 5px; }
+.glance .gl-bgchip { width: 22px; height: 22px; border-radius: 7px; border: 1px solid var(--g-edge); background-color: #1a1828; background-size: 8px 8px; }
+.glance .gl-bgchip.on { border-color: var(--g-accent); box-shadow: 0 0 0 2px var(--g-acc-soft); }
+.gl-bgchip.glass { background-image: linear-gradient(rgba(255,255,255,.18) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.18) 1px, transparent 1px); }
+.gl-bgchip.dots { background-image: radial-gradient(circle, rgba(220,210,255,.6) 1px, transparent 1.5px); background-size: 6px 6px; }
+.gl-bgchip.lattice { background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.2) 0 1px, transparent 1px 6px), repeating-linear-gradient(-45deg, rgba(255,255,255,.2) 0 1px, transparent 1px 6px); background-size: auto; }
+.gl-bgchip.aurora { background-image: linear-gradient(rgba(170,150,255,.45) 1px, transparent 1px), linear-gradient(90deg, rgba(120,190,255,.45) 1px, transparent 1px); background-size: 10px 10px; }
+.gl-bgchip.none { background-image: none; }

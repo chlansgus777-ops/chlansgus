@@ -202,3 +202,4 @@ it("tapping the market line opens the sectors, strongest first, each as its benc
   act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
   expect(screen.queryByTestId("glance-sectors")).toBeNull();
 });
+

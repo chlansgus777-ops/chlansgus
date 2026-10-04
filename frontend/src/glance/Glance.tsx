@@ -60,6 +60,7 @@ function Shell({ session, delayed, wave, children }: { session: string | null; d
   const s = session ? SESSION[session] : null;
   const [menu, setMenu] = useState(false);
   const [waves] = usePref(WAVE_KEY);
+  const [bg] = useBgPattern();
   const hidden = usePageHidden();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -74,7 +75,8 @@ function Shell({ session, delayed, wave, children }: { session: string | null; d
     return () => { window.removeEventListener("pointerdown", down); window.removeEventListener("keydown", key); };
   }, [menu]);
   return (
-    <div ref={ref} className={`glance${isDesktop() ? " desk" : ""}${hidden ? " paused" : ""}`} data-testid="glance">
+    <div ref={ref} className={`glance${isDesktop() ? " desk" : ""}${hidden ? " paused" : ""}`} data-bg={bg} data-testid="glance">
+      <div className="gl-bg" aria-hidden><i className="gl-grid" /></div>
       {waves && <Waves tone={wave} />}
       <header className="gl-head" data-tauri-drag-region>
         <span className="gl-brand" data-tauri-drag-region><i aria-hidden />MarketLens</span>
@@ -104,6 +106,7 @@ function Menu({ onClose }: { onClose: () => void }) {
   const [sym, setSym] = useState(focusSymbol() ?? "");
   const [waves, setWaves] = usePref(WAVE_KEY);
   const [acct, setAcct] = usePref(ACCT_KEY);
+  const [bg, setBg] = useBgPattern();
   return (
     <div className="gl-menu" role="dialog" aria-label="Glance 설정">
       {isDesktop() && (
@@ -114,6 +117,13 @@ function Menu({ onClose }: { onClose: () => void }) {
       )}
       <div className="gl-opt"><span>물결 효과</span>
         <button type="button" role="switch" aria-checked={waves} aria-label="물결 효과" className={waves ? "on" : ""} onClick={() => setWaves(!waves)}><i /></button>
+      </div>
+      <div className="gl-opt gl-bgopt"><span>배경 무늬</span>
+        <div role="radiogroup" aria-label="배경 무늬">
+          {BG_PATTERNS.map(([k, label]) => (
+            <button key={k} type="button" role="radio" aria-checked={bg === k} aria-label={label} title={label} className={`gl-bgchip ${k}${bg === k ? " on" : ""}`} onClick={() => setBg(k)} />
+          ))}
+        </div>
       </div>
       <div className="gl-opt"><span>내 계좌 수익률</span>
         <button type="button" role="switch" aria-checked={acct} aria-label="내 계좌 수익률 표시" className={acct ? "on" : ""} onClick={() => setAcct(!acct)}><i /></button>
@@ -201,6 +211,26 @@ function Account({ t, rows, live }: { t: AccountLive["totals"]; rows: AccountLiv
       )}
     </div>
   );
+}
+
+/** The background pattern (this computer only). */
+const BG_KEY = "ml.glance.bg";
+const BG_PATTERNS: [string, string][] = [["glass", "유리 격자"], ["dots", "도트"], ["lattice", "마름모 철망"], ["aurora", "오로라 격자"], ["none", "무늬 없음"]];
+const DEFAULT_BG = "glass";
+function useBgPattern(): [string, (v: string) => void] {
+  const read = () => { try { const v = localStorage.getItem(BG_KEY); return v && BG_PATTERNS.some(([k]) => k === v) ? v : DEFAULT_BG; } catch { return DEFAULT_BG; } };
+  const [v, setV] = useState(read);
+  useEffect(() => {
+    const on = () => setV(read());
+    window.addEventListener("ml-glance-pref", on);
+    window.addEventListener("storage", on);
+    return () => { window.removeEventListener("ml-glance-pref", on); window.removeEventListener("storage", on); };
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps -- read() is stable
+  return [v, (nv: string) => {
+    try { localStorage.setItem(BG_KEY, nv); } catch { /* this session only */ }
+    setV(nv);
+    window.dispatchEvent(new Event("ml-glance-pref"));
+  }];
 }
 
 /** An inline popover: closes on a click outside its box or on Escape. */
