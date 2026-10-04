@@ -100,8 +100,8 @@ fn spawn_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
 // ------------------------------------------------------------------ GLANCE MODE (a frameless desktop widget)
 const GLANCE: &str = "glance";
-const GLANCE_W: f64 = 320.0;
-const GLANCE_H: f64 = 470.0;
+const GLANCE_W: f64 = 360.0;
+const GLANCE_H: f64 = 500.0;
 
 fn api_init_script(app: &AppHandle) -> String {
     let st = app.state::<Backend>();
@@ -162,8 +162,8 @@ fn glance_open(app: AppHandle) -> Result<(), String> {
     let w = WebviewWindowBuilder::new(&app, GLANCE, WebviewUrl::App("index.html".into()))
         .title("MarketLens Glance")
         .inner_size(GLANCE_W, GLANCE_H)
-        .min_inner_size(280.0, 380.0)
-        .max_inner_size(480.0, 760.0)
+        .min_inner_size(320.0, 420.0)
+        .max_inner_size(520.0, 760.0)
         .decorations(false)
         .transparent(true)
         .shadow(false)
