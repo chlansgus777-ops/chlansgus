@@ -188,3 +188,17 @@ it("tapping the account opens the held names with their own total and today's re
   expect(localStorage.getItem("ml.focus")).toBe("NVDA");
   expect(screen.queryByTestId("glance-holdings")).toBeNull();
 });
+
+it("tapping the market line opens the sectors, strongest first, each as its benchmark ETF's move today", async () => {
+  show();
+  const line = await screen.findByTestId("glance-market");
+  act(() => { fireClick(line); });
+  const panel = await screen.findByTestId("glance-sectors");
+  expect(panel.textContent).toContain("반도체SOXX");
+  expect(panel.textContent).toContain("헬스케어XLV");
+  expect(panel.textContent).toContain("업종 대표 ETF 기준");
+  // no quotes yet in this test: every sector says "—", never a made-up number
+  expect([...panel.querySelectorAll("li b")].every((b) => b.textContent === "—")).toBe(true);
+  act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+  expect(screen.queryByTestId("glance-sectors")).toBeNull();
+});

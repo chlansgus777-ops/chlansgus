@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useApi, usePoll, useSettling } from "../components/useApi";
-import { effectiveState, useQuote, useViewQuotes, type QuoteRow } from "../quotes";
+import { effectiveState, useAllQuotes, useQuote, useViewQuotes, type QuoteRow } from "../quotes";
 import { quantityShown } from "../advice";
 import { ACTION_INFO, REGIME_KO } from "../i18n";
 import { splitCandidates, type Dash } from "../pages/Dashboard";
@@ -148,12 +148,15 @@ function usePref(key: string, dflt = true): [boolean, (v: boolean) => void] {
   }];
 }
 
-/** Two slow waves along the bottom edge — decoration only; their colour follows today's account move (mint up, pink
- * down, lavender otherwise). Pure CSS transforms; stopped under reduced motion and switchable in the menu. */
+/** Two slow waves along the bottom edge — decoration only, in the accent's violet → indigo. Pure CSS transforms;
+ * paused while the window is hidden, stopped under reduced motion and switchable in the menu. */
 function Waves({ tone: t }: { tone: string }) {
   const path = "M0 18 Q 45 6 90 18 T 180 18 T 270 18 T 360 18 T 450 18 T 540 18 T 630 18 T 720 18 V 60 H 0 Z";
   return (
     <div className={`gl-waves ${t}`} aria-hidden>
+      <svg width="0" height="0" style={{ position: "absolute" }}>
+        <defs><linearGradient id="gl-wavefill" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#a395ff" /><stop offset="1" stopColor="#6270ff" /></linearGradient></defs>
+      </svg>
       <svg viewBox="0 0 720 60" preserveAspectRatio="none" className="w1"><path d={path} /></svg>
       <svg viewBox="0 0 720 60" preserveAspectRatio="none" className="w2"><path d={path} /></svg>
     </div>
@@ -164,21 +167,12 @@ function Waves({ tone: t }: { tone: string }) {
 /** The account's own total and today's return, as /portfolio/live counts them (the Toss app's basis) — percentages only,
  * no amounts or account details on an always-visible widget. */
 function Account({ t, rows, live }: { t: AccountLive["totals"]; rows: AccountLive["rows"]; live: boolean }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return undefined;
-    const down = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    window.addEventListener("pointerdown", down);
-    window.addEventListener("keydown", key);
-    return () => { window.removeEventListener("pointerdown", down); window.removeEventListener("keydown", key); };
-  }, [open]);
+  const [open, setOpen, ref] = usePopover();
   if (t.pnl_rate == null && t.daily_rate == null) return null;
   // largest holding first (by value, which is never shown), then by name
   const held = [...rows].filter((r) => r.quantity > 0).sort((a, b) => (b.value ?? -1) - (a.value ?? -1) || a.ticker.localeCompare(b.ticker));
   return (
-    <div className="gl-acct-wrap" ref={ref}>
+    <div className={`gl-acct-wrap${open ? " up" : ""}`} ref={ref}>
       <button type="button" className={`gl-acct${open ? " open" : ""}`} onClick={() => setOpen((v) => !v)} aria-expanded={open}
         data-testid="glance-account" title="보유 종목 보기">
         <span className="gl-ak">내 계좌</span>
@@ -207,6 +201,21 @@ function Account({ t, rows, live }: { t: AccountLive["totals"]; rows: AccountLiv
       )}
     </div>
   );
+}
+
+/** An inline popover: closes on a click outside its box or on Escape. */
+function usePopover(): [boolean, React.Dispatch<React.SetStateAction<boolean>>, React.RefObject<HTMLDivElement | null>] {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const down = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("pointerdown", down);
+    window.addEventListener("keydown", key);
+    return () => { window.removeEventListener("pointerdown", down); window.removeEventListener("keydown", key); };
+  }, [open]);
+  return [open, setOpen, ref];
 }
 
 /** True while the window is minimised or covered (the decoration then stops; values keep polling). */
@@ -260,17 +269,19 @@ function Market({ d, m }: { d: Dash | null | undefined; m: MacroResp | null | un
   if (spy?.change_pct != null) items.push({ k: "SPY", v: signed(spy.change_pct), t: tone(spy.change_pct) });
   if (vix !== null) items.push({ k: "VIX", v: vix.toFixed(1), t: "" });
   if (tnx !== null) items.push({ k: items.length >= 4 ? "10년" : "10년물", v: `${tnx.toFixed(2)}%`, t: "" });
+  const [open, setOpen, ref] = usePopover();
   return (
+    <div className={`gl-market-wrap${open ? " up" : ""}`} ref={ref}>
     <section className={`gl-market ${st?.tone ?? "idle"}`}>
       <Buddy mood={st ? st.tone || "flat" : "sleep"} />
       <div className="gl-mcol">
-      <button type="button" className="gl-mstate" onClick={() => void openAnalyze("/market")} data-testid="glance-market"
-        title={conf !== null ? "데이터 충족도: 국면 판단에 쓴 거시 데이터가 얼마나 갖춰졌는지(확률 아님)" : undefined}>
+      <button type="button" className="gl-mstate" onClick={() => setOpen((v) => !v)} aria-expanded={open} data-testid="glance-market"
+        title={conf !== null ? "업종별 강세·약세 보기 · 데이터 충족도: 국면 판단에 쓴 거시 데이터가 얼마나 갖춰졌는지(확률 아님)" : "업종별 강세·약세 보기"}>
         <span className="gl-mk">미국 시장</span>
         {st ? <span className={`gl-mv ${st.tone}`}>{st.label}</span> : <span className="gl-mv muted">판단 대기</span>}
         {st && primary && !BASIC.has(primary) && <span className="gl-msub">{regimeShort(primary)}</span>}
         {conf !== null && <span className="gl-mconf">데이터 {conf}%</span>}
-        <span className="gl-chev" aria-hidden>›</span>
+        <span className="gl-chev" aria-hidden>{open ? "⌃" : "⌄"}</span>
       </button>
       {items.length > 0 && (
         <dl className="gl-metrics" data-testid="glance-metrics" style={{ gridTemplateColumns: `repeat(${Math.max(items.length, 4)}, minmax(0, 1fr))` }}>
@@ -279,6 +290,40 @@ function Market({ d, m }: { d: Dash | null | undefined; m: MacroResp | null | un
       )}
       </div>
     </section>
+    {open && <Sectors onMarket={() => { setOpen(false); void openAnalyze("/market"); }} />}
+    </div>
+  );
+}
+
+/** US sectors by their benchmark ETFs — the same live quote stream the rest of the widget uses, subscribed only while
+ * this list is open. Each figure is that ETF's move today, labelled as such (not an index of the sector). */
+const SECTORS: [string, string][] = [
+  ["SOXX", "반도체"], ["XLK", "기술"], ["XLC", "커뮤니케이션"], ["XLY", "경기소비재"], ["XLF", "금융"], ["XLV", "헬스케어"],
+  ["XLI", "산업재"], ["XLE", "에너지"], ["XLB", "소재"], ["XLP", "필수소비재"], ["XLU", "유틸리티"], ["XLRE", "부동산"],
+];
+function Sectors({ onMarket }: { onMarket: () => void }) {
+  useViewQuotes(SECTORS.map(([t]) => t));
+  const all = useAllQuotes();
+  const rows = SECTORS.map(([t, name]) => ({ t, name, c: all.get(t)?.change_pct ?? null }))
+    .sort((a, b) => (a.c === null ? 1 : 0) - (b.c === null ? 1 : 0) || (b.c ?? 0) - (a.c ?? 0));
+  const max = Math.max(0.005, ...rows.map((r) => Math.abs(r.c ?? 0)));
+  const known = rows.filter((r) => r.c !== null);
+  return (
+    <div className="gl-sectors" role="dialog" aria-label="업종별 강세·약세" data-testid="glance-sectors">
+      <div className="gl-hhead gl-shead"><span>업종 · 오늘</span><span>{known.length ? `강세 ${known.filter((r) => r.c! > 0).length} · 약세 ${known.filter((r) => r.c! < 0).length}` : "시세 받는 중"}</span></div>
+      <ul>
+        {rows.map((r) => (
+          <li key={r.t} title={`${r.name} 대표 ETF ${r.t}의 오늘 등락`}>
+            <span className="gl-sname">{r.name}<small>{r.t}</small></span>
+            <span className="gl-sbar" aria-hidden>
+              {r.c !== null && <i className={tone(r.c)} style={{ width: `${(Math.abs(r.c) / max) * 50}%`, [r.c >= 0 ? "left" : "right"]: "50%" }} />}
+            </span>
+            <b className={r.c !== null ? tone(r.c) : "muted"}>{r.c !== null ? signed(r.c) : "—"}</b>
+          </li>
+        ))}
+      </ul>
+      <div className="gl-sfoot"><small>업종 대표 ETF 기준 · 실시간</small><button type="button" className="gl-link" onClick={onMarket}>시장 화면 ↗</button></div>
+    </div>
   );
 }
 
@@ -467,6 +512,7 @@ function Sparkline({ values }: { values: number[] }) {
       <figcaption>종가 {values.length}일</figcaption>
       <svg viewBox={`0 0 ${w} ${h}`} aria-hidden>
         <defs>
+          <linearGradient id="gl-stroke" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#7d86ff" stopOpacity="0.7" /><stop offset="1" stopColor="#c4b9ff" /></linearGradient>
           <linearGradient id="gl-fill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" className="f0" /><stop offset="1" className="f1" />
           </linearGradient>
