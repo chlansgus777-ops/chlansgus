@@ -40,8 +40,9 @@ body:has(.glance):not(:has(.glance.desk)) { background: #07070b; }
    symmetric left↔right at any window width; at the default 360px the 18px glass grid lands exactly on both window
    borders and on the cards' edges (18px in) */
 .gl-grid { background-position: center 0;
-  -webkit-mask-image: radial-gradient(130% 85% at 50% 0%, #000 30%, rgba(0, 0, 0, 0.4) 66%, transparent 100%);
-  mask-image: radial-gradient(130% 85% at 50% 0%, #000 30%, rgba(0, 0, 0, 0.4) 66%, transparent 100%); }
+  /* strongest at the top, fading steadily, gone from halfway down */
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.7) 15%, rgba(0, 0, 0, 0.3) 33%, transparent 50%);
+  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.7) 15%, rgba(0, 0, 0, 0.3) 33%, transparent 50%); }
 /* 1. glass tiles — fine lines with a bright dot on each crossing */
 .glance[data-bg="glass"] .gl-grid {
   --l: rgba(255, 255, 255, 0.055);
