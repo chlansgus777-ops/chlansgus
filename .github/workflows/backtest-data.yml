@@ -94,6 +94,8 @@ jobs:
           echo; echo "=== manifest.json"; cat bt-out/manifest.json
           echo; echo "=== leak_checks (summary)"; python3 -c "import json;d=json.load(open('bt-out/leak_checks.json'));print(json.dumps({k:v for k,v in d.items() if k!='truncated_copy'}, ensure_ascii=False));print([(x['t'],x['rows'],x['differences']) for x in d.get('truncated_copy',[])])"
           echo "=== application"; python3 -c "import json;print(json.dumps(json.load(open('bt-out/results.json')).get('application'), ensure_ascii=False, indent=1))"
+          echo "=== summary (one line, last: what the session that drives the run reads)"
+          python3 -c "import json;d=json.load(open('summary.json'));d['strategy'].pop('equity_weekly',None);print(json.dumps(d, ensure_ascii=False, separators=(',',':')))"
       - name: Results of a finished run and its reproduction (diff)
         if: inputs.task == 'diff'
         uses: actions/download-artifact@v4
