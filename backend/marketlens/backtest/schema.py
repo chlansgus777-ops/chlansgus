@@ -174,8 +174,11 @@ class ReplayTransport(httpx.BaseTransport):
         with self._eng.connect() as c:
             row = c.execute(select(bt_http.c.status, bt_http.c.body).where(bt_http.c.key == key)).first()
         if row is None:
+            # not collected: that one input is missing at t (404 → the app's "not found", one series of the macro
+            # picture), never fetched. A transport error here made the app drop every series of the request — the
+            # SP500 vintages were never recorded and the 7-year run had no macro in any week (2026-10-04).
             self.misses.append(clean)
-            raise NetworkBlocked(f"not in the collected data: {clean[:200]}", request=request)
+            return httpx.Response(404, json={"error_message": f"not in the collected data: {clean[:200]}"}, request=request)
         self.served += 1
         self.urls.append(clean)
         return httpx.Response(row[0], content=row[1].encode(), headers={"content-type": "application/json"}, request=request)
