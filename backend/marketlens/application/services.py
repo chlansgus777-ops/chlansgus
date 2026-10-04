@@ -785,14 +785,20 @@ class MarketLensService:
             issued_at = issued_at.replace(tzinfo=timezone.utc)
         return issued_at < datetime.fromisoformat(self._account_changed_at)
 
+    MA_ALERT_MIN_SCORE = 60.0  # owner 2026-10-05: only names scoring 60 or more alert on a moving-average touch
+
     def _ma_levels(self) -> list[Any]:
-        """The 20 / 50 / 200-day lines of every held and watched name, from its newest analysis, on today's share basis."""
+        """The 20 / 50 / 200-day lines of every name whose newest analysis scores ``MA_ALERT_MIN_SCORE`` or more — the
+        held and watched names and the analysed pool of the shown scan — on today's share basis."""
         out = []
         with self.sf() as s:
             names = {h.ticker for h in self.portfolio(s).holdings} | {w.ticker for w in repo.watchlist(s)}
+            scan = self.shown_scan(s)
+            if scan is not None:
+                names |= {r.ticker for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None and r.rank <= self.LIVE_POOL}
             for t in sorted(names):
                 r = self.latest_company_recommendation(s, t)
-                if r is None:
+                if r is None or r.score is None or r.score < self.MA_ALERT_MIN_SCORE:
                     continue
                 lv = levels_from_result(t, r.result, r.as_of, self.levels_now(r).get("split_factor") or 1.0)
                 if lv is not None:

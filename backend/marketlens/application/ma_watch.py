@@ -1,5 +1,5 @@
-"""이동평균선 닿음 알림 (owner 2026-10-05: "200일선에 닿았다 몇일선에 닿았다 … 닿았을때 알람"): every live price of a
-held or watched name is checked against the 20 / 50 / 200-day moving averages of its newest analysis (on today's share
+"""이동평균선 닿음 알림 (owner 2026-10-05: "200일선에 닿았다 몇일선에 닿았다 … 닿았을때 알람", "60점 이상 종목들만"): every
+live price of a name whose newest analysis scores 60 or more (held, watched or in the analysed pool) is checked against the 20 / 50 / 200-day moving averages of its newest analysis (on today's share
 basis), and a touch becomes an alert in the app's alert center — once per name, line and New York trading day, never on
 every tick. Only a display and an alert: nothing here changes a score or a decision.
 
@@ -105,10 +105,12 @@ class MaWatch:
                 st = state(price, line, lv.atr)
                 prev = self._last.get((sym, n))
                 self._last[(sym, n)] = st
-                if st != "AT" or prev == "AT" or self._sent.get((sym, n)) == day:
+                # only a price coming TO the line while watched: a name already at a line when the app starts (or the lines
+                # reload) says nothing — the stock page shows it — so a restart never fires a burst of alerts
+                if st != "AT" or prev in (None, "AT") or self._sent.get((sym, n)) == day:
                     continue
                 self._sent[(sym, n)] = day
-                how = " · 위에서 내려와 닿음(지지 시험)" if prev == "ABOVE" else " · 아래에서 올라와 닿음(저항 시험)" if prev == "BELOW" else ""
+                how = " · 위에서 내려와 닿음(지지 시험)" if prev == "ABOVE" else " · 아래에서 올라와 닿음(저항 시험)"
                 out.append({"window": n, "label": label, "line": line, "from": prev,
                             "text": f"{sym} {label}에 닿음 — 현재가 ${price:,.2f}, {label} ${line:,.2f} ({price / line - 1:+.1%}){how}"})
         for a in out:

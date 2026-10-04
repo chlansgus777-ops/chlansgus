@@ -16,9 +16,13 @@ export function maState(price: number, line: number, atr: number | null | undefi
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
 
-export function MaTouch({ technicals, price, split = 1, alerts }: {
-  technicals: Record<string, unknown> | null | undefined; price: number | null; split?: number; alerts: boolean;
+/** The backend alerts on names whose newest analysis scores this or more (application/ma_watch.py). */
+export const MA_ALERT_MIN_SCORE = 60;
+
+export function MaTouch({ technicals, price, split = 1, score }: {
+  technicals: Record<string, unknown> | null | undefined; price: number | null; split?: number; score: number | null | undefined;
 }) {
+  const alerts = typeof score === "number" && score >= MA_ALERT_MIN_SCORE;
   const f = split > 0 ? split : 1;
   const atr = num(technicals?.atr14) !== null ? num(technicals?.atr14)! / f : null;
   const rows = MA_LINES.map(([n, label]) => {
@@ -37,7 +41,7 @@ export function MaTouch({ technicals, price, split = 1, alerts }: {
     <div className="ma-touch" data-testid="ma-touch">
       <div className="ma-head">
         <span className={`ma-headline${touching.length ? " at" : ""}`}>{headline}</span>
-        <span className="caption">{alerts ? "보유·관심 종목이라 닿으면 알림이 옵니다" : "보유·관심 종목에 넣으면 닿을 때 알림이 옵니다"}</span>
+        <span className="caption">{alerts ? `점수 ${Math.round(score!)}점 — 선에 닿으면 알림이 옵니다` : `알림은 점수 ${MA_ALERT_MIN_SCORE}점 이상 종목만${typeof score === "number" ? ` (지금 ${Math.round(score)}점)` : ""}`}</span>
       </div>
       <div className="ma-rows">
         {rows.map((r) => (

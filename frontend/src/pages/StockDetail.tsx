@@ -167,9 +167,7 @@ function StockDetail({ ticker }: { ticker: string }) {
   const lvj = useApi<{ live: (LiveJudgement & { rec_id: number; analysed_at: string }) | null }>(`/stocks/${ticker}/live`, [ticker]);
   usePoll(lvj.reload, 1_000, true);
   const wl = useApi<{ ticker: string }[]>("/watchlist");
-  const watched = Array.isArray(wl.data) && wl.data.some((w) => w?.ticker === ticker);
-  const pf = useApi<{ holdings?: { ticker: string }[] }>("/portfolio");
-  const held = Array.isArray(pf.data?.holdings) && pf.data!.holdings!.some((h) => h?.ticker === ticker);  // an odd answer never breaks the page
+  const watched = Array.isArray(wl.data) && wl.data.some((w) => w?.ticker === ticker);  // an odd answer never breaks the page
   const mine = d.data && d.data.analysis.ticker === ticker ? d.data : null;
   const mineOk = !!mine;
   const [heroVisible, setHeroVisible] = useState(true);
@@ -408,7 +406,7 @@ function StockDetail({ ticker }: { ticker: string }) {
         {hist.length > 1 && e ? (
           <PlanChart data={hist} levels={{ stop: e.stop, maxBuy: e.max_buy, zoneLow: e.acceptable_low, ideal: e.ideal_entry, t1: e.target1, t2: e.target2 }} height={320} />
         ) : hist.length > 1 ? <PlanChart data={hist} levels={{}} height={260} /> : <Empty>가격 이력이 부족해 차트를 그리지 않습니다.</Empty>}
-        <MaTouch technicals={a.technicals} price={priceNow} split={split} alerts={watched || held} />
+        <MaTouch technicals={a.technicals} price={priceNow} split={split} score={rec.score} />
         <div className="divider" />
         <div className="two">
           <div>

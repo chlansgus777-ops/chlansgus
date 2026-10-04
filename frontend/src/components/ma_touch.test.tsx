@@ -16,18 +16,19 @@ it("uses a quarter ATR, never under half a percent", () => {
 });
 
 it("names the line being touched and where the price sits against the others", () => {
-  render(<MaTouch technicals={{ sma20: 230, sma50: 220, sma200: 200, atr14: 4 }} price={200.5} alerts={false} />);
+  render(<MaTouch technicals={{ sma20: 230, sma50: 220, sma200: 200, atr14: 4 }} price={200.5} score={55} />);
   const box = screen.getByTestId("ma-touch");
   expect(box.textContent).toContain("지금 200일선에 닿아 있음");
-  expect(box.textContent).toContain("보유·관심 종목에 넣으면 닿을 때 알림이 옵니다");
+  expect(box.textContent).toContain("알림은 점수 60점 이상 종목만 (지금 55점)");
   expect([...box.querySelectorAll(".ma-chip")].map((c) => c.textContent)).toEqual(["아래", "아래", "닿음"]);
 });
 
 it("is on today's share basis after a split, and hides without lines or a price", () => {
-  render(<MaTouch technicals={{ sma20: 2000, sma50: 1800, sma200: 1500, atr14: 40 }} price={210} split={10} alerts />);
+  render(<MaTouch technicals={{ sma20: 2000, sma50: 1800, sma200: 1500, atr14: 40 }} price={210} split={10} score={72.4} />);
   expect(screen.getByTestId("ma-touch").textContent).toContain("모든 이동평균선 위 (상승 추세)");
   expect(screen.getByTestId("ma-touch").textContent).toContain("$200.00");
+  expect(screen.getByTestId("ma-touch").textContent).toContain("점수 72점 — 선에 닿으면 알림이 옵니다");
   cleanup();
-  const { container } = render(<MaTouch technicals={{}} price={210} alerts />);
+  const { container } = render(<MaTouch technicals={{}} price={210} score={80} />);
   expect(container.textContent).toBe("");
 });

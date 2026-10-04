@@ -42,8 +42,17 @@ def test_coming_down_to_the_200_day_line_alerts_once_with_its_direction():
     assert w.observe("NVDA", 200.2, ts) == []            # back again the same day: no repeat
 
 
+def test_already_at_a_line_when_watching_starts_says_nothing():
+    w, sent = watch([lv({200: 200.0})])
+    assert w.observe("NVDA", 200.1, NOW) == []    # first price seen is already at the line: no startup burst
+    w.observe("NVDA", 205.0, NOW)
+    assert [a["window"] for a in w.observe("NVDA", 200.2, NOW)] == [200]  # coming back to it does
+    assert "위에서 내려와" in sent[0][0][3]
+
+
 def test_a_new_new_york_day_can_alert_again():
     w, sent = watch([lv({200: 200.0})])
+    w.observe("NVDA", 205.0, NOW - timedelta(seconds=2))
     w.observe("NVDA", 200.1, NOW - timedelta(seconds=1))
     w._now = lambda: NOW + timedelta(days=1)  # type: ignore[method-assign]
     w.observe("NVDA", 210.0, NOW + timedelta(days=1))
