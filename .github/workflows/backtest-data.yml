@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff"
+        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions"
         required: true
         default: "probe"
       resume_run_id:
@@ -96,6 +96,17 @@ jobs:
           echo "=== application"; python3 -c "import json;print(json.dumps(json.load(open('bt-out/results.json')).get('application'), ensure_ascii=False, indent=1))"
           echo "=== summary (one line, last: what the session that drives the run reads)"
           python3 -c "import json;d=json.load(open('summary.json'));d['strategy'].pop('equity_weekly',None);print(json.dumps(d, ensure_ascii=False, separators=(',',':')))"
+      - name: Results of a finished run (actions)
+        if: inputs.task == 'actions'
+        uses: actions/download-artifact@v4
+        with:
+          name: backtest-results
+          path: bt-out
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Why the run bought so rarely (actions; nothing is measured again)
+        if: inputs.task == 'actions'
+        run: gunzip -f bt-out/rows.db.gz && python -m marketlens.backtest.actions bt-out/rows.db
       - name: Results of a finished run and its reproduction (diff)
         if: inputs.task == 'diff'
         uses: actions/download-artifact@v4
