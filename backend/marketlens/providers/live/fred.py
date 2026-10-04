@@ -90,6 +90,7 @@ class FredMacroProvider:
         fred_today = as_of.astimezone(FRED_TZ).date()
         end = min(as_of.date(), fred_today)
         out: dict[str, MacroSeries] = {}
+        refused: ProviderDataError | None = None
         for sid in series_ids:
             if sid not in FRED_MAP:
                 continue
@@ -98,7 +99,14 @@ class FredMacroProvider:
             # release times are not in this API: monthly/quarterly releases (CPI 08:30 ET, …) on the analysis
             # day itself may not be public yet at ``as_of`` → use the previous day's vintage for them
             vintage = end if sid in DAILY else end - timedelta(days=1)
-            obs = self._observations(fid, end, end - lookback, vintage)
+            try:
+                obs = self._observations(fid, end, end - lookback, vintage)
+            except ProviderDataError as e:
+                # one series FRED refuses (SP500 has no ALFRED vintage before 2026: 400 for every past date) is that
+                # series missing, not the whole macro picture — the 7-year backtest had no macro in any week (2026-10-04).
+                # A refusal that concerns every series (key, server, rate limit) is another exception and still raises.
+                refused = e
+                continue
             if not obs:
                 continue
             series = [v for _, v in obs]
@@ -128,4 +136,6 @@ class FredMacroProvider:
             if sid in (SPX, NASDAQ_COMP) and len(vals) >= 200:
                 above = latest > sum(vals[-200:]) / 200
             out[sid] = MacroSeries(sid, fact, change_20d=ch, pct_change_20d=pct, above_200d=above)
+        if not out and refused is not None:
+            raise refused
         return out

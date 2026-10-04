@@ -115,6 +115,22 @@ def test_fred_parsing_missing_values_and_staleness():
         FredMacroProvider(None).get_series([US10Y], NOW)
 
 
+def test_fred_one_refused_series_leaves_the_others():
+    """SP500 has no ALFRED vintage before 2026: FRED answers 400 for every past date. That series is missing, not the
+    whole macro picture (the 7-year backtest had no macro in any week, 2026-10-04); a refusal of every series raises."""
+    from marketlens.domain.macro import SPX
+
+    obs = {"observations": [{"date": (date(2026, 9, 24) - timedelta(days=i)).isoformat(), "value": str(4.0 + i * 0.01)} for i in reversed(range(30))]}
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error_message": "Bad Request"}) if "series_id=SP500" in str(req.url) else httpx.Response(200, json=obs)
+
+    out = FredMacroProvider("k", transport=transport({"series/observations": answer})).get_series([US10Y, SPX], NOW)
+    assert US10Y in out and SPX not in out
+    with pytest.raises(ProviderDataError):
+        FredMacroProvider("k", transport=transport({"series/observations": httpx.Response(400)})).get_series([US10Y, SPX], NOW)
+
+
 def test_finnhub_quote_news_and_errors():
     ts = int(NOW.timestamp())
     t = transport({"/quote": httpx.Response(200, json={"c": 101.5, "t": ts, "o": 100, "h": 102, "l": 99, "pc": 100}),
