@@ -36,26 +36,34 @@ body:has(.glance):not(:has(.glance.desk)) { background: #07070b; }
 .gl-bg i { position: absolute; inset: 0; display: block; }
 .gl-bg::before { content: ""; position: absolute; left: -20%; right: -20%; top: -150px; height: 330px;
   background: radial-gradient(closest-side, rgba(163, 149, 255, 0.24), rgba(110, 160, 255, 0.07) 55%, transparent); }
-.gl-grid { -webkit-mask-image: radial-gradient(135% 85% at 30% 0%, #000 30%, rgba(0, 0, 0, 0.4) 66%, transparent 100%);
-  mask-image: radial-gradient(135% 85% at 30% 0%, #000 30%, rgba(0, 0, 0, 0.4) 66%, transparent 100%); }
+/* every pattern is laid out from the centre (lines in the middle of each tile, tiles centred), so it is mirror-
+   symmetric left↔right at any window width; at the default 360px the 18px glass grid lands exactly on both window
+   borders and on the cards' edges (18px in) */
+.gl-grid { background-position: center 0;
+  -webkit-mask-image: radial-gradient(130% 85% at 50% 0%, #000 30%, rgba(0, 0, 0, 0.4) 66%, transparent 100%);
+  mask-image: radial-gradient(130% 85% at 50% 0%, #000 30%, rgba(0, 0, 0, 0.4) 66%, transparent 100%); }
 /* 1. glass tiles — fine lines with a bright dot on each crossing */
 .glance[data-bg="glass"] .gl-grid {
-  background-image: radial-gradient(circle, rgba(205, 195, 255, 0.30) 0.9px, transparent 1.4px),
-    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 22px 22px; background-position: -11px -11px, -1px -1px, -1px -1px; }
+  --l: rgba(255, 255, 255, 0.055);
+  background-image: radial-gradient(circle at center, rgba(205, 195, 255, 0.32) 0.9px, transparent 1.4px),
+    linear-gradient(to bottom, transparent 8.5px, var(--l) 8.5px, var(--l) 9.5px, transparent 9.5px),
+    linear-gradient(to right, transparent 8.5px, var(--l) 8.5px, var(--l) 9.5px, transparent 9.5px);
+  background-size: 18px 18px; }
 /* 2. dots — a soft dot matrix */
 .glance[data-bg="dots"] .gl-grid {
-  background-image: radial-gradient(circle, rgba(210, 200, 255, 0.34) 1px, transparent 1.6px);
-  background-size: 16px 16px; background-position: 8px 8px; }
+  background-image: radial-gradient(circle at center, rgba(210, 200, 255, 0.34) 1px, transparent 1.6px);
+  background-size: 18px 18px; }
 /* 3. lattice — a diagonal (diamond) mesh */
 .glance[data-bg="lattice"] .gl-grid {
-  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.055) 0 1px, transparent 1px 17px),
-    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.055) 0 1px, transparent 1px 17px); }
+  background-image: linear-gradient(45deg, transparent calc(50% - 0.5px), rgba(255, 255, 255, 0.06) calc(50% - 0.5px), rgba(255, 255, 255, 0.06) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+    linear-gradient(-45deg, transparent calc(50% - 0.5px), rgba(255, 255, 255, 0.06) calc(50% - 0.5px), rgba(255, 255, 255, 0.06) calc(50% + 0.5px), transparent calc(50% + 0.5px));
+  background-size: 24px 24px; }
 /* 4. aurora grid — wider cells, lines tinted violet → cyan, glowing crossings */
 .glance[data-bg="aurora"] .gl-grid {
-  background-image: radial-gradient(circle, rgba(170, 200, 255, 0.55) 1px, rgba(163, 149, 255, 0.18) 2.4px, transparent 3.6px),
-    linear-gradient(rgba(170, 150, 255, 0.11) 1px, transparent 1px), linear-gradient(90deg, rgba(120, 190, 255, 0.11) 1px, transparent 1px);
-  background-size: 30px 30px; background-position: -15px -15px, -1px -1px, -1px -1px; }
+  background-image: radial-gradient(circle at center, rgba(170, 200, 255, 0.55) 1px, rgba(163, 149, 255, 0.18) 2.4px, transparent 3.6px),
+    linear-gradient(to bottom, transparent 17.5px, rgba(170, 150, 255, 0.11) 17.5px, rgba(170, 150, 255, 0.11) 18.5px, transparent 18.5px),
+    linear-gradient(to right, transparent 17.5px, rgba(120, 190, 255, 0.11) 17.5px, rgba(120, 190, 255, 0.11) 18.5px, transparent 18.5px);
+  background-size: 36px 36px; }
 .glance[data-bg="none"] .gl-grid { display: none; }
 /* a soft diagonal sheen across the glass */
 .glance::after {
