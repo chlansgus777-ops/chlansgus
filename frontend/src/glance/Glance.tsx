@@ -44,7 +44,7 @@ export default function Glance() {
   return (
     <Shell session={sys.data?.market?.session ?? null} delayed={delayed} wave={waveTone}>
       <Market d={dash.data} m={macro.data} />
-      {acctTotals && <Account t={acctTotals} live={!!acct.data?.live && !acct.error} />}
+      {acctTotals && <Account t={acctTotals} rows={acct.data?.rows ?? []} live={!!acct.data?.live && !acct.error} />}
       {focus ? <Focus ticker={focus} others={others} /> : <div className="gl-quiet">종목 화면을 열면 그 종목을 여기서 따라갑니다</div>}
     </Shell>
   );
@@ -163,15 +163,49 @@ function Waves({ tone: t }: { tone: string }) {
 // ------------------------------------------------------------------ my account (optional)
 /** The account's own total and today's return, as /portfolio/live counts them (the Toss app's basis) — percentages only,
  * no amounts or account details on an always-visible widget. */
-function Account({ t, live }: { t: AccountLive["totals"]; live: boolean }) {
+function Account({ t, rows, live }: { t: AccountLive["totals"]; rows: AccountLive["rows"]; live: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const down = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("pointerdown", down);
+    window.addEventListener("keydown", key);
+    return () => { window.removeEventListener("pointerdown", down); window.removeEventListener("keydown", key); };
+  }, [open]);
   if (t.pnl_rate == null && t.daily_rate == null) return null;
+  // largest holding first (by value, which is never shown), then by name
+  const held = [...rows].filter((r) => r.quantity > 0).sort((a, b) => (b.value ?? -1) - (a.value ?? -1) || a.ticker.localeCompare(b.ticker));
   return (
-    <button type="button" className="gl-acct" onClick={() => void openAnalyze("/portfolio")} data-testid="glance-account" title="포트폴리오 화면 열기">
-      <span className="gl-ak">내 계좌</span>
-      {t.pnl_rate != null && <span className="gl-av">총 <b className={tone(t.pnl_rate)}>{signed(t.pnl_rate)}</b></span>}
-      {t.daily_rate != null && <span className="gl-av">오늘 <b className={tone(t.daily_rate)}>{signed(t.daily_rate)}</b></span>}
-      {!live && <span className="gl-astale">지연</span>}
-    </button>
+    <div className="gl-acct-wrap" ref={ref}>
+      <button type="button" className={`gl-acct${open ? " open" : ""}`} onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        data-testid="glance-account" title="보유 종목 보기">
+        <span className="gl-ak">내 계좌</span>
+        {t.pnl_rate != null && <span className="gl-av">총 <b className={tone(t.pnl_rate)}>{signed(t.pnl_rate)}</b></span>}
+        {t.daily_rate != null && <span className="gl-av">오늘 <b className={tone(t.daily_rate)}>{signed(t.daily_rate)}</b></span>}
+        {!live && <span className="gl-astale">지연</span>}
+        <span className="gl-chev gl-acct-chev" aria-hidden>{open ? "⌃" : "⌄"}</span>
+      </button>
+      {open && (
+        <div className="gl-holdings" role="dialog" aria-label="보유 종목" data-testid="glance-holdings">
+          <div className="gl-hhead"><span>보유 종목 {held.length}</span><span>총 수익률</span><span>오늘</span></div>
+          {held.length === 0 && <p className="gl-hnone">보유 종목이 없습니다</p>}
+          <ul>
+            {held.map((r) => (
+              <li key={r.ticker}>
+                <button type="button" onClick={() => { followSymbol(r.ticker); setOpen(false); }} title={`${r.ticker} 따라가기`}>
+                  <span className="gl-htk">{r.ticker}{!r.live && <i title="실시간 가격 아님" aria-label="실시간 가격 아님" />}</span>
+                  <b className={r.pnl_rate != null ? tone(r.pnl_rate) : "muted"}>{r.pnl_rate != null ? signed(r.pnl_rate) : "—"}</b>
+                  <span className={r.daily_rate != null ? tone(r.daily_rate) : "muted"}>{r.daily_rate != null ? signed(r.daily_rate) : "—"}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button type="button" className="gl-link gl-hall" onClick={() => { setOpen(false); void openAnalyze("/portfolio"); }}>포트폴리오 전체 보기 ↗</button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -217,13 +251,15 @@ function Market({ d, m }: { d: Dash | null | undefined; m: MacroResp | null | un
     const s = m?.series?.[id];
     return s && s.latest.value !== null && !["MISSING", "CONFLICTING"].includes(s.latest.quality) ? s.latest.value : null;
   };
-  const vix = val("VIX"), tnx = val("US10Y");
-  // SPY / QQQ are the ETFs' own moves, labelled as such (not the indices)
-  const items: { k: string; v: string; t: string }[] = [];
+  const vix = val("VIX"), tnx = val("US10Y"), ndq = val("NASDAQ_COMP");
+  // SPY / QQQ are the ETFs' own live moves, labelled as such; the Nasdaq Composite is the index itself, at its last
+  // daily close (FRED) — a level, never shown as a live move
+  const items: { k: string; v: string; t: string; title?: string; lead?: boolean }[] = [];
+  if (ndq !== null) items.push({ k: "나스닥", v: Math.round(ndq).toLocaleString("en-US"), t: "", lead: true, title: "나스닥 종합지수 · 최근 거래일 종가 (실시간 아님 — 오늘 움직임은 옆의 QQQ)" });
+  if (qqq?.change_pct != null) items.push({ k: "QQQ", v: signed(qqq.change_pct), t: tone(qqq.change_pct), title: "나스닥100 추종 ETF의 오늘 등락(실시간)" });
   if (spy?.change_pct != null) items.push({ k: "SPY", v: signed(spy.change_pct), t: tone(spy.change_pct) });
-  if (qqq?.change_pct != null) items.push({ k: "QQQ", v: signed(qqq.change_pct), t: tone(qqq.change_pct) });
   if (vix !== null) items.push({ k: "VIX", v: vix.toFixed(1), t: "" });
-  if (tnx !== null) items.push({ k: "10년물", v: `${tnx.toFixed(2)}%`, t: "" });
+  if (tnx !== null) items.push({ k: items.length >= 4 ? "10년" : "10년물", v: `${tnx.toFixed(2)}%`, t: "" });
   return (
     <section className={`gl-market ${st?.tone ?? "idle"}`}>
       <Buddy mood={st ? st.tone || "flat" : "sleep"} />
@@ -237,8 +273,8 @@ function Market({ d, m }: { d: Dash | null | undefined; m: MacroResp | null | un
         <span className="gl-chev" aria-hidden>›</span>
       </button>
       {items.length > 0 && (
-        <dl className="gl-metrics" data-testid="glance-metrics">
-          {items.map((x) => <div key={x.k}><dt>{x.k}</dt><dd className={x.t}>{x.v}</dd></div>)}
+        <dl className="gl-metrics" data-testid="glance-metrics" style={{ gridTemplateColumns: `repeat(${Math.max(items.length, 4)}, minmax(0, 1fr))` }}>
+          {items.map((x) => <div key={x.k} title={x.title} className={x.lead ? "lead" : undefined}><dt>{x.k}</dt><dd className={x.t}>{x.v}</dd></div>)}
         </dl>
       )}
       </div>
