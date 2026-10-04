@@ -175,15 +175,27 @@ def _specific(text: str, r: Mapping[str, Any], lv: Mapping[str, Any]) -> str:
         zone = f"{_usd(low)}~{_usd(lv['max_buy'])}" if isinstance(low, (int, float)) else f"최대 {_usd(lv['max_buy'])} 이하"
         return f"현재가 {_usd(lv['price'])}가 매수 구간({zone}) 안"
     if text == "다음 실적에 대한 시장 기대치가 높음":
-        streak = e.get("beat_streak")
-        return (f"{streak}분기 연속 예상 상회 — 다음 실적에 대한 기대치가 높아 평범한 상회로는 부족할 수 있음" if streak
-                else "다음 실적에 대한 시장 기대치가 높음 — 평범한 상회로는 부족할 수 있음")
+        return _expectation_text(e)
     if text.startswith("다가오는 촉매 전"):
         nxt = (r.get("event_risk") or {}).get("nearest") or {}
         days = (r.get("event_risk") or {}).get("days_until")
         if nxt.get("title"):
             return f"{text} — {nxt['title']} {days}일 앞({nxt.get('event_date')})" if days is not None else f"{text} — {nxt['title']}"
     return text
+
+
+def _expectation_text(e: Mapping[str, Any]) -> str:
+    """A HIGH expectation bar with the stock's own reason: the beat streak, the run into the last report, or both."""
+    streak = e.get("beat_streak")
+    run = e.get("pre_earnings_run_pct")
+    why = []
+    if streak:
+        why.append(f"{streak}분기 연속 예상 상회")
+    if isinstance(run, (int, float)):
+        why.append(f"지난 실적 전 주가 {_pct(run)}")
+    if why:
+        return f"{' · '.join(why)} — 다음 실적에 대한 기대치가 높아 평범한 상회로는 부족할 수 있음"
+    return "다음 실적에 대한 시장 기대치가 높음 — 평범한 상회로는 부족할 수 있음"
 
 
 # ------------------------------------------------------------------ 3 support / against
@@ -200,7 +212,7 @@ def _support_against(r: Mapping[str, Any], lv: Mapping[str, Any]) -> tuple[list[
             it = _item("CALC", text, tone="pos" if rs.get("sign", 0) > 0 else "neg", evidence=refs.get(rs.get("text", ""), ()), label=label)
             (sup if rs.get("sign", 0) > 0 else ag if rs.get("sign", 0) < 0 else sup).append(it)
     if e.get("expectation_bar") == "HIGH" and not any("기대치" in x["text"] for x in ag):
-        ag.append(_item("VIEW", "다음 실적에 대한 시장 기대치가 높음 — 평범한 상회로는 부족할 수 있음", tone="neg", label="실적"))
+        ag.append(_item("VIEW", _expectation_text(e), tone="neg", label="실적"))
     er = r.get("event_risk") or {}
     if er.get("level") in ("HIGH", "EXTREME"):
         nxt = er.get("nearest") or {}

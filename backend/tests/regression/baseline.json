@@ -25,8 +25,8 @@
    "ISSUE_EXPORT_CONTROL_eb52d2cd": -2.59
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-2.1.0",
-  "total": 43.11,
+  "scoring_model_version": "scoring-2.2.0",
+  "total": 41.06,
   "vetoes": [
    "INSUFFICIENT_MODEL_COVERAGE"
   ]
@@ -57,8 +57,8 @@
    "ISSUE_INFLATION_e80d95bf": 3.97
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-2.1.0",
-  "total": 51.36,
+  "scoring_model_version": "scoring-2.2.0",
+  "total": 50.74,
   "vetoes": [
    "THESIS_INVALIDATED"
   ]
@@ -90,8 +90,8 @@
    "ISSUE_EXPORT_CONTROL_eb52d2cd": -30.39
   },
   "raw_action": "WAIT",
-  "scoring_model_version": "scoring-2.1.0",
-  "total": 73.36,
+  "scoring_model_version": "scoring-2.2.0",
+  "total": 73.85,
   "vetoes": []
  },
  "TSM": {
@@ -121,8 +121,8 @@
    "ISSUE_EXPORT_CONTROL_eb52d2cd": -17.4
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-2.1.0",
-  "total": 51.05,
+  "scoring_model_version": "scoring-2.2.0",
+  "total": 48.07,
   "vetoes": []
  },
  "XOM": {
@@ -151,8 +151,8 @@
    "ISSUE_OIL_b0d427e2": 9.68
   },
   "raw_action": "WATCH",
-  "scoring_model_version": "scoring-2.1.0",
-  "total": 65.06,
+  "scoring_model_version": "scoring-2.2.0",
+  "total": 65.83,
   "vetoes": []
  }
 }

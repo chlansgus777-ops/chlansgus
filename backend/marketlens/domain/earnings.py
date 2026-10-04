@@ -138,6 +138,7 @@ class EarningsAssessment:
     expectation_bar: ExpectationBar
     beat_streak: int
     notes: tuple[str, ...]
+    pre_earnings_run_pct: float | None = None  # the run into the last report (what sets a HIGH bar), for the reading
 
 
 def assess_earnings(
@@ -208,6 +209,7 @@ def assess_earnings(
         expectation_bar=bar,
         beat_streak=streak,
         notes=tuple(notes),
+        pre_earnings_run_pct=last.pre_earnings_run_pct,
     )
 
 
