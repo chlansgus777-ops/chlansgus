@@ -118,12 +118,68 @@ export function PlanCard({ p }: { p: Plan }) {
   );
 }
 
+export interface Preview { price: number | null; appStop: number | null; appTarget: number | null }
+
+const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
+
+/** 내 규칙으로 산다면: a name not held yet, bought at today's price under the saved rules — where the stop, the first
+ * take-profit and the add level would be, what one share risks, and how the app's own stop compares. */
+export function RulePreview({ ticker, rules, saved, pv }: { ticker: string; rules: PlansView["rules"]; saved: boolean; pv: Preview }) {
+  const px = pv.price;
+  if (px === null || !Number.isFinite(px) || px <= 0) return null;
+  const stopPct = num(rules.stop_pct, -7), takePct = num(rules.take1_pct, 10), frac = num(rules.take1_fraction, 0.5), trailPct = num(rules.trail_pct, -8);
+  const addMode = String(rules.add_mode ?? "winners_only"), addPct = num(rules.add_trigger_pct, 5), addFrac = num(rules.add_fraction, 0.5), maxAdds = num(rules.max_adds, 1);
+  const ruleStop = px * (1 + stopPct / 100);
+  const app = pv.appStop !== null && pv.appStop > 0 && pv.appStop < px ? pv.appStop : null;
+  const useApp = rules.use_app_stop === true && app !== null && app > ruleStop;
+  const stop = useApp ? app! : ruleStop;
+  const take = px * (1 + takePct / 100);
+  const add = addMode === "winners_only" ? px * (1 + addPct / 100) : null;
+  const rr = (take - px) / (px - stop);
+  const levels: Level[] = [
+    { key: "stop", label: "손절", value: stop, tone: "neg" }, { key: "avg", label: "매수가", value: px, tone: "neutral" },
+    { key: "take1", label: `익절 ${Math.round(frac * 100)}%`, value: take, tone: "pos" },
+    ...(add !== null && maxAdds > 0 ? [{ key: "add", label: "추가매수", value: add, tone: "buy" as const }] : []),
+    ...(app !== null && !useApp && Math.abs(app - stop) / px > 0.004 ? [{ key: "app", label: "앱 손절", value: app, tone: "sell" as const }] : []),
+  ];
+  return (
+    <article className="plan-card preview" data-testid={`preview-${ticker}`}>
+      <header>
+        <div className="who"><b>지금 {money(px, "USD")}에 산다면</b><span className="caption">{saved ? "저장한 내 규칙" : "기본 규칙(아직 저장 전)"} 기준 · 매수 후에는 실제 평단으로 다시 계산</span></div>
+        <span className="plan-act" data-icon="◇">매수 전 계획</span>
+      </header>
+      <PriceLadder levels={levels} currency="USD" testId={`preview-ladder-${ticker}`} />
+      <dl className="plan-facts">
+        <div><dt>손절가</dt><dd className="neg">{money(stop, "USD")}<small>1주당 {money(stop - px, "USD")} · {useApp ? "앱 손절가" : `${stopPct}%`}</small></dd></div>
+        <div><dt>1차 익절</dt><dd className="pos">{money(take, "USD")}<small>{Math.round(frac * 100)}% 매도 · 나머지 고점 {trailPct}% 추적</small></dd></div>
+        <div><dt>추가매수</dt><dd>{addMode === "none" || maxAdds <= 0 ? "안 함" : add !== null ? `${money(add, "USD")} 이상` : "가격 조건 없음"}<small>{addMode === "none" || maxAdds <= 0 ? "규칙상 추가매수 없음" : `첫 매수의 ${Math.round(addFrac * 100)}% · ${maxAdds}회까지`}</small></dd></div>
+        <div><dt>손익비</dt><dd>{Number.isFinite(rr) ? rr.toFixed(2) : "—"}<small>1차 익절까지 이익 ÷ 손절까지 손실</small></dd></div>
+      </dl>
+      <footer className="caption">
+        {app === null ? "앱 분석 손절가가 없어 비교하지 않았습니다." : useApp ? `앱 분석 손절가 ${money(app, "USD")}가 규칙 손절보다 높아 그것을 씁니다.`
+          : app < ruleStop ? `앱 분석 손절가 ${money(app, "USD")}는 내 규칙 손절보다 아래 — 내 규칙이 먼저 닿습니다.`
+          : `앱 분석 손절가 ${money(app, "USD")}가 내 규칙 손절보다 위입니다. 규칙에서 '앱 분석 손절가 사용'을 켜면 그 가격을 씁니다.`}
+        {" "}산 뒤에는 이 가격들에 닿을 때 알림(종 아이콘)으로 알려드립니다.
+      </footer>
+    </article>
+  );
+}
+
 /** 내 규칙: 지금 할 일 — the account's holdings under the owner's own mechanical rules. ``ticker``: one name (stock
- * page); ``actionsOnly``: only the holdings whose rule says to act now (home). MarketLens never places the order. */
-export function HoldingPlans({ ticker, actionsOnly }: { ticker?: string; actionsOnly?: boolean }) {
+ * page; ``preview`` shows the plan for buying it now when it is not held); ``actionsOnly``: only the holdings whose rule
+ * says to act now (home). MarketLens never places the order. */
+export function HoldingPlans({ ticker, actionsOnly, preview }: { ticker?: string; actionsOnly?: boolean; preview?: Preview }) {
   const p = useApi<PlansView>(ticker ? `/habits/plans?ticker=${encodeURIComponent(ticker)}` : "/habits/plans", [ticker]);
   usePoll(p.reload, 15_000);
   const x = p.data;
+  if (x && ticker && preview && !x.plans.length && preview.price !== null) {
+    return (
+      <Card title="내 규칙으로 산다면" testId="plan-preview" explain="아직 보유하지 않은 종목입니다. 지금 가격에 산다고 가정하고 '내 매매 규칙'을 적용한 매수 전 계획입니다. MarketLens는 주문을 넣지 않습니다."
+        right={<Link className="btn sm" to="/performance?view=mine#rules">규칙 바꾸기</Link>}>
+        <RulePreview ticker={ticker} rules={x.rules} saved={x.rules_saved} pv={preview} />
+      </Card>
+    );
+  }
   if (!x || !x.connected || !x.plans.length) return null;
   const rows = actionsOnly ? x.plans.filter((r) => r.action !== "HOLD") : x.plans;
   if (actionsOnly && !rows.length) return null;
@@ -131,7 +187,7 @@ export function HoldingPlans({ ticker, actionsOnly }: { ticker?: string; actions
   const title = ticker ? "내 규칙: 이 종목 지금 할 일" : actionsOnly ? "내 규칙상 지금 할 일" : "내 규칙: 보유 종목 지금 할 일";
   return (
     <Card title={title} testId={ticker ? "plan-one" : actionsOnly ? "plan-actions" : "plans"}
-      explain="저장한 '내 매매 규칙'을 지금 가격에 그대로 적용한 결과입니다. MarketLens는 주문을 넣지 않습니다 — 실행은 직접 하세요."
+      explain="저장한 '내 매매 규칙'을 지금 가격에 그대로 적용한 결과입니다. 가격이 손절·익절·추가매수 가격에 닿으면 알림(종 아이콘)으로도 알려드립니다. MarketLens는 주문을 넣지 않습니다 — 실행은 직접 하세요."
       right={<div className="row tight">{!ticker && <span className="caption">{acting ? `행동 필요 ${acting}종목` : "모두 보유 유지"}</span>}<Link className="btn sm" to="/performance?view=mine#rules">규칙 바꾸기</Link></div>}>
       {!x.rules_saved && <Notice tone="info">아직 내 규칙을 저장하지 않아 기본값(평단 −7% 손절, +10%에서 절반 익절, 수익 중일 때만 추가매수)으로 계산했습니다. <Link to="/performance?view=mine#rules">내 거래 기록으로 만든 제안값 보기 →</Link></Notice>}
       <div className={`plan-grid${rows.length === 1 ? " one" : ""}`}>{rows.map((r) => <PlanCard key={r.symbol} p={r} />)}</div>

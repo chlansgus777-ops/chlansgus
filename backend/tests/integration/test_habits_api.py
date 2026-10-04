@@ -131,3 +131,17 @@ def test_the_pc_check_prints_raw_records_next_to_the_calculation_without_secrets
     nv = next(x for x in d["대표 거래 대조"] if x["계산"]["symbol"] == "NVDA")
     assert nv["원본 매수"]["avg_price"] == "100.00" and nv["원본 매도"]["avg_price"] == "101.00" and nv["계산"]["entry"] == 100.0
     assert d["보유 종목 지금 할 일"][0]["action_ko"] == "손절"
+
+
+def test_rule_alerts_reach_the_alert_center_on_a_live_price(account):
+    """A held name's live price below the saved rule's stop is announced once in the app's alert center."""
+    c, svc, fake = account
+    assert c.put("/api/habits/rules", json={"trade": {"stop_pct": -5}}).status_code == 200
+    assert svc.rule_watch.load() == 1  # NVDA (the one holding)
+    now = svc.now()
+    svc._on_price("NVDA", 100.5, now)  # 105 × 0.95 = 99.75 < 100.5: hold
+    svc._on_price("NVDA", 99.0, now)
+    svc._on_price("NVDA", 98.0, now)
+    rows = [a for a in c.get("/api/alerts").json()["alerts"] if a["kind"].startswith("RULE_")]
+    assert len(rows) == 1 and rows[0]["kind"] == "RULE_STOP" and rows[0]["ticker"] == "NVDA" and "$99.75" in rows[0]["text"]
+    assert fake.secret not in rows[0]["text"]

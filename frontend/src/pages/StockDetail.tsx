@@ -398,7 +398,7 @@ function StockDetail({ ticker }: { ticker: string }) {
 
       {/* ③ 가격 계획: the chart is the centre; below it the levels, how they were computed and the buy amount */}
       <Section no={3} title="가격 계획" sub={zone.text} />
-      <HoldingPlans ticker={a.ticker} />
+      <HoldingPlans ticker={a.ticker} preview={{ price: priceNow, appStop: e?.stop ?? null, appTarget: e?.target1 ?? null }} />
       <div className="card" data-testid="price-plan">
         {hist.length > 1 && e ? (
           <PlanChart data={hist} levels={{ stop: e.stop, maxBuy: e.max_buy, zoneLow: e.acceptable_low, ideal: e.ideal_entry, t1: e.target1, t2: e.target2 }} height={320} />

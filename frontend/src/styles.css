@@ -1086,6 +1086,8 @@ td.num, th.num, .acct-fig .t-key { font-variant-numeric: tabular-nums; }
 .plan-card.neg::before { background: var(--down); }
 .plan-card.pos { border-color: rgba(95, 224, 189, 0.26); background: linear-gradient(180deg, rgba(95, 224, 189, 0.06), rgba(255, 255, 255, 0.015) 55%); }
 .plan-card.pos::before { background: var(--up); }
+.plan-card.preview { border-style: dashed; border-color: var(--accent-line); background: linear-gradient(180deg, var(--accent-soft), rgba(255, 255, 255, 0.015) 60%); }
+.plan-card.preview::before { background: var(--accent); }
 .plan-card.buy::before { background: var(--buy); } .plan-card.sell::before { background: var(--sell); }
 .plan-card.sell { border-color: rgba(255, 167, 102, 0.26); }
 .plan-card.buy { border-color: rgba(114, 184, 255, 0.24); }

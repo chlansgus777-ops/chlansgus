@@ -4,6 +4,7 @@ only writes are the owner's own rules, notes and stops in this app's database, a
 
 from __future__ import annotations
 
+import threading
 from datetime import date, datetime
 from typing import Any
 
@@ -12,7 +13,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from marketlens.application import habits as H
-from marketlens.domain.habit_diagnosis import TradeRules, holding_plan
+from marketlens.domain.habit_diagnosis import HoldingState, TradeRules, holding_plan
 from marketlens.domain.habits import KST, Rules, StopPlan
 from marketlens.domain.market_calendar import to_ny
 from marketlens.infrastructure.db import repository as repo
@@ -114,8 +115,8 @@ def _inputs(s: Any, sample: bool) -> dict[str, Any]:
                      "extended": (b._fills or {}).get("extended") or {}}}
 
 
-def plans(s: Any, inp: dict[str, Any], tr: TradeRules) -> list[dict[str, Any]]:
-    """The mechanical plan of each holding (portfolio / stock page / home)."""
+def holding_states(s: Any, inp: dict[str, Any]) -> list[HoldingState]:
+    """Each holding with what its plan needs and its price now (live quote → Toss price → latest close)."""
     holdings = inp["holdings"] or []
     if not holdings:
         return []
@@ -146,14 +147,35 @@ def plans(s: Any, inp: dict[str, Any], tr: TradeRules) -> list[dict[str, Any]]:
         if px is not None and highs.get(sym) is not None:
             highs[sym] = max(highs[sym] or px, px)
         prices[sym] = (px, at, src)
+    return H.position_states(inp["fills"], holdings, prices, highs, app)
+
+
+def plans(s: Any, inp: dict[str, Any], tr: TradeRules) -> list[dict[str, Any]]:
+    """The mechanical plan of each holding (portfolio / stock page / home)."""
+    holdings = inp["holdings"] or []
     out = []
-    for st in H.position_states(inp["fills"], holdings, prices, highs, app):
+    for st in holding_states(s, inp):
         p = holding_plan(st, tr)
         p["name"] = next((h.get("name") for h in holdings if h["symbol"] == st.symbol), st.symbol)
         p["market"] = next((h.get("market") for h in holdings if h["symbol"] == st.symbol), None)
         out.append(p)
     order = {"STOP": 0, "TRAIL": 1, "TAKE1": 2, "ADD": 3, "NO_PRICE": 4, "HOLD": 5}
     return sorted(out, key=lambda p: (order.get(p["action"], 9), p["symbol"]))
+
+
+def rule_states(s: Any) -> tuple[list[HoldingState], TradeRules]:
+    """The account's holdings and the saved trade rules, for the live rule alerts (US names: the ones with live prices)."""
+    inp = _inputs(s, False)
+    _r, tr, _h = _rules(s)
+    us = {h["symbol"] for h in inp["holdings"] or [] if h.get("market") == "US"}
+    return [st for st in holding_states(s, inp) if st.symbol in us], tr
+
+
+def wire_rule_watch(s: Any) -> None:
+    """Give the service's rule watch its loader (the account lives behind the API layer's inputs)."""
+    rw = getattr(s, "rule_watch", None)
+    if rw is not None:
+        rw.loader = lambda: rule_states(s)
 
 
 def _report(s: Any, sample: bool) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -210,6 +232,12 @@ class RulesIn(BaseModel):
     trade: dict[str, Any] | None = None
 
 
+def _rules_changed(s: Any) -> None:
+    rw = getattr(s, "rule_watch", None)
+    if rw is not None and rw.loader is not None:
+        threading.Thread(target=rw.load, daemon=True, name="rule-watch-load").start()
+
+
 @router.put("/habits/rules")
 def save_rules(req: Request, body: RulesIn) -> dict[str, Any]:
     """Saved rules: the analysis is recomputed with them at once; the trade rules apply to every holding from now on,
@@ -228,6 +256,7 @@ def save_rules(req: Request, body: RulesIn) -> dict[str, Any]:
         hist = _get(s, H.RULES_HISTORY_KEY, [])
         hist.append({"saved_at": now, "stop_pct": tr.stop_pct, "take1_pct": tr.take1_pct})
         _put(s, H.RULES_HISTORY_KEY, hist[-200:])
+    _rules_changed(s)
     return {"pattern": pat.__dict__, "trade": trade}
 
 
@@ -235,6 +264,7 @@ def save_rules(req: Request, body: RulesIn) -> dict[str, Any]:
 def reset_rules(req: Request) -> dict[str, Any]:
     s = _svc(req)
     _put(s, H.RULES_KEY, {})
+    _rules_changed(s)
     return {"pattern": Rules().__dict__, "trade": TradeRules().__dict__}
 
 

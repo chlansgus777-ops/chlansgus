@@ -32,6 +32,7 @@ from marketlens import __version__
 from marketlens.api.phone_routes import PUBLIC as PHONE_PUBLIC
 from marketlens.api.phone_routes import router as phone_router
 from marketlens.api.habits_routes import router as habits_router
+from marketlens.api.habits_routes import wire_rule_watch
 from marketlens.api.quotes import router as quotes_router
 from marketlens.api.routes import router
 from marketlens.application.phone import COOKIE as PHONE_COOKIE
@@ -82,6 +83,7 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
                 migrate(settings.database_url)
             sf = make_session_factory(make_engine(settings.database_url))
             app.state.service = MarketLensService(settings, sf)
+        wire_rule_watch(app.state.service)
         _start_phone(app)
         sched = None
         if getattr(settings, "scheduler", False):
@@ -119,6 +121,8 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
     app = FastAPI(title="MarketLens", version=__version__, lifespan=lifespan)
     app.state.service = service
     app.state.ready = service is not None
+    if service is not None:
+        wire_rule_watch(service)
 
     app.state.phone = None
 

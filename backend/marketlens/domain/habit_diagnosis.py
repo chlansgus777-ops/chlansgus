@@ -239,8 +239,19 @@ class HoldingState:
     app_thesis_broken: bool = False
 
 
+def _m(v: float, cur: str) -> str:
+    """A price in its own currency, the way the screens write it."""
+    if cur == "KRW":
+        return f"{v:,.0f}원"
+    return f"${v:,.2f}" if cur == "USD" else f"{v:,.2f} {cur}"
+
+
 def holding_plan(h: HoldingState, r: TradeRules) -> dict[str, Any]:
     avg = h.avg_price
+
+    def m(v: float) -> str:
+        return _m(v, h.currency)
+
     pct_stop = avg * (1 + r.stop_pct / 100)
     stop, stop_src = pct_stop, f"평단 {r.stop_pct:g}%"
     if r.use_app_stop and h.app_stop is not None and h.app_stop > pct_stop and h.app_stop < (h.price or avg * 10):
@@ -271,23 +282,23 @@ def holding_plan(h: HoldingState, r: TradeRules) -> dict[str, Any]:
         plan |= {"action": "NO_PRICE", "action_ko": "가격 확인 불가", "detail": "현재가가 없어 규칙을 적용하지 않았습니다"}
         return plan
     if p <= stop:
-        plan |= {"action": "STOP", "action_ko": "손절", "detail": f"현재가 {p:g} ≤ 손절가 {stop:.2f} ({stop_src}) — 규칙상 전량 매도"}
+        plan |= {"action": "STOP", "action_ko": "손절", "detail": f"현재가 {m(p)} ≤ 손절가 {m(stop)} ({stop_src}) — 규칙상 전량 매도"}
     elif trail is not None and p <= trail:
-        plan |= {"action": "TRAIL", "action_ko": "추적 손절", "detail": f"현재가 {p:g} ≤ 고점 {h.high_since_open:g} 대비 {r.trail_pct:g}% ({trail:.2f}) — 규칙상 남은 수량 매도"}
+        plan |= {"action": "TRAIL", "action_ko": "추적 손절", "detail": f"현재가 {m(p)} ≤ 고점 {m(h.high_since_open or p)} 대비 {r.trail_pct:g}% ({m(trail)}) — 규칙상 남은 수량 매도"}
     elif not h.sold_since_open and p >= take1:
-        plan |= {"action": "TAKE1", "action_ko": "1차 익절", "detail": f"현재가 {p:g} ≥ 1차 익절가 {take1:.2f} — 규칙상 {r.take1_fraction:.0%} 매도, 나머지는 추적 손절"}
+        plan |= {"action": "TAKE1", "action_ko": "1차 익절", "detail": f"현재가 {m(p)} ≥ 1차 익절가 {m(take1)} — 규칙상 {r.take1_fraction:.0%} 매도, 나머지는 추적 손절"}
     elif r.add_mode != "none" and h.adds_done < r.max_adds and (add_level is None or p >= add_level) and not h.app_thesis_broken \
             and h.app_action not in ("SELL", "AVOID", "REDUCE") and (r.add_mode == "any" or p > avg):
-        lvl = f"평단 +{r.add_trigger_pct:g}% ({add_level:.2f}) 이상" if add_level is not None else "조건 없음"
-        plan |= {"action": "ADD", "action_ko": "추가매수 가능", "detail": f"현재가 {p:g}: {lvl} · 추가매수 {h.adds_done}/{r.max_adds}회 → {add_qty:g}주까지 규칙상 가능"}
+        lvl = f"평단 +{r.add_trigger_pct:g}% ({m(add_level)}) 이상" if add_level is not None else "조건 없음"
+        plan |= {"action": "ADD", "action_ko": "추가매수 가능", "detail": f"현재가 {m(p)}: {lvl} · 추가매수 {h.adds_done}/{r.max_adds}회 → {add_qty:g}주까지 규칙상 가능"}
     else:
-        nxt = [f"손절 {stop:.2f} ({(stop / p - 1) * 100:+.1f}%)"]
+        nxt = [f"손절 {m(stop)} ({(stop / p - 1) * 100:+.1f}%)"]
         if trail is not None:
-            nxt.append(f"추적 손절 {trail:.2f} ({(trail / p - 1) * 100:+.1f}%)")
+            nxt.append(f"추적 손절 {m(trail)} ({(trail / p - 1) * 100:+.1f}%)")
         if not h.sold_since_open:
-            nxt.append(f"1차 익절 {take1:.2f} ({(take1 / p - 1) * 100:+.1f}%)")
+            nxt.append(f"1차 익절 {m(take1)} ({(take1 / p - 1) * 100:+.1f}%)")
         if add_level is not None and h.adds_done < r.max_adds and r.add_mode != "none":
-            nxt.append(f"추가매수 {add_level:.2f} 이상")
+            nxt.append(f"추가매수 {m(add_level)} 이상")
         plan |= {"action": "HOLD", "action_ko": "보유 유지", "detail": "다음 행동 가격: " + " · ".join(nxt)}
         if r.add_mode == "winners_only" and p < avg:
             notes.append("평단 아래 — 규칙상 물타기(추가매수) 하지 않음")

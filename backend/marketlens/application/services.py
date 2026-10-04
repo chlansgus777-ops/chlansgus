@@ -28,6 +28,7 @@ from marketlens.application.broker import BrokerSync
 from marketlens.application.toss_quotes import TossQuoteFeed, live_quote
 from marketlens.domain.broker import merge_broker
 from marketlens.application.live_judge import LiveJudge, plans_from_rows
+from marketlens.application.rule_watch import RuleWatch
 from marketlens.application.refresher import Refresher, Snapshot
 from marketlens.application.registry import ProviderRegistry, build_registry
 from marketlens.application.replay import ReplayOutcome, config_snapshot, replay
@@ -257,8 +258,10 @@ class MarketLensService:
         # the price-dependent verdict on every quote (buy zone, stop, target, live reward/risk) + alerts
         self.judge = LiveJudge(now=self.now)
         self.quotes.annotate = self.judge.annotate
-        self.quotes.on_price = self.judge.observe
         self.judge.on_reanalyze = self.request_reanalysis
+        # the owner's own trade rules on the held names (내 규칙 알림): same prices, same alert center
+        self.rule_watch = RuleWatch(add=self.judge.add, now=self.now)
+        self.quotes.on_price = self._on_price
         self._reanalyzed: dict[str, float] = {}
         self._briefing: tuple[str, float, dict[str, Any]] | None = None  # (KST day, monotonic time built, briefing)
         self._briefing_lock = threading.Lock()
@@ -710,12 +713,20 @@ class MarketLensService:
     def live_plans(self) -> None:
         """Keep the judge's plans current (background, at most every ``LIVE_PLAN_AGE``) — called by the quote routes."""
         self.refresher.get("live-plans", self._load_live_plans, max_age=self.LIVE_PLAN_AGE, retry_after=60)
+        if self.rule_watch.loader is not None:
+            self.refresher.get("rule-watch", self.rule_watch.load, max_age=self.LIVE_PLAN_AGE, retry_after=60)
+
+    def _on_price(self, ticker: str, price: float, ts: datetime | None) -> None:
+        """Every live price: the recommendation's verdict, then the owner's own rules on a held name."""
+        self.judge.observe(ticker, price, ts)
+        self.rule_watch.observe(ticker, price, ts)
 
     def invalidate_live_plans(self) -> None:
         """Drop the plans after a change; they are reloaded by the next quote route or stream tick (≤ STATUS_EVERY_S),
         never from the request that changed the data — a background read racing its commit on a shared connection
         (in-memory SQLite) lost the record, and a burst of changes reloads once instead of once per change."""
         self.refresher.invalidate("live-plans")
+        self.refresher.invalidate("rule-watch")
         self._pool_cache = None  # holdings / watchlist changed: the live pool follows at the next round
 
     def portfolio_changed(self) -> None:

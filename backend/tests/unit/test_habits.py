@@ -3,6 +3,8 @@ diagnosis and the mechanical holding plan). Every fill here is made up; no accou
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -269,3 +271,41 @@ def test_the_mechanical_plan_of_a_holding():
     assert app["stop"] == 96.0 and "앱 분석" in app["stop_source"]
     with pytest.raises(ValueError):
         TradeRules.from_dict({"stop_pct": 5})
+
+
+def test_rule_watch_announces_each_change_once_on_live_prices():
+    """내 규칙 알림: a live price that changes what the rule says becomes ONE alert; a repeat, a stale price, a name
+    not held or a return to "보유 유지" says nothing. The high seen live moves the trailing stop."""
+    from datetime import datetime, timedelta, timezone
+
+    from marketlens.application.rule_watch import RuleWatch
+
+    def _held(**kw) -> HoldingState:  # noqa: ANN003 - the account state the loader gives: no price yet
+        return replace(_h(100.0, **kw), price=None)
+
+    now = datetime(2026, 10, 5, 15, 0, tzinfo=timezone.utc)
+    got: list[tuple] = []
+    w = RuleWatch(add=lambda *a, **k: got.append((a, k)), now=lambda: now)
+    rules = TradeRules(saved_at="2026-10-04T00:00:00+00:00")
+    w.loader = lambda: ([_held(high_since_open=100.0)], rules)
+    assert w.load() == 1
+    assert w.observe("AAA", 101.0, now)["action"] == "HOLD" and got == []
+    w.observe("AAA", 92.0, now)
+    assert len(got) == 1 and got[0][0][1] == "RULE_STOP" and got[0][0][2] == "danger" and "$93.00" in got[0][0][3]
+    w.observe("AAA", 91.0, now)  # still below the stop: not news
+    w.observe("AAA", 91.0, now - timedelta(hours=2))  # stale
+    w.observe("ZZZ", 1.0, now)  # not held
+    assert len(got) == 1
+    w.observe("AAA", 111.0, now)  # back up through the first target
+    assert got[-1][0][1] == "RULE_TAKE1" and len(got) == 2
+    # once the first target is taken, the high seen live (125) sets the trailing stop at 115
+    w.loader = lambda: ([_held(high_since_open=111.0, sold_since_open=True)], rules)
+    w.load()
+    w.observe("AAA", 125.0, now)
+    w.observe("AAA", 114.0, now)
+    assert got[-1][0][1] == "RULE_TRAIL" and "$115.00" in got[-1][0][3]
+    # new rules: what they say now is news again
+    w.loader = lambda: ([_held(high_since_open=100.0)], TradeRules(stop_pct=-5, saved_at="2026-10-05T00:00:00+00:00"))
+    w.load()
+    w.observe("AAA", 94.0, now)
+    assert got[-1][0][1] == "RULE_STOP" and "$95.00" in got[-1][0][3]

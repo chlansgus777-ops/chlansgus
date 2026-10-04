@@ -51,7 +51,7 @@ beforeEach(() => {
     if (u.includes("/habits/trades/")) return new Response(JSON.stringify({ trade: TRADE, order: null, is_sample: false, calc: ["진입가 100 = 매수 주문 ord0001의 평균 체결가"],
       bars: [{ day: "2026-09-01", open: 100, high: 100.5, low: 99.5, close: 100 }, { day: "2026-09-03", open: 98, high: 100, low: 95.8, close: 97 }],
       raw: { buy: { order_id: "ord0001" }, sell: { order_id: "ord0002" } }, note: {}, user_stop: null, basis_note: null }));
-    if (u.includes("/habits/plans")) return new Response(JSON.stringify({ plans: connected ? [PLAN, { ...PLAN, symbol: "AMD", action: "HOLD", action_ko: "보유 유지" }] : [], rules: RULES, rules_saved: false, connected, at: "" }));
+    if (u.includes("/habits/plans")) return new Response(JSON.stringify({ plans: connected && !u.includes("MSFT") ? [PLAN, { ...PLAN, symbol: "AMD", action: "HOLD", action_ko: "보유 유지" }] : [], rules: RULES, rules_saved: false, connected, at: "" }));
     if (u.includes("/habits/rules")) return new Response(JSON.stringify({ trade: RULES, pattern: {} }));
     if (u.includes("/habits")) {
       if (u.includes("sample=1")) return new Response(JSON.stringify(REPORT(true)));
@@ -129,4 +129,14 @@ it("holdings: the rule's action now, on the portfolio and only the actions at ho
   const { container } = render(<MemoryRouter><HoldingPlans /></MemoryRouter>);
   await waitFor(() => expect(calls.filter((c) => c.url.includes("/habits/plans")).length).toBeGreaterThan(2));
   expect(container.textContent).toBe("");
+});
+
+it("a name not held: the plan for buying it now under my rules, compared with the app's stop", async () => {
+  render(<MemoryRouter><HoldingPlans ticker="MSFT" preview={{ price: 400, appStop: 380, appTarget: 460 }} /></MemoryRouter>);
+  const card = await screen.findByTestId("preview-MSFT");
+  expect(card.textContent).toContain("$372.00");  // 400 − 7 %
+  expect(card.textContent).toContain("$440.00");  // + 10 %
+  expect(card.textContent).toContain("$420.00");  // add at + 5 %
+  expect(card.textContent).toContain("1.43");     // (440 − 400) ÷ (400 − 372)
+  expect(card.textContent).toContain("앱 분석 손절가 $380.00가 내 규칙 손절보다 위");
 });
