@@ -135,3 +135,19 @@ it("an empty account (nothing held or no data) shows no account line", async () 
   await screen.findByTestId("glance-action");
   expect(screen.queryByTestId("glance-account")).toBeNull();
 });
+
+it("uses the owner's own character picture when one was chosen on this PC, by market mood with the base as fallback", async () => {
+  const pic = (t: string) => `data:image/png;base64,${t}`;
+  localStorage.setItem("ml.glance.char.base", pic("BASE"));
+  show();
+  await screen.findByTestId("glance-action");
+  const img = () => document.querySelector(".gl-buddy.gl-pic img") as HTMLImageElement | null;
+  expect(img()?.getAttribute("src")).toBe(pic("BASE"));  // Neutral has no picture of its own: the base one
+  localStorage.setItem("ml.glance.char.flat", pic("FLAT"));
+  act(() => { window.dispatchEvent(new Event("ml-glance-pref")); });
+  await waitFor(() => expect(img()?.getAttribute("src")).toBe(pic("FLAT")));
+  localStorage.setItem("ml.glance.char.flat", "javascript:alert(1)");  // only image data is ever shown
+  localStorage.removeItem("ml.glance.char.base");
+  act(() => { window.dispatchEvent(new Event("ml-glance-pref")); });
+  await waitFor(() => expect(img()).toBeNull());
+});

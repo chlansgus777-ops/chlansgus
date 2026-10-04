@@ -105,6 +105,7 @@ function Menu({ onClose }: { onClose: () => void }) {
       <div className="gl-opt"><span>내 계좌 수익률</span>
         <button type="button" role="switch" aria-checked={acct} aria-label="내 계좌 수익률 표시" className={acct ? "on" : ""} onClick={() => setAcct(!acct)}><i /></button>
       </div>
+      <CharPicker />
       <form className="gl-opt" onSubmit={(e) => { e.preventDefault(); if (sym.trim()) followSymbol(sym.trim()); onClose(); }}>
         <span>따라갈 종목</span><input aria-label="따라갈 종목" value={sym} onChange={(e) => setSym(e.target.value.toUpperCase())} placeholder="NVDA" maxLength={12} />
       </form>
@@ -128,6 +129,76 @@ function usePref(key: string, dflt = true): [boolean, (v: boolean) => void] {
     setV(nv);
     window.dispatchEvent(new Event("ml-glance-pref"));
   }];
+}
+
+/** The owner's own character pictures, chosen from this PC and kept only in this PC's app storage (never uploaded,
+ * never part of the program): one base picture, and optionally one per market mood. Each is shrunk to 160px. */
+const PIC_SLOTS: [string, string][] = [["base", "기본"], ["pos", "위험 선호"], ["flat", "중립"], ["warn", "주의"], ["neg", "위험 회피"], ["sleep", "로딩"]];
+const picKey = (slot: string) => `ml.glance.char.${slot}`;
+function readPics(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [slot] of PIC_SLOTS) {
+    try { const v = localStorage.getItem(picKey(slot)); if (v && v.startsWith("data:image/")) out[slot] = v; } catch { /* no storage */ }
+  }
+  return out;
+}
+function useCharPics(): Record<string, string> {
+  const [p, setP] = useState(readPics);
+  useEffect(() => {
+    const on = () => setP(readPics());
+    window.addEventListener("ml-glance-pref", on);
+    window.addEventListener("storage", on);
+    return () => { window.removeEventListener("ml-glance-pref", on); window.removeEventListener("storage", on); };
+  }, []);
+  return p;
+}
+async function shrink(file: File): Promise<string> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = url; });
+    const side = 160, c = document.createElement("canvas");
+    c.width = side; c.height = side;
+    const k = Math.min(img.width, img.height);  // centre square crop
+    c.getContext("2d")!.drawImage(img, (img.width - k) / 2, (img.height - k) / 2, k, k, 0, 0, side, side);
+    return c.toDataURL("image/png");
+  } finally { URL.revokeObjectURL(url); }
+}
+
+function CharPicker() {
+  const pics = useCharPics();
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const set = (slot: string, v: string | null) => {
+    try { if (v) localStorage.setItem(picKey(slot), v); else localStorage.removeItem(picKey(slot)); setErr(null); }
+    catch { setErr("저장 공간이 부족합니다"); }
+    window.dispatchEvent(new Event("ml-glance-pref"));
+  };
+  const pick = (slot: string) => {
+    const inp = document.createElement("input");
+    inp.type = "file"; inp.accept = "image/*";
+    inp.onchange = () => { const f = inp.files?.[0]; if (f) shrink(f).then((v) => set(slot, v), () => setErr("그림을 읽지 못했습니다")); };
+    inp.click();
+  };
+  const slots = open ? PIC_SLOTS : PIC_SLOTS.slice(0, 1);
+  return (
+    <div className="gl-chars">
+      <div className="gl-opt"><span>캐릭터 그림</span>
+        <button type="button" className="gl-link" onClick={() => setOpen((v) => !v)} aria-expanded={open}>{open ? "접기" : "기분별"}</button>
+      </div>
+      <div className="gl-slots">
+        {slots.map(([slot, label]) => (
+          <div key={slot} className="gl-slot">
+            <button type="button" className="gl-slot-pic" onClick={() => pick(slot)} aria-label={`${label} 그림 고르기`}>
+              {pics[slot] ? <img src={pics[slot]} alt="" /> : <span>+</span>}
+            </button>
+            <small>{label}</small>
+            {pics[slot] && <button type="button" className="gl-link" onClick={() => set(slot, null)} aria-label={`${label} 그림 지우기`}>지우기</button>}
+          </div>
+        ))}
+      </div>
+      {err && <small className="gl-err">{err}</small>}
+    </div>
+  );
 }
 
 /** Two slow waves along the bottom edge — decoration only; their colour follows today's account move (mint up, pink
@@ -418,6 +489,16 @@ function Sparkline({ values }: { values: number[] }) {
  * nothing more (never a new judgement): beaming for 위험 선호, calm for 중립, worried brows for 주의, teary for 위험
  * 회피, asleep while the state is not known yet. The ring behind it carries the state's colour. */
 function Buddy({ mood }: { mood: string }) {
+  const pics = useCharPics();
+  const pic = pics[mood] ?? pics.base;
+  if (pic) {
+    // the owner's own picture (chosen on this PC): the ring keeps the market state's colour
+    return (
+      <span className={`gl-buddy gl-pic ${mood}`} aria-hidden>
+        <img src={pic} alt="" draggable={false} />
+      </span>
+    );
+  }
   const sleepy = mood === "sleep";
   const mouth: Record<string, string> = {
     pos: "M21 29.5 Q24 32.5 27 29.5", flat: "M22 30.2 Q24 31.4 26 30.2", warn: "M21.5 31 Q24 29.4 26.5 31", neg: "M21.5 31.6 Q24 28.8 26.5 31.6", sleep: "M22.5 30.4 Q24 31.2 25.5 30.4",
