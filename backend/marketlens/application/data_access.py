@@ -77,6 +77,7 @@ class DataAccess:
         self.ttl = ttl
         self.cache = cache or TTLCache()
         self.store = store
+        self._breadth_cache: tuple[date, Any] | None = None  # (session, breadth result) — one whole-market read per session
         self.now_fn = now_fn or (lambda: datetime.now(timezone.utc))
         self.live_quote: Callable[[str], Any] | None = None  # set by the service: the real-time feed's price, when fresh
         self.supplemental_news: Callable[[], list[NewsItem]] | None = None  # cached optional news; never waits for HTTP
@@ -426,7 +427,88 @@ class DataAccess:
         f = self.macro(as_of)
         if f.value is None or not f.value:
             return None, f.error or "거시 데이터 없음"
-        return MacroSnapshot(as_of=as_of, series=f.value), None
+        series = dict(f.value)
+        if self.store is not None:  # LIVE: what FRED does not carry, from the app's own daily bars
+            series.update(self._market_series(as_of, series))
+        return MacroSnapshot(as_of=as_of, series=series), None
+
+    # the indices FRED does not publish (Russell 2000, PHLX Semiconductor; Nasdaq-100 when its series is refused) are
+    # read from the ETFs that track them — their 20-day change and 200-day trend are the index's within a few basis
+    # points; the LEVEL is the ETF's price and is labelled so (owner 2026-10-04: "나스닥100, 러셀2000 등 없음")
+    INDEX_ETFS = {"RUT": "IWM", "SOX": "SOXX", "NDX": "QQQ"}
+
+    def _market_series(self, as_of: datetime, have: dict[str, Any]) -> dict[str, Any]:
+        from marketlens.domain.enums import DataMode, DataQuality
+        from marketlens.domain.facts import Fact
+        from marketlens.domain.macro import BREADTH_ABOVE_200D, MacroSeries
+        from marketlens.domain.market_calendar import last_completed_session
+
+        end = last_completed_session(as_of)  # only sessions that had closed at ``as_of`` (no intraday bar, no look-ahead)
+        now = datetime.now(tz=timezone.utc)
+        out: dict[str, Any] = {}
+
+        def fact(v: float, src: str, d: date, note: str) -> Fact:
+            fresh = (end - d).days <= 5
+            return Fact(v, src, datetime(d.year, d.month, d.day, tzinfo=timezone.utc), now,
+                        DataQuality.FRESH if fresh else DataQuality.STALE, DataMode.LIVE, note=note)
+
+        for sid, etf in self.INDEX_ETFS.items():
+            got = have.get(sid)
+            if got is not None and got.latest.value is not None:
+                continue
+            try:
+                bars = [b for b in (self.store.bars(etf, end - timedelta(days=420), end) if self.store else []) if b.day <= end]
+            except Exception:  # noqa: BLE001 - one missing proxy is that row missing
+                continue
+            if len(bars) < 21:
+                continue
+            closes = [b.close for b in bars]
+            last = closes[-1]
+            above = last > sum(closes[-200:]) / 200 if len(closes) >= 200 else None
+            out[sid] = MacroSeries(sid, fact(last, f"etf:{etf}", bars[-1].day, f"{etf} ETF 가격(지수 값 아님) — 변화율·200일선 판단은 지수와 같음"),
+                                   change_20d=last - closes[-21], pct_change_20d=last / closes[-21] - 1, above_200d=above)
+        if BREADTH_ABOVE_200D not in have:
+            b = self._breadth(end)
+            if b is not None:
+                share, prev, n, d = b
+                out[BREADTH_ABOVE_200D] = MacroSeries(BREADTH_ABOVE_200D, fact(share, "calc:breadth", d, f"저장된 일봉으로 계산 — 보통주 {n:,}개 중 200일 이동평균 위 비율"),
+                                                      change_20d=None if prev is None else share - prev, pct_change_20d=None)
+        return out
+
+    def _breadth(self, end: date) -> tuple[float, float | None, int, date] | None:
+        """Share of the stored common stocks closing above their 200-day average on the last session (and 20 sessions
+        before), computed once per session — a whole-market read of ~300 days of bars."""
+        hit = self._breadth_cache
+        if hit is not None and hit[0] == end:
+            return hit[1]
+        store = self.store
+        if store is None:
+            return None
+        etfs = {s.ticker for s in store.securities(end) if getattr(s, "is_etf", False)}
+        allbars = store.last_bars_all(end - timedelta(days=320), end)
+        days = sorted({b.day for bs in allbars.values() for b in bs[-25:]})
+        if len(days) < 21:
+            self._breadth_cache = (end, None)
+            return None
+        last_day, prev_day = days[-1], days[-21]
+
+        def share_on(day: date) -> tuple[float | None, int]:
+            above = n = 0
+            for t, bs in allbars.items():
+                if t in etfs:
+                    continue
+                cl = [b.close for b in bs if b.day <= day]
+                if len(cl) < 200 or bs[-1].day < last_day - timedelta(days=7) or cl[-1] < 1:
+                    continue  # too young, no longer trading, or a penny line
+                n += 1
+                above += cl[-1] > sum(cl[-200:]) / 200
+            return (above / n if n >= 200 else None), n
+
+        share, n = share_on(last_day)
+        prev, _ = share_on(prev_day)
+        res = (share, prev, n, last_day) if share is not None else None
+        self._breadth_cache = (end, res)
+        return res
 
 
 # typed aliases for readability in the scanner

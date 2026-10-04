@@ -18,7 +18,14 @@ export const SERIES_KO: Record<string, string> = {
 export function SeriesTable({ data, ids }: { data: MacroResp; ids: string[] }) {
   return (
     <div className="scroll"><table><thead><tr><th>지표</th><th className="num">값</th><th className="num">20일 변화</th><th>출처</th><th>기준 시점</th><th>품질</th></tr></thead>
-      <tbody>{ids.map((id) => { const s = data.series[id]; const ch = s ? (s.pct_change_20d !== null ? s.pct_change_20d : null) : null; return <tr key={id}><td>{SERIES_KO[id] ?? id}</td><td className="num">{s ? num(s.latest.value) : <span className="danger">없음(MISSING)</span>}</td><td className="num">{s ? (ch !== null ? <span className={ch >= 0 ? "pos" : "neg"}>{pct(ch)}</span> : num(s.change_20d)) : "N/A"}</td><td className="caption">{s?.latest.source ?? "—"}</td><td className="caption" title={s?.latest.note ?? ""}>{stamp(s?.latest.source_ts)}</td><td><Quality q={s?.latest.quality ?? "MISSING"} /></td></tr>; })}</tbody></table></div>
+      <tbody>{ids.map((id) => {
+        const s = data.series[id];
+        const ch = s ? (s.pct_change_20d !== null ? s.pct_change_20d : null) : null;
+        const etf = s?.latest.source.startsWith("etf:") ? s.latest.source.slice(4) : null;  // an index FRED lacks, read from its ETF
+        const share = id === "BREADTH_ABOVE_200D";
+        return <tr key={id}><td>{SERIES_KO[id] ?? id}{etf ? <div className="caption" title={s?.latest.note ?? ""}>{etf} ETF 가격 기준(지수 값 아님)</div> : null}</td>
+          <td className="num">{s ? (share && s.latest.value !== null ? pct(s.latest.value, 0, false) : num(s.latest.value)) : <span className="danger">없음(MISSING)</span>}</td>
+          <td className="num">{s ? (ch !== null ? <span className={ch >= 0 ? "pos" : "neg"}>{pct(ch)}</span> : share && s.change_20d !== null ? <span className={s.change_20d >= 0 ? "pos" : "neg"}>{`${s.change_20d >= 0 ? "+" : ""}${(s.change_20d * 100).toFixed(1)}%p`}</span> : num(s.change_20d)) : "N/A"}</td><td className="caption">{s?.latest.source ?? "—"}</td><td className="caption" title={s?.latest.note ?? ""}>{stamp(s?.latest.source_ts)}</td><td><Quality q={s?.latest.quality ?? "MISSING"} /></td></tr>; })}</tbody></table></div>
   );
 }
 

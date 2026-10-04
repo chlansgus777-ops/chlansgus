@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from marketlens.domain.enums import DataMode, DataQuality
 from marketlens.domain.facts import Fact
 from marketlens.domain.macro import (
-    BRENT, CORE_CPI_YOY, CORE_PCE_YOY, CPI_YOY, FED_FUNDS, GDP_QOQ_SAAR, HY_SPREAD, NASDAQ_COMP,
+    BRENT, CORE_CPI_YOY, CORE_PCE_YOY, CPI_YOY, FED_FUNDS, GDP_QOQ_SAAR, HY_SPREAD, NASDAQ_COMP, NDX,
     PAYROLLS_CHG, PCE_YOY, SPX, UNEMPLOYMENT, US2Y, US10Y, US30Y, USD_INDEX, USDKRW, VIX, WTI, MacroSeries,
 )
 from marketlens.infrastructure.resilience import TokenBucket
@@ -41,9 +41,10 @@ FRED_MAP: dict[str, tuple[str, str]] = {
     HY_SPREAD: ("BAMLH0A0HYM2", "level"),
     SPX: ("SP500", "level"),
     NASDAQ_COMP: ("NASDAQCOM", "level"),
+    NDX: ("NASDAQ100", "level"),  # 나스닥 100 (NASDAQ OMX via FRED, daily)
     USDKRW: ("DEXKOUS", "level"),  # 원/달러 환율 (KRW per USD)
 }
-DAILY = {FED_FUNDS, US2Y, US10Y, US30Y, USD_INDEX, WTI, BRENT, VIX, HY_SPREAD, SPX, NASDAQ_COMP, USDKRW}
+DAILY = {FED_FUNDS, US2Y, US10Y, US30Y, USD_INDEX, WTI, BRENT, VIX, HY_SPREAD, SPX, NASDAQ_COMP, NDX, USDKRW}
 
 
 FRED_TZ = ZoneInfo("America/Chicago")  # St. Louis Fed
@@ -133,7 +134,7 @@ class FredMacroProvider:
             ch = latest - prev if prev is not None else None
             pct = (latest / prev - 1) if prev not in (None, 0) else None
             above = None
-            if sid in (SPX, NASDAQ_COMP) and len(vals) >= 200:
+            if sid in (SPX, NASDAQ_COMP, NDX) and len(vals) >= 200:
                 above = latest > sum(vals[-200:]) / 200
             out[sid] = MacroSeries(sid, fact, change_20d=ch, pct_change_20d=pct, above_200d=above)
         if not out and refused is not None:
