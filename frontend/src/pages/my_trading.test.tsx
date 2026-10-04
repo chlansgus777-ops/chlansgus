@@ -88,7 +88,7 @@ it("saves the rules the owner sets, starting from the suggestion", async () => {
   page();
   await screen.findByTestId("rules-suggested");
   fireEvent.click(screen.getByRole("button", { name: "제안값을 입력칸에 넣기" }));
-  expect((screen.getByLabelText("손절: 평단 대비 %") as HTMLInputElement).value).toBe("-5");
+  expect((screen.getByLabelText("손절 (평단 대비 %)") as HTMLInputElement).value).toBe("-5");
   fireEvent.click(screen.getByRole("button", { name: "규칙 저장" }));
   await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.url.endsWith("/api/habits/rules"))).toBe(true));
   const body = JSON.parse(calls.find((c) => c.method === "PUT")!.body!);

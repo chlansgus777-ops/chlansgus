@@ -184,7 +184,8 @@ def diagnose(orders: Sequence[OrderResult], adds: Sequence[AddEvent], open_loser
             "규칙대로라면 정리할 종목입니다 — 포트폴리오의 '지금 할 일'을 확인하세요.")
     F.sort(key=lambda f: -f["weight"])
     for f in F:
-        f["confidence"] = "표본 적음" if few else "충분"
+        # a holding below its stop is a fact about today, not an estimate from past sales
+        f["confidence"] = "현재 상태" if f["id"] == "open_losers" else "표본 적음" if few else "충분"
     out["findings"] = F
     top = F[0]["title"] if F else None
     out["headline"] = (f"매도 {n}건 · 승률 {win_rate:.0%} · 평균 이익 {avg_win:+.1f}% / 평균 손실 {avg_loss:+.1f}% · 거래당 {expectancy:+.2f}%"
