@@ -10,6 +10,7 @@ import { useJudgedRows, useQuote, useViewQuotes, type QuoteRow } from "../quotes
 import { LiveZone } from "../components/LiveZone";
 import { useLiveRows } from "../components/liveBoard";
 import { MorningBriefing } from "../components/Briefing";
+import { HoldingPlans } from "../components/HoldingPlans";
 import { ago, day, num, pct, price, stampEt, errKo } from "../format";
 import { ACTION_PLAIN, BULLISH, HEALTH_KO, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
 import type { OppRow, ScanInfo } from "../types";
@@ -221,6 +222,7 @@ export default function Dashboard() {
       )}
 
       <MorningBriefing />
+      <HoldingPlans actionsOnly />
       <div className="home-grid">
         <div className="home-main">
           {/* the first five seconds: how many names pass right now, the market's mood, the biggest risk, the next event */}

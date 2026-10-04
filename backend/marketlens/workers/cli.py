@@ -22,6 +22,35 @@ def _service(settings: Any):  # type: ignore[no-untyped-def]
     return MarketLensService(settings, make_session_factory(make_engine(settings.database_url)))
 
 
+def _habits_check(s: Any, refresh: bool, n: int) -> int:
+    """내 매매 진단 on this PC's stored executions: the summary, the diagnosis, the holdings' rule actions, and a few
+    representative trades with their raw Toss record beside the calculation (owner 2026-10-04: "대표 거래 몇 건의 원본
+    기록과 계산 결과를 대조"). No key, token or account number is printed; nothing is ordered."""
+    from marketlens.api.habits_routes import _report
+
+    if s.broker is None or not s.broker.active():
+        print("토스증권이 연결되어 있지 않습니다 — 앱의 설정에서 연결한 뒤 다시 실행하세요", file=sys.stderr)
+        return 2
+    if refresh:
+        s.broker_sync_now()
+    rep, inp = _report(s, False)
+    out = {"자료": "실제 토스증권 계좌(읽기 전용)", "체결 조회": rep["meta"].get("fills"), "기간": rep["period"], "요약": rep["summary"],
+           "진단": {"headline": rep["diagnosis"]["headline"], "cause": rep["diagnosis"].get("cause"),
+                  "findings": [{k: f[k] for k in ("title", "evidence", "fix")} for f in rep["diagnosis"]["findings"]]},
+           "보유 종목 지금 할 일": [{k: p[k] for k in ("symbol", "action_ko", "detail", "stop", "take1")} for p in rep["plans"]]}
+    picks: list[dict[str, Any]] = []
+    for want in ("CANDIDATE", "NOT", "NEED_BASIS", "INSUFFICIENT"):  # one of each kind first
+        picks += [t for t in rep["trades"] if t["pattern"] == want][:1]
+    picks = (picks + [t for t in rep["trades"] if t not in picks])[:max(0, n)]
+    raw = inp["raw"]
+    keep = ("order_id", "symbol", "side", "status", "quantity", "avg_price", "amount", "commission", "tax", "currency", "ordered_at", "filled_at")
+    out["대표 거래 대조"] = [{"계산": {k: t[k] for k in ("symbol", "quantity", "entry", "exit", "net_pnl", "net_ret", "mae", "mfe", "pattern", "pattern_reason")},
+                         "원본 매수": {k: (raw.get(t["buy_order_id"] or "") or {}).get(k) for k in keep} if t["buy_order_id"] else None,
+                         "원본 매도": {k: (raw.get(t["sell_order_id"]) or {}).get(k) for k in keep}} for t in picks]
+    print(json.dumps(out, ensure_ascii=False, indent=1, default=str))
+    return 0
+
+
 def _serve(settings: Any, host: str, port: int) -> int:
     import uvicorn
 
@@ -83,6 +112,9 @@ def main(argv: list[str] | None = None) -> int:
     bk = sub.add_parser("backup", help="consistent copy of the SQLite database (safe while the app runs)")
     bk.add_argument("dest")
     sub.add_parser("sync", help="LIVE only: refresh the local point-in-time store from free sources")
+    hc = sub.add_parser("habits-check", help="read-only: 내 매매 진단 on the stored 토스증권 executions, with representative trades' raw records next to the calculation")
+    hc.add_argument("--refresh", action="store_true", help="read new executions from 토스증권 first (read-only GET)")
+    hc.add_argument("--trades", type=int, default=3, help="representative trades to print with their raw records")
     lv = sub.add_parser("live-verify", help="LIVE only: smoke-test every free provider (NVDA AAPL MSFT JPM XOM AMZN TSM)")
     lv.add_argument("--out", help="write the full JSON report to this file (stdout is truncated)")
     sim = sub.add_parser("simulate", help="MOCK only: run weekly scans over past weeks to populate evaluation data")
@@ -110,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
         print("migrated", settings.database_url)
         return 0
     s = _service(settings)
+    if args.cmd == "habits-check":
+        return _habits_check(s, args.refresh, args.trades)
     if args.cmd == "sync":
         print(json.dumps(s.sync_market(), default=str)[:4000])
     elif args.cmd == "audit-history":

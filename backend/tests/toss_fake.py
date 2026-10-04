@@ -181,7 +181,8 @@ class FakeToss:
             if q.get("status") != "CLOSED":
                 return self._resp(path, method, 200, {"result": {"orders": [], "nextCursor": None, "hasNext": False}})
             limit = min(int(q.get("limit", 20)), 100)
-            rows = [o for o in self.orders if (not q.get("from") or o["orderedAt"][:10] >= q["from"]) and (not q.get("to") or o["orderedAt"][:10] <= q["to"])]
+            rows = [o for o in self.orders if (not q.get("from") or o["orderedAt"][:10] >= q["from"]) and (not q.get("to") or o["orderedAt"][:10] <= q["to"])
+                    and (not q.get("symbol") or o["symbol"] == q["symbol"])]
             rows.sort(key=lambda o: o["orderedAt"], reverse=True)
             start = int(q.get("cursor", "0"))
             page = rows[start:start + limit]

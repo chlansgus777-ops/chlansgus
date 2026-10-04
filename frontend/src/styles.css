@@ -1033,3 +1033,17 @@ td.num, th.num, .acct-fig .t-key { font-variant-numeric: tabular-nums; }
   .home-brief .brief-tiles { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .home-brief .brief-tile.acct { grid-column: 1 / -1; }
 }
+
+/* 내 매매 진단 / 내 규칙 (2026-10-04) */
+.plan-act { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; background: color-mix(in srgb, currentColor 12%, transparent); color: inherit; }
+.plan-act.neg { background: color-mix(in srgb, var(--neg, #d33) 14%, transparent); color: var(--neg, #d33); }
+.plan-act.pos { background: color-mix(in srgb, var(--pos, #2a2) 14%, transparent); color: var(--pos, #2a2); }
+.plan-act.info { background: color-mix(in srgb, var(--accent, #36c) 14%, transparent); color: var(--accent, #36c); }
+.plan-act.muted { opacity: .75; }
+.findings { margin: 0; padding-left: 20px; display: grid; gap: 10px; }
+.form-grid.rules { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.form-grid.rules label.check { display: flex; gap: 6px; align-items: center; }
+.trade-detail pre.raw { white-space: pre-wrap; font-size: 11px; max-height: 220px; overflow: auto; }
+.trade-detail label.block { display: block; margin-bottom: 6px; }
+.trade-detail textarea { width: 100%; }
+tr.clickable { cursor: pointer; }

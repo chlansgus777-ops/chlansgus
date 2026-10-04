@@ -31,6 +31,7 @@ from fastapi.responses import PlainTextResponse
 from marketlens import __version__
 from marketlens.api.phone_routes import PUBLIC as PHONE_PUBLIC
 from marketlens.api.phone_routes import router as phone_router
+from marketlens.api.habits_routes import router as habits_router
 from marketlens.api.quotes import router as quotes_router
 from marketlens.api.routes import router
 from marketlens.application.phone import COOKIE as PHONE_COOKIE
@@ -196,6 +197,7 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
     app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["content-type", CLIENT_HEADER, TOKEN_HEADER])
     app.include_router(phone_router, prefix="/api")
     app.include_router(router, prefix="/api")
+    app.include_router(habits_router, prefix="/api")
     app.include_router(quotes_router, prefix="/api")
 
     @app.get("/api/health/live", include_in_schema=False)

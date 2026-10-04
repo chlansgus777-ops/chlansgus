@@ -13,6 +13,7 @@ import { refreshQuoteSubscriptions, useQuote, useViewQuotes } from "../quotes";
 import { useAnalysisJob } from "../components/useAnalysisJob";
 import { rememberStock } from "../components/QuickSearch";
 import { PlanChart } from "../components/PlanChart";
+import { HoldingPlans } from "../components/HoldingPlans";
 import { Action, Bar, Card, Disclosure, Empty, Err, EvidenceChips, FreshnessTable, Loading, Metric, Notice, Quality, Ribbon, ScoreMeter, Section, StaleData, StatePanel, StatusBadge, Stmt, Term, isExpired } from "../components/ui";
 import { usePageTime, useStatus } from "../components/status";
 import { usePoll, useApi } from "../components/useApi";
@@ -397,6 +398,7 @@ function StockDetail({ ticker }: { ticker: string }) {
 
       {/* ③ 가격 계획: the chart is the centre; below it the levels, how they were computed and the buy amount */}
       <Section no={3} title="가격 계획" sub={zone.text} />
+      <HoldingPlans ticker={a.ticker} />
       <div className="card" data-testid="price-plan">
         {hist.length > 1 && e ? (
           <PlanChart data={hist} levels={{ stop: e.stop, maxBuy: e.max_buy, zoneLow: e.acceptable_low, ideal: e.ideal_entry, t1: e.target1, t2: e.target2 }} height={320} />

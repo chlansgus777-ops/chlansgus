@@ -1,5 +1,6 @@
 import { Fragment, useState } from "react";
 import { BacktestSection } from "../components/Backtest";
+import MyTrading from "./MyTrading";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { Card, Disclosure, Empty, Err, LineChart, Loading, Ribbon, StaleData, Tabs } from "../components/ui";
@@ -55,7 +56,27 @@ const CAL_KO: Record<string, string> = { INSUFFICIENT_SAMPLES: "표본 부족(�
 const SAMPLE_GOAL = 30;
 type Period = "30d" | "90d" | "1y" | "all";
 
+/** 성과: whether the app's recommendations worked (추천 성과) and why the owner's own trades did not (내 매매 진단). */
 export default function Performance() {
+  const [params, setParams] = useSearchParams();
+  const view = params.get("view") === "mine" ? "mine" : "recs";
+  return (
+    <>
+      <div className="perf-switch" style={{ padding: "0 0 12px" }}>
+        <Tabs<"recs" | "mine"> label="성과 보기" value={view} onChange={(v) => setParams(v === "mine" ? { view: "mine" } : {}, { replace: true })}
+          items={[["recs", "추천 성과"], ["mine", "내 매매 진단"]]} />
+      </div>
+      {view === "mine" ? (
+        <div className="grid">
+          <div className="page-head enter"><div><h1>내 매매 진단</h1><div className="t-sub">내 토스증권 체결 기록으로 왜 수익이 안 나는지, 무엇을 고칠지, 보유 종목은 규칙상 지금 무엇을 할지 봅니다.</div></div></div>
+          <MyTrading />
+        </div>
+      ) : <RecommendationPerformance />}
+    </>
+  );
+}
+
+function RecommendationPerformance() {
   const [params, setParams] = useSearchParams();  // the period lives in the URL: back/refresh keep it
   const q = params.get("period");
   const period: Period = q === "30d" || q === "90d" || q === "1y" ? q : "all";

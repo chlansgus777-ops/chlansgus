@@ -6,6 +6,7 @@ import { Ledger } from "../components/Ledger";
 import { DomesticHoldings, TossCard, TossFills, type TossView } from "../components/TossConnect";
 import { KrwReturn, type KrwView } from "../components/KrwReturn";
 import { AccountLiveCard, signedWon, useAccountLive } from "../components/AccountLive";
+import { HoldingPlans } from "../components/HoldingPlans";
 import { LivePrice } from "../components/LivePrice";
 import { LiveZone } from "../components/LiveZone";
 import { ITrash } from "../components/icons";
@@ -160,6 +161,7 @@ export default function Portfolio() {
           {x.correlations.length > 0 && <details className="caption" style={{ marginTop: 8 }}><summary>종목별 상관계수 · {x.correlations.length}쌍</summary><div style={{ marginTop: 8 }}><Term k="correlation">상관계수</Term>: {x.correlations.map(([a, b, c]) => `${a}↔${b} ${num(c, 2)}`).join(" · ")}</div></details>}
         </Card>
       )}
+      {toss && <HoldingPlans />}
       {!empty && <KrwReturn k={x.krw} />}
       {toss && <DomesticHoldings items={toss.domestic ?? []} syncedAt={toss.synced_at} />}
       <div className="g2">

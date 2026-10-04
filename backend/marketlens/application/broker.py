@@ -35,7 +35,7 @@ SNAP_KEY, FILLS_KEY, PREFS_KEY, FILL_FX_KEY = "broker.toss.snapshot", "broker.to
 CASH_SOURCES = ("toss_usd", "toss_usd_krw", "manual")
 FILLS_EVERY_S = 600.0
 FILLS_FIRST_DAYS = 365
-FILLS_KEEP = 2000
+FILLS_KEEP = 5000
 FILL_FX_PER_SYNC = 30  # executions whose Toss rate is looked up per sync (once each, kept): a long history fills in over a few minutes
 KEY_TROUBLE = ("NOT_CONFIGURED", "BAD_KEY", "IP_NOT_ALLOWED", "TOKEN_REVOKED", "NO_ACCOUNT")
 
@@ -318,7 +318,35 @@ class BrokerSync:
             items[f.order_id] = self._fill_dict(f)
         keep = sorted(items.values(), key=lambda f: f["ordered_at"], reverse=True)[:FILLS_KEEP]
         # complete: every execution since ``since`` is here — the first full read reached its end, and so did each later one
-        return {"items": keep, "since": first.isoformat(), "complete": complete and (prev is None or bool(prev.get("complete"))), "synced_at": now.isoformat()}
+        return {"items": keep, "since": first.isoformat(), "complete": complete and (prev is None or bool(prev.get("complete"))), "synced_at": now.isoformat(),
+                "extended": (prev or {}).get("extended") or {}}
+
+    def extend_fills(self, symbol: str) -> dict[str, Any]:
+        """매매 진단's "기간 확대 조회": every closed order of one name the API still keeps (no start date), merged
+        into the stored executions — for a sale whose purchase lies before the regular window. Read-only (GET)."""
+        if not self.enabled or self.client is None:
+            raise TossError("NOT_CONFIGURED", "토스증권 키가 없습니다")
+        sym = symbol.strip().upper()
+        if not sym or len(sym) > 12 or not all(ch.isalnum() or ch in ".-" for ch in sym):
+            raise ValueError("종목 코드를 확인하세요")
+        with self._lock:
+            c = self.client
+            acct = c.brokerage_account()
+            got, complete = c.fills(acct.seq, None, self.now().astimezone(KST).date(), max_pages=50, symbol=sym)
+            items = {f["order_id"]: f for f in (self._fills or {}).get("items", [])}
+            before = len(items)
+            for f in got:
+                items[f.order_id] = self._fill_dict(f)
+            fills = dict(self._fills or {"since": self.now().astimezone(KST).date().isoformat(), "complete": False})
+            fills["items"] = sorted(items.values(), key=lambda f: f["ordered_at"], reverse=True)[:FILLS_KEEP]
+            ext = dict(fills.get("extended") or {})
+            ext[sym] = {"at": self.now().isoformat(), "complete": complete, "orders": len(got)}
+            fills["extended"] = ext
+            with self.sf() as s:
+                repo.set_setting(s, FILLS_KEY, json.dumps(fills))
+                s.commit()
+            self._fills = fills
+        return {"symbol": sym, "orders": len(got), "added": len(items) - before, "complete": complete}
 
     @staticmethod
     def _fill_dict(f: TossFill) -> dict[str, Any]:

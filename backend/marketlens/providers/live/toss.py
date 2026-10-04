@@ -401,13 +401,18 @@ class TossClient:
                 out.append((symbol_of(r["symbol"], "US" if r.get("currency") == "USD" else "KR"), p, _ts(r.get("timestamp"))))
         return out
 
-    def fills(self, account: int, since: date, until: date, max_pages: int = 30) -> tuple[list[TossFill], bool]:
+    def fills(self, account: int, since: date | None, until: date, max_pages: int = 30, symbol: str | None = None) -> tuple[list[TossFill], bool]:
         """Executions of closed orders ordered from ``since`` to ``until`` (KST days, inclusive), newest pages first.
+        ``since`` None: the whole history the API keeps (매매 진단's "기간 확대 조회", with ``symbol``: one name).
         Returns (fills, complete) — complete=False when ``max_pages`` pages of 100 did not reach the end."""
         out: list[TossFill] = []
         cursor: str | None = None
         for _ in range(max_pages):
-            params: dict[str, Any] = {"status": "CLOSED", "from": since.isoformat(), "to": until.isoformat(), "limit": 100}
+            params: dict[str, Any] = {"status": "CLOSED", "to": until.isoformat(), "limit": 100}
+            if since is not None:
+                params["from"] = since.isoformat()
+            if symbol:
+                params["symbol"] = symbol
             if cursor:
                 params["cursor"] = cursor
             res = self._get("/api/v1/orders", params, account=account)
