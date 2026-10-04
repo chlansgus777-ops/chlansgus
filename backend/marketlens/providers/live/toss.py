@@ -28,12 +28,14 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time as dtime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
 import httpx
 
+from marketlens.domain.market import Bar
+from marketlens.domain.market_calendar import to_ny
 from marketlens.infrastructure.logging import add_secrets, redact_text
 from marketlens.providers.live.nasdaq_symbols import canonical
 
@@ -44,8 +46,9 @@ MAX_429_WAIT_S = 5.0
 MIN_GAP_S = 0.12  # our own pacing per rate-limit group (the server's bucket allows ~10/s; we never need that)
 
 GROUP = {"/oauth2/token": "AUTH", "/api/v1/accounts": "ACCOUNT", "/api/v1/holdings": "ASSET", "/api/v1/orders": "ORDER_HISTORY",
-         "/api/v1/buying-power": "ORDER_INFO", "/api/v1/exchange-rate": "MARKET_INFO", "/api/v1/prices": "MARKET_DATA"}
+         "/api/v1/buying-power": "ORDER_INFO", "/api/v1/exchange-rate": "MARKET_INFO", "/api/v1/prices": "MARKET_DATA", "/api/v1/candles": "MARKET_DATA_CHART"}
 PRICES_MAX = 200  # symbols per /api/v1/prices call (the spec)
+CANDLES_MAX = 200  # candles per /api/v1/candles call (the spec)
 
 
 class TossError(Exception):
@@ -400,6 +403,37 @@ class TossClient:
                     continue
                 out.append((symbol_of(r["symbol"], "US" if r.get("currency") == "USD" else "KR"), p, _ts(r.get("timestamp"))))
         return out
+
+    def daily_candles(self, symbol: str, since: date, count: int = CANDLES_MAX, max_pages: int = 3) -> list[Bar]:
+        """Daily candles of one US ``symbol`` from ``since`` (NY trading days) to the newest, oldest first — split-adjusted
+        (``adjusted=true``, the spec's default 수정주가) like the rest of the app's stored bars. Pages of ``count`` (at most
+        200) backwards with ``nextBefore`` until ``since`` is reached, the history ends or ``max_pages`` pages were read.
+        A candle's day is its own trading date: the spec stamps a daily candle at local midnight."""
+        out: dict[date, Bar] = {}
+        before: str | None = None
+        for _ in range(max_pages):
+            params: dict[str, Any] = {"symbol": symbol, "interval": "1d", "count": max(1, min(count, CANDLES_MAX)), "adjusted": "true"}
+            if before:
+                params["before"] = before
+            res = self._get("/api/v1/candles", params)
+            if not isinstance(res, dict) or not isinstance(res.get("candles"), list):
+                raise _err("BAD_DATA", extra="캔들 형식")
+            oldest: date | None = None
+            for c in res["candles"]:
+                if not isinstance(c, dict):
+                    raise _err("BAD_DATA", extra="캔들 항목 형식")
+                ts = _ts(c.get("timestamp")) or _missing("캔들 시각")
+                day = ts.date() if ts.timetz().replace(tzinfo=None) == dtime(0) else to_ny(ts).date()
+                o, h, lo, cl, v = (dec(c.get(k), "캔들 " + k) for k in ("openPrice", "highPrice", "lowPrice", "closePrice", "volume"))
+                if o is None or h is None or lo is None or cl is None or v is None or min(o, h, lo, cl) <= 0 or v < 0:
+                    raise _err("BAD_DATA", extra="캔들 값")
+                oldest = day if oldest is None or day < oldest else oldest
+                if day >= since:
+                    out[day] = Bar(day, float(o), float(h), float(lo), float(cl), float(v))
+            before = res.get("nextBefore")
+            if not before or oldest is None or oldest <= since:
+                break
+        return [out[d] for d in sorted(out)]
 
     def fills(self, account: int, since: date | None, until: date, max_pages: int = 30, symbol: str | None = None) -> tuple[list[TossFill], bool]:
         """Executions of closed orders ordered from ``since`` to ``until`` (KST days, inclusive), newest pages first.

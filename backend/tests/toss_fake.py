@@ -83,6 +83,12 @@ def order(n: int, symbol: str, side: str, qty: str, price: str, day: str, cur: s
                           "filledAt": f"{day}T23:31:00.000+09:00" if float(f) > 0 else None, "settlementDate": None}}
 
 
+def candle(day: str, close: float, volume: float = 1_000_000, offset: str = "-04:00") -> dict[str, Any]:
+    """One US daily candle as the spec stamps it: the trading day at local (New York) midnight, decimal strings."""
+    return {"timestamp": f"{day}T00:00:00{offset}", "openPrice": f"{close * 0.99:.2f}", "highPrice": f"{close * 1.01:.2f}", "lowPrice": f"{close * 0.98:.2f}",
+            "closePrice": f"{close:.2f}", "volume": f"{volume:.0f}", "currency": "USD"}
+
+
 class FakeToss:
     def __init__(self, client_id: str = "c_01TESTCLIENT0000", secret: str = "s3cr3t-value-for-tests", expires_in: int = 86400) -> None:
         self.client_id, self.secret, self.expires_in = client_id, secret, expires_in
@@ -99,6 +105,8 @@ class FakeToss:
         self.prices: dict[str, tuple[str, str | None]] = {}  # symbol -> (lastPrice, timestamp) for /api/v1/prices
         self.faults: list[httpx.Response | Exception] = []  # served first, in order (429, 500, a network error…)
         self.requests: list[httpx.Request] = []
+        # symbol -> daily candles, newest first (as /api/v1/candles returns them); a symbol not here is a 404
+        self.candles: dict[str, list[dict[str, Any]]] = {}
         self.price_calls_allowed: int | None = None  # after this many /api/v1/prices calls: 429 (a burst over the rate limit)
         self.errors: list[str] = []  # spec violations seen (requests or our own responses)
 
@@ -164,6 +172,18 @@ class FakeToss:
                 self.errors.append(f"/api/v1/prices with {len(syms)} symbols (spec: at most 200)")
             rows = [{"symbol": x, "timestamp": self.prices[x][1], "lastPrice": self.prices[x][0], "currency": "USD"} for x in syms if x in self.prices]
             return self._resp(path, method, 200, {"result": rows})
+        if path == "/api/v1/candles":
+            rows = self.candles.get(q.get("symbol", ""))
+            if rows is None:
+                return self._error(path, method, 404, "not-found", "종목을 찾을 수 없습니다.")
+            count = int(q.get("count", 100))
+            if not 1 <= count <= 200:
+                self.errors.append(f"/api/v1/candles count={count} (spec: 1..200)")
+            if q.get("before"):  # inclusive: candles at or before that moment (the spec)
+                rows = [c for c in rows if c["timestamp"] <= q["before"]]
+            page = rows[:count]
+            more = len(rows) > count
+            return self._resp(path, method, 200, {"result": {"candles": page, "nextBefore": page[-1]["timestamp"] if page and more else None}})
         if path == "/api/v1/accounts":
             return self._resp(path, method, 200, {"result": self.accounts})
         if acct is not None and int(acct) not in {a["accountSeq"] for a in self.accounts}:

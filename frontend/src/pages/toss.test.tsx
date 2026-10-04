@@ -78,6 +78,19 @@ describe("the connection card", () => {
     fireEvent.click(screen.getByText("지금 동기화"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/api/broker/toss/sync"))).toBe(true));
   });
+  it("says where the daily price history comes from, and which names stay on Polygon and why", () => {
+    const view = { ...ON, daily_bars: { active: true, session: "2026-10-02", kept: 41, rejected: { AMD: "종가 불일치(같은 날 250거래일 중앙값 차이 2.90%)", ZZZZ: "토스에 없는 종목" }, error: null, last_run: null } };
+    render(<MemoryRouter><TossCard view={view} onChange={() => {}} compact /></MemoryRouter>);
+    const line = screen.getByTestId("toss-daily-bars");
+    expect(line.textContent).toContain("일봉: 토스증권 41종목 (2026-10-02 장까지)");
+    expect(line.textContent).toContain("시장 전체는 Polygon");
+    expect(line.textContent).toContain("Polygon 유지 2종목(AMD, ZZZZ)");
+    expect(line.innerHTML).toContain("종가 불일치");
+    cleanup();
+    render(<MemoryRouter><TossCard view={ON} onChange={() => {}} compact /></MemoryRouter>);
+    expect(screen.queryByTestId("toss-daily-bars")).toBeNull();  // not connected for daily bars: nothing claimed
+  });
+
   it("a failed 지금 동기화 reloads the view (light, ribbon, time) instead of a second red line", async () => {
     reply = (m) => (m === "POST" ? new Response(JSON.stringify({ detail: "토스증권 서버에 연결하지 못했습니다" }), { status: 503 }) : null);
     const onChange = vi.fn();

@@ -84,6 +84,8 @@ class DataAccess:
         # set by the service: ask the real-time feed for many names in ONE request before they are analysed (a scan);
         # one request per name hit the broker's rate limit and left most of a pre-market scan without a price
         self.prefetch_quotes: Callable[[list[str]], None] | None = None
+        # set by the service: bring one name's stored daily history up to date from 토스증권 first (application/toss_bars.py)
+        self.daily_bars: Callable[[str], bool] | None = None
 
     def _get(self, kind: str, chain: str, method: str, key: str, *args: Any, cross_check: Any = None) -> Fetched:
         ttl = self.ttl.get(kind, timedelta(minutes=5))
@@ -116,12 +118,25 @@ class DataAccess:
                 return Fetched(q, "toss")
         return self._get("price", "price", "get_quote", t, t, cross_check=relative_conflicts(("price",), 0.02))
 
+    def refresh_daily(self, t: str) -> bool:
+        """Bring ``t``'s stored daily history up to date from 토스증권 (at most once per session per name). False when
+        Toss is not connected or did not answer — Polygon and the store stay the source then."""
+        if self.daily_bars is None or "~" in t:
+            return False
+        try:
+            return bool(self.daily_bars(t))
+        except Exception as e:  # noqa: BLE001 - a Toss failure never fails a price read
+            log.warning("toss daily bars %s: %s", t, type(e).__name__)
+            return False
+
     def bars(self, t: str, start: date, end: date, fill_gaps: bool = True) -> Fetched:
         """``fill_gaps``: when the stored history misses the requested START and the market sync has not finished its
         backfill yet, ask the provider for the range (independent review F07: one recent bar answered a request for a
         month). Scans pass False — hundreds of per-ticker requests would exhaust the free rate limit; they wait for
         the sync, and readiness says so."""
         stored: list[Bar] = []
+        if fill_gaps:
+            self.refresh_daily(t)  # Toss's candles, when they agree with the stored history, are read from the store below
         if self.store is not None:
             stored = self.store.bars(t, start, end)
             # the store is authoritative when it covers the requested end (±3 sessions for sync lag) and either its

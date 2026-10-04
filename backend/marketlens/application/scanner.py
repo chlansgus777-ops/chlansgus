@@ -228,6 +228,8 @@ class Scanner:
         quote = take("price", self.data.quote(t)) if full else None
         if not full:
             missing["price"] = "3단계(펀더멘털 선별)는 실시간 시세를 조회하지 않음"
+        if full:  # the names analysed in full (a scan's finalists, a single analysis): 토스증권 daily candles first
+            self.data.refresh_daily(t)
         bars = take("bars", self.data.bars(t, d - timedelta(days=HISTORY_CALENDAR_DAYS), d, fill_gaps=False)) or []
         # stage 3 (full=False, the ~150 stage-2 names) reads only what the sync ingested; the final names may
         # fetch a missing filing (bounded by the manifest back-off)

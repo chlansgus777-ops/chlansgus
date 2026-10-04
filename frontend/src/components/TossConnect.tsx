@@ -12,6 +12,7 @@ export interface TossView {
   prefs: { cash: "toss_usd" | "toss_usd_krw" | "manual" }; key_store?: "keychain" | "env_file";
   fills: { count: number; complete: boolean; since: string | null; synced_at: string | null } | null;
   domestic?: TossHolding[]; other?: TossHolding[];
+  daily_bars?: { active: boolean; session: string | null; kept: number; rejected: Record<string, string>; error: { kind: string; text: string } | null; last_run: string | null };
   totals?: Record<string, { purchase: string; value: string; pnl: string; daily_pnl: string }>;
   cash?: { USD: string | null; KRW: string | null }; fx?: { rate: string | null; mid: string | null; at: string | null } | null;
 }
@@ -94,6 +95,7 @@ export function TossCard({ view, onChange, compact = false }: { view: TossView |
         {compact && <button className="sm ghost" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? "접기" : "설정"}</button>}
       </div>
       {e && <Ribbon tone={["UNAVAILABLE", "RATE_LIMITED", "BAD_DATA"].includes(e.kind) ? "info" : "warn"} cap="동기화 실패" testId="toss-sync-error">{e.text}{view.synced_at ? ` 지금 보이는 보유 현황은 ${age === "방금" ? "방금" : `${age}에`} 받은 것입니다.` : ""}</Ribbon>}
+      {view.daily_bars?.active && <DailyBars d={view.daily_bars} />}
       {!e && view.stale && <Notice tone="warn">마지막 동기화가 {age}입니다. 인터넷 연결을 확인하거나 ‘지금 동기화’를 누르세요.</Notice>}
       {(!compact || open) && (
         <div className="toss-settings">
@@ -118,6 +120,18 @@ export function TossCard({ view, onChange, compact = false }: { view: TossView |
 }
 
 /** Domestic (KRX) holdings of the account, in won as Toss computed them — outside the dollar totals and the analysis. */
+/** 일봉(일별 가격 기록)의 출처: 보유·관심·분석 후보는 토스증권 일봉이 먼저, 기존 기록과 맞지 않거나 실패하면 Polygon 그대로. */
+function DailyBars({ d }: { d: NonNullable<TossView["daily_bars"]> }) {
+  const off = Object.entries(d.rejected);
+  return (
+    <div className="caption" data-testid="toss-daily-bars">
+      일봉: 토스증권 {d.kept}종목{d.session ? ` (${d.session} 장까지)` : ""} · 그 밖의 종목과 시장 전체는 Polygon
+      {off.length > 0 && <span title={off.map(([t, why]) => `${t}: ${why}`).join("\n")}> · Polygon 유지 {off.length}종목({off.slice(0, 3).map(([t]) => t).join(", ")}{off.length > 3 ? " 외" : ""})</span>}
+      {d.error && <span> · 일봉 요청 잠시 멈춤: {d.error.text}</span>}
+    </div>
+  );
+}
+
 export function DomesticHoldings({ items, syncedAt }: { items: TossHolding[]; syncedAt: string | null }) {
   if (!items.length) return null;
   const total = items.reduce((a, h) => a + (n(h.market_value) ?? 0), 0);

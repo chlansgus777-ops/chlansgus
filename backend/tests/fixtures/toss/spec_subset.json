@@ -3248,6 +3248,549 @@
      }
     }
    }
+  },
+  "/api/v1/candles": {
+   "get": {
+    "tags": [
+     "Market Data"
+    ],
+    "summary": "캔들 차트 조회",
+    "description": "종목의 캔들(OHLCV) 차트 데이터를 조회합니다. 최대 200개 봉을 반환합니다.\n\n봉은 최신순(`timestamp` 내림차순)으로 정렬됩니다 — 배열의 첫 요소가 가장 최근 봉, 마지막 요소가 가장 오래된 봉입니다.\n\n**Rate Limits Group**: `MARKET_DATA_CHART`\n",
+    "operationId": "getCandles",
+    "security": [
+     {
+      "oauth2ClientCredentials": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "query",
+      "required": true,
+      "description": "종목 심볼. KRX: 6자리 종목코드 (숫자 또는 영문·숫자 조합; 예: 005930, 0101N0), US: 영문 티커 (예: AAPL). 영문 대/소문자, 숫자, '.', '-' 만 허용한다.",
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9.\\-]+$"
+      },
+      "examples": {
+       "krx": {
+        "summary": "삼성전자",
+        "value": "005930"
+       },
+       "us": {
+        "summary": "Apple",
+        "value": "AAPL"
+       }
+      }
+     },
+     {
+      "name": "interval",
+      "in": "query",
+      "required": true,
+      "description": "봉 단위",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "1m",
+        "1d"
+       ]
+      }
+     },
+     {
+      "name": "count",
+      "in": "query",
+      "required": false,
+      "description": "조회 봉 수 (최대 200)",
+      "schema": {
+       "type": "integer",
+       "default": 100,
+       "minimum": 1,
+       "maximum": 200
+      }
+     },
+     {
+      "name": "before",
+      "in": "query",
+      "required": false,
+      "description": "페이지네이션 상한 (inclusive, ISO 8601). 이 시각과 같거나 이전인 봉만 반환합니다. 미지정 시 가장 최신 봉부터 반환.\n다음 페이지 요청 시 이전 응답의 `nextBefore` 값을 그대로 전달합니다.\n타임존 오프셋의 `+` 는 쿼리스트링에서 `%2B` 로 URL 인코딩해야 합니다 (예: `before=2026-03-25T09:00:00%2B09:00`).\n",
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "example": "2026-03-25T09:00:00+09:00"
+     },
+     {
+      "name": "adjusted",
+      "in": "query",
+      "required": false,
+      "description": "수정주가 적용 여부. `true` 면 수정주가 적용, `false` 면 미적용.",
+      "schema": {
+       "type": "boolean",
+       "default": true
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "성공",
+      "content": {
+       "application/json": {
+        "schema": {
+         "allOf": [
+          {
+           "type": "object",
+           "description": "성공 응답 envelope. 200 응답에 사용됩니다.\n각 엔드포인트의 성공 응답 스키마는 `allOf` 로 본 스키마를 상속하며 `result` 를 구체 타입으로 specialize 합니다.\n실패 응답은 별도의 `ErrorResponse` 스키마를 사용합니다 (4xx/5xx). `result` 와 `error` 는 동시에 나타나지 않습니다.\n",
+           "required": [
+            "result"
+           ],
+           "properties": {
+            "result": {
+             "description": "성공 응답의 페이로드. 엔드포인트별 타입이 다르며, 각 엔드포인트 스펙에서 `allOf` 로 구체 타입을 명시합니다.\n"
+            }
+           }
+          },
+          {
+           "type": "object",
+           "properties": {
+            "result": {
+             "type": "object",
+             "required": [
+              "candles"
+             ],
+             "properties": {
+              "candles": {
+               "type": "array",
+               "description": "캔들 목록. 최신순(`timestamp` 내림차순) 정렬 — 배열 첫 요소가 가장 최근 봉, 마지막 요소가 가장 오래된 봉입니다.",
+               "items": {
+                "type": "object",
+                "required": [
+                 "timestamp",
+                 "openPrice",
+                 "highPrice",
+                 "lowPrice",
+                 "closePrice",
+                 "volume",
+                 "currency"
+                ],
+                "properties": {
+                 "timestamp": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "봉 기준 시각\n- `1m`: 봉 종료 시각. 해당 봉은 `[timestamp - 1분, timestamp)` 구간의 체결을 집계합니다.\n- `1d`: 해당 거래일 (시각은 현지 자정 고정)\n",
+                  "example": "2026-03-25T09:00:00+09:00"
+                 },
+                 "openPrice": {
+                  "type": "string",
+                  "format": "decimal",
+                  "maxLength": 30,
+                  "description": "시가",
+                  "example": "71600"
+                 },
+                 "highPrice": {
+                  "type": "string",
+                  "format": "decimal",
+                  "maxLength": 30,
+                  "description": "고가",
+                  "example": "72300"
+                 },
+                 "lowPrice": {
+                  "type": "string",
+                  "format": "decimal",
+                  "maxLength": 30,
+                  "description": "저가",
+                  "example": "71500"
+                 },
+                 "closePrice": {
+                  "type": "string",
+                  "format": "decimal",
+                  "maxLength": 30,
+                  "description": "종가",
+                  "example": "72000"
+                 },
+                 "volume": {
+                  "type": "string",
+                  "format": "decimal",
+                  "maxLength": 30,
+                  "description": "거래량",
+                  "example": "3521000"
+                 },
+                 "currency": {
+                  "type": "string",
+                  "enum": [
+                   "KRW",
+                   "USD"
+                  ],
+                  "description": "통화 코드.\n- KRW: 한국 원화\n- USD: 미국 달러\n\n클라이언트는 unknown enum 값을 허용하도록 구현해야 합니다.\n"
+                 }
+                }
+               }
+              },
+              "nextBefore": {
+               "type": [
+                "string",
+                "null"
+               ],
+               "format": "date-time",
+               "description": "다음 페이지 조회 시 `before` 쿼리 파라미터에 그대로 전달. 마지막 페이지면 null."
+              }
+             }
+            }
+           }
+          }
+         ]
+        },
+        "examples": {
+         "dailyCandles": {
+          "summary": "일봉 (1d)",
+          "value": {
+           "result": {
+            "candles": [
+             {
+              "timestamp": "2026-03-25T00:00:00+09:00",
+              "openPrice": "71600",
+              "highPrice": "72300",
+              "lowPrice": "71500",
+              "closePrice": "72000",
+              "volume": "3521000",
+              "currency": "KRW"
+             },
+             {
+              "timestamp": "2026-03-24T00:00:00+09:00",
+              "openPrice": "71200",
+              "highPrice": "71800",
+              "lowPrice": "71000",
+              "closePrice": "71600",
+              "volume": "2984000",
+              "currency": "KRW"
+             }
+            ],
+            "nextBefore": "2026-03-24T00:00:00+09:00"
+           }
+          }
+         },
+         "minuteCandles": {
+          "summary": "분봉 (1m)",
+          "value": {
+           "result": {
+            "candles": [
+             {
+              "timestamp": "2026-03-25T09:32:00+09:00",
+              "openPrice": "72000",
+              "highPrice": "72100",
+              "lowPrice": "71950",
+              "closePrice": "72050",
+              "volume": "15200",
+              "currency": "KRW"
+             },
+             {
+              "timestamp": "2026-03-25T09:31:00+09:00",
+              "openPrice": "71950",
+              "highPrice": "72050",
+              "lowPrice": "71900",
+              "closePrice": "72000",
+              "volume": "18400",
+              "currency": "KRW"
+             }
+            ],
+            "nextBefore": "2026-03-25T09:31:00+09:00"
+           }
+          }
+         },
+         "lastPage": {
+          "summary": "마지막 페이지 (nextBefore null)",
+          "value": {
+           "result": {
+            "candles": [
+             {
+              "timestamp": "2026-03-20T00:00:00+09:00",
+              "openPrice": "70800",
+              "highPrice": "71200",
+              "lowPrice": "70500",
+              "closePrice": "71000",
+              "volume": "2112000",
+              "currency": "KRW"
+             }
+            ],
+            "nextBefore": null
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "잘못된 요청",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "examples": {
+         "unsupportedCandleInterval": {
+          "summary": "지원하지 않는 캔들 주기",
+          "value": {
+           "error": {
+            "requestId": "01HXYZABCDEFG123456789",
+            "code": "invalid-request",
+            "message": "지원하지 않는 캔들 주기입니다.",
+            "data": {
+             "field": "interval",
+             "allowedValues": [
+              "1m",
+              "1d"
+             ]
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "종목을 찾을 수 없음",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "stock-not-found",
+          "message": "종목을 찾을 수 없습니다."
+         }
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "요청 한도 초과. 포함 헤더의 의미는 아래 `headers` 정의를 참조합니다.",
+      "headers": {
+       "X-RateLimit-Limit": {
+        "description": "현재 허용된 초당 요청 수 (burst capacity)",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 10
+       },
+       "X-RateLimit-Remaining": {
+        "description": "현재 버킷에 남은 토큰 수. 429 시 0.",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 0
+       },
+       "X-RateLimit-Reset": {
+        "description": "토큰 1 개가 재충전될 때까지 예상 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       },
+       "Retry-After": {
+        "description": "재시도 권장 초",
+        "schema": {
+         "type": "integer"
+        },
+        "example": 1
+       }
+      },
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "rate-limit-exceeded",
+          "message": "요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
+         }
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "시세 조회 중 일시적 오류",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "description": "에러 응답 envelope. 4xx/5xx 응답에 사용됩니다. 성공 응답은 별도의 `ApiResponse` 스키마를 사용합니다.\n",
+         "required": [
+          "error"
+         ],
+         "properties": {
+          "error": {
+           "type": "object",
+           "description": "에러 객체. 에러 식별에 필요한 최소 정보(`requestId`, `code`, `message`)와\n필요 시 해결 힌트(`data`)를 포함합니다.\n",
+           "required": [
+            "requestId",
+            "code",
+            "message"
+           ],
+           "properties": {
+            "requestId": {
+             "type": "string",
+             "description": "요청을 식별하는 고유 ID. 응답 헤더 `X-Request-Id` 와 동일한 값입니다.\n토스증권 CS 문의 시 첨부를 권장합니다.\n",
+             "example": "01HXYZABCDEFG123456789"
+            },
+            "code": {
+             "type": "string",
+             "description": "에러 코드. flat string 식별자.\n도메인 에러는 이유를 직접 표현하는 단일 식별자 (예: `invalid-request`, `order-not-found`) 를 사용합니다.\n클라이언트는 unknown code 를 허용하도록 구현해야 합니다.\n",
+             "example": "order-not-found"
+            },
+            "message": {
+             "type": "string",
+             "description": "사용자에게 노출 가능한 에러 메시지. 내부 정책상 노출이 제한되는 경우 빈 문자열로 내려갈 수 있으므로\n클라이언트는 `code` 기반으로 메시지를 자체 매핑할 것을 권장합니다.\n",
+             "example": "주문 방향이 올바르지 않습니다."
+            },
+            "data": {
+             "type": [
+              "object",
+              "null"
+             ],
+             "description": "에러 해결 힌트. 에러 코드별로 포함 여부와 키 구조가 다르며, 없는 경우 필드 자체가 생략됩니다.\n모든 표준 키가 항상 함께 내려가지 않으며, 각 에러 코드에 해당하는 서브셋만 포함됩니다.\n\n## 표준 키 (camelCase)\n\n| 키 | 타입 | 설명 |\n|---|---|---|\n| `field` | string | 검증 실패 원인 필드. 외부 API 에 노출된 이름 (request body JSON key 또는 query parameter name) 을 사용합니다. 복수 필드는 쉼표로 구분 (예: `\"quantity,orderAmount\"`). |\n| `allowedValues` | string[] | enum 후보 값 전체. |\n| `allowedConditions` | object | 조건부 허용 규칙 (`marketCountry` / `orderType` / `side` 등). |\n| `constraint` | object | 필드 제약 (`min` / `max` / `integerOnly` / `step`). |\n| `format` | string | 포맷 규칙명 (예: `decimal`). |\n| `pattern` | string | 정규식. |\n| `maxLength` | number | 문자열 길이 상한. |\n| `limits` | object | 금액 / 수량 한도 (`threshold` / `minimum` / `maximum` + `currency`). |\n| `retryAfterAt` | string | 절대 재시도 시각 (ISO 8601 offset, KST). |\n| `retryAfterSeconds` | number | 상대 재시도 시각 (초). |\n| `tickSize` | string | 호가 단위. |\n| `nearestPrices` | string[] | 근접 유효 가격 (`[lower, upper]`). |\n\n구체적인 에러 코드별 `data` 예시는 각 엔드포인트의 4xx / 5xx 응답 예시를 참고합니다.\n",
+             "additionalProperties": true
+            }
+           }
+          }
+         }
+        },
+        "example": {
+         "error": {
+          "requestId": "01HXYZABCDEFG123456789",
+          "code": "internal-error",
+          "message": "처리 중 문제가 생겼어요. 잠시 후 다시 시도해주세요."
+         }
+        }
+       }
+      }
+     }
+    }
+   }
   }
  }
 }

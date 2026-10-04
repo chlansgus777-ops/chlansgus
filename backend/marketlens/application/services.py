@@ -25,6 +25,7 @@ from marketlens.application.market_store import MarketStore
 from marketlens.application.pipeline import AnalysisInputs, AnalysisResult, run_analysis
 from marketlens.domain.market import Quote
 from marketlens.application.broker import BrokerSync
+from marketlens.application.toss_bars import TossBars
 from marketlens.application.toss_quotes import TossQuoteFeed, live_quote
 from marketlens.domain.broker import merge_broker
 from marketlens.application.live_judge import LiveJudge, plans_from_rows
@@ -277,6 +278,9 @@ class MarketLensService:
         # its prices are the app's real-time feed in every session Toss quotes (application/toss_quotes.py)
         self.toss_feed = TossQuoteFeed(self.quotes, None)
         self.quotes.poll_status = self.toss_feed.status
+        # its daily candles are the stored daily history of the names that matter (application/toss_bars.py)
+        self.toss_bars = TossBars(None, self.store, self.now, names=self._toss_bar_names)
+        self.data.daily_bars = self.toss_bars.ensure
         self.attach_broker(BrokerSync(self.sf, self.now, getattr(settings, "toss_client_id", None), getattr(settings, "toss_client_secret", None),
                                       enabled=settings.mode == DataMode.LIVE))
         self.data.live_quote = self._live_quote  # an analysis prices at the same second the screens show
@@ -601,6 +605,7 @@ class MarketLensService:
         self.broker = broker
         broker.on_change = self._broker_changed
         self.toss_feed.broker = broker  # one client id, one token: the feed uses the broker's own client
+        self.toss_bars.broker = broker
 
     def _broker_changed(self) -> None:
         """Holdings or cash in the account changed (or it was connected / disconnected): the live verdicts' held flags,
@@ -690,6 +695,8 @@ class MarketLensService:
         routes; the refresher runs at most one sync at a time and backs off after a failure."""
         if self.broker.due():  # the schedule is the broker's own (wall clock): one sync in flight at most
             self.accounts.get("broker:toss", self.broker.sync, max_age=0.0, retry_after=0.0)
+        if self.toss_bars.due():  # once per completed session: the names that matter get Toss's daily candles
+            self.refresher.get("toss:bars", self.toss_bars.refresh, max_age=0.0, retry_after=300.0)
 
     BRIEFING_AGE = 3.0  # seconds a built briefing is reused (it follows the live prices; the screen asks every few seconds)
 
@@ -786,6 +793,16 @@ class MarketLensService:
         return issued_at < datetime.fromisoformat(self._account_changed_at)
 
     MA_ALERT_MIN_SCORE = 60.0  # owner 2026-10-05: only names scoring 60 or more alert on a moving-average touch
+
+    def _toss_bar_names(self) -> list[str]:
+        """Held, watched, the analysed pool of the shown scan and the benchmark — the names whose daily history comes
+        from 토스증권 first."""
+        with self.sf() as s:
+            names = {h.ticker for h in self.portfolio(s).holdings} | {w.ticker for w in repo.watchlist(s)}
+            scan = self.shown_scan(s)
+            if scan is not None:
+                names |= {r.ticker for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None and r.rank <= self.LIVE_POOL}
+        return ["SPY"] + sorted(names - {"SPY"})
 
     def _ma_levels(self) -> list[Any]:
         """The 20 / 50 / 200-day lines of every name whose newest analysis scores ``MA_ALERT_MIN_SCORE`` or more — the

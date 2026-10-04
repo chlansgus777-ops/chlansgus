@@ -39,6 +39,7 @@ RELIST_GAP_DAYS = 7  # absent from the SEC file for up to a week and back: a dat
 
 GROUPED_DAYS_KEY = "grouped_loaded_days"  # app setting: ISO dates the market-wide grouped download stored
 GROUPED_MIN_ROWS = 1000  # a US market session holds ~10,000 tickers; per-ticker write-backs hold a handful
+PREFERRED_BARS = "toss"  # 토스증권 daily candles (application/toss_bars.py): kept only where they agreed with the other source
 
 
 class MarketStore:
@@ -528,7 +529,8 @@ class MarketStore:
         return {date.fromisoformat(x) for x in raw.split(",") if x}
 
     def bars(self, ticker: str, start: date, end: date) -> list[Bar]:
-        """Daily bars of one company, across ticker renames (security master)."""
+        """Daily bars of one company, across ticker renames (security master). A session stored from 토스증권 as well
+        (application/toss_bars.py — only kept when it agreed with the other source) is read from Toss."""
         by_day: dict[date, Bar] = {}
         aliases = self.aliases(ticker)  # own session first: never nest sessions (shared SQLite connection)
         with self.sf() as s:
@@ -537,17 +539,43 @@ class MarketStore:
                 if until is not None:
                     q = q.where(PriceBarRow.day < until)
                 for r in s.scalars(q.order_by(PriceBarRow.day)):
-                    by_day.setdefault(r.day, Bar(r.day, r.open, r.high, r.low, r.close, r.volume))
+                    if r.source == PREFERRED_BARS or r.day not in by_day:
+                        by_day[r.day] = Bar(r.day, r.open, r.high, r.low, r.close, r.volume)
         return [by_day[d] for d in sorted(by_day)]
+
+    def source_bars(self, ticker: str, start: date, end: date, exclude: str) -> list[Bar]:
+        """The stored bars of ``ticker`` itself (no aliases) from every source but ``exclude`` — what Toss's candles
+        are checked against before they are kept."""
+        by_day: dict[date, Bar] = {}
+        with self.sf() as s:
+            q = select(PriceBarRow).where(PriceBarRow.ticker == ticker, PriceBarRow.source != exclude, PriceBarRow.day >= start, PriceBarRow.day <= end)
+            for r in s.scalars(q.order_by(PriceBarRow.day)):
+                by_day.setdefault(r.day, Bar(r.day, r.open, r.high, r.low, r.close, r.volume))
+        return [by_day[d] for d in sorted(by_day)]
+
+    def last_bar_day(self, ticker: str, source: str) -> date | None:
+        with self.sf() as s:
+            return s.execute(select(func.max(PriceBarRow.day)).where(PriceBarRow.ticker == ticker, PriceBarRow.source == source)).scalar()
+
+    def delete_bars(self, ticker: str, source: str) -> int:
+        """Remove one source's bars of ``ticker`` (Toss candles that stopped agreeing — never mixed silently)."""
+        with self.sf() as s:
+            rows = list(s.scalars(select(PriceBarRow).where(PriceBarRow.ticker == ticker, PriceBarRow.source == source)))
+            for r in rows:
+                s.delete(r)
+            s.commit()
+        return len(rows)
 
     def last_bars_all(self, start: date, end: date) -> dict[str, list[Bar]]:
         """All stored bars in a window, grouped by ticker (one query for the whole market)."""
         out: dict[str, dict[date, Bar]] = {}
         with self.sf() as s:
             # plain rows, not ORM objects: the whole market's window (owner report: 5 s per screen from building 200k objects)
-            q = select(PriceBarRow.ticker, PriceBarRow.day, PriceBarRow.open, PriceBarRow.high, PriceBarRow.low, PriceBarRow.close, PriceBarRow.volume)
-            for t, d, o, h, lo, c, v in s.execute(q.where(PriceBarRow.day >= start, PriceBarRow.day <= end)):
-                out.setdefault(t, {}).setdefault(d, Bar(d, o, h, lo, c, v))
+            q = select(PriceBarRow.ticker, PriceBarRow.day, PriceBarRow.open, PriceBarRow.high, PriceBarRow.low, PriceBarRow.close, PriceBarRow.volume, PriceBarRow.source)
+            for t, d, o, h, lo, c, v, src in s.execute(q.where(PriceBarRow.day >= start, PriceBarRow.day <= end)):
+                byd = out.setdefault(t, {})
+                if src == PREFERRED_BARS or d not in byd:  # the same session from Toss is read from Toss (as bars())
+                    byd[d] = Bar(d, o, h, lo, c, v)
             renamed = [t for (t,) in s.execute(select(SecurityRow.ticker).where(SecurityRow.mode == self.mode, SecurityRow.predecessor.is_not(None)))]
         for t in renamed:  # a renamed company keeps its price history (security master)
             merged = dict(out.get(t, {}))

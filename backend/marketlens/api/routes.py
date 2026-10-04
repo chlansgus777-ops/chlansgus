@@ -597,7 +597,7 @@ def _toss_call(fn: Any) -> dict[str, Any]:
 def toss_status(req: Request) -> dict[str, Any]:
     s = svc(req)
     s.broker_tick()
-    return s.broker.view()
+    return s.broker.view() | {"daily_bars": s.toss_bars.status()}
 
 
 @router.put("/broker/toss/credentials")
