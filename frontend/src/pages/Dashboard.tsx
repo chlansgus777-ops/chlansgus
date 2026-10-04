@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 import { Link } from "react-router-dom";
 import { IArrow, IDownload, IEvent, IPerf, IPortfolio, IShield, IStar } from "../components/icons";
-import { Action, Card, Change, Empty, Err, LineChart, Loading, Notice, ScoreMeter, StaleData, StatePanel, StatusBadge, Term } from "../components/ui";
+import { Action, Card, Change, Empty, Err, LineChart, Loading, Notice, ScoreMeter, StaleData, StatePanel, Term } from "../components/ui";
 import { NotReady, ReadinessBanner, SyncControl, type ReadinessInfo } from "../components/Readiness";
 import { type ScanStatus, usePageTime, useStatus } from "../components/status";
 import { useApi, usePoll } from "../components/useApi";
@@ -71,6 +71,12 @@ export function riskLine(r: OppRow): string {
 function CardPrice({ r }: { r: OppRow }) {
   const { row } = useQuote(r.ticker);
   return row?.price != null ? <LivePrice ticker={r.ticker} size="sm" showState={false} /> : <span style={{ whiteSpace: "nowrap" }}>{price(r.price)}</span>;
+}
+
+function groupBy<T>(xs: T[], key: (x: T) => string): [string, T[]][] {
+  const m = new Map<string, T[]>();
+  for (const x of xs) m.set(key(x), [...(m.get(key(x)) ?? []), x]);
+  return [...m];
 }
 
 function CandidateCard({ r, lead }: { r: OppRow; lead?: boolean }) {
@@ -259,9 +265,14 @@ export default function Dashboard() {
             {notValid.length > 0 && (
               <div style={{ marginTop: 16 }} data-testid="not-valid">
                 <div className="t-kicker" style={{ marginBottom: 8 }}>지금은 유효하지 않은 추천 — 매수 신호로 보지 마세요</div>
-                <div className="invalid-list">{notValid.slice(0, 5).map((r) => (
-                  <div className="it" key={r.id}><Link to={`/stocks/${r.ticker}`}>{r.ticker}</Link> <Action a={r.action} status={r.current_status} quality={r.data_quality} /> <StatusBadge s={r.current_status} reason={r.current_status_reason} action={r.action} /> <span className="caption">{r.current_status_reason ?? ""}</span></div>
+                {/* one line per reason: five names invalidated by the same account change say it once */}
+                <div className="invalid-list">{groupBy(notValid.slice(0, 12), (r) => r.current_status_reason ?? "").map(([why, rs]) => (
+                  <div className="it" key={why || "-"}>
+                    <div className="names">{rs.map((r) => <span className="inv" key={r.id}><Link to={`/stocks/${r.ticker}`}>{r.ticker}</Link><Action a={r.action} status={r.current_status} quality={r.data_quality} /></span>)}</div>
+                    {why && <div className="caption">{why}</div>}
+                  </div>
                 ))}</div>
+                {notValid.length > 12 && <div className="caption" style={{ marginTop: 6 }}>외 {notValid.length - 12}개 — 종목 화면의 후보 목록에서 볼 수 있습니다</div>}
               </div>
             )}
           </Card>

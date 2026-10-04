@@ -250,7 +250,7 @@ const STATE: Record<StateKind, { icon: string; tone: "info" | "warn" | "danger";
 };
 
 /** One of the named screen states: what it is, what cannot be known right now, and what the user can do. */
-export function StatePanel({ kind, title, what, todo, children, actions, testId }: { kind: StateKind; title?: string; what?: ReactNode; todo?: ReactNode; children?: ReactNode; actions?: ReactNode; testId?: string }) {
+export function StatePanel({ kind, title, what, unknown, todo, children, actions, testId }: { kind: StateKind; title?: string; what?: ReactNode; unknown?: ReactNode; todo?: ReactNode; children?: ReactNode; actions?: ReactNode; testId?: string }) {
   const s = STATE[kind];
   return (
     <div className={`state tone-${s.tone}`} role={s.tone === "danger" ? "alert" : "status"} data-testid={testId ?? `state-${kind}`}>
@@ -258,7 +258,7 @@ export function StatePanel({ kind, title, what, todo, children, actions, testId 
       <div className="title">{title ?? s.title}</div>
       <dl>
         <dt>무슨 상황</dt><dd>{what ?? s.what}</dd>
-        <dt>알 수 없는 것</dt><dd>{s.unknown}</dd>
+        <dt>알 수 없는 것</dt><dd>{unknown ?? s.unknown}</dd>
         <dt>할 수 있는 일</dt><dd>{todo ?? s.todo}</dd>
       </dl>
       {children}

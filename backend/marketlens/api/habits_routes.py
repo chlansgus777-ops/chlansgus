@@ -5,7 +5,7 @@ only writes are the owner's own rules, notes and stops in this app's database, a
 from __future__ import annotations
 
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -52,8 +52,8 @@ def _bars_fn(s: Any) -> H.BarsFn:
     from marketlens.api.routes import _view_bars
 
     def bars(sym: str, start: date, end: date) -> list[Any] | None:
-        if not sym.replace(".", "").replace("-", "").isalpha():
-            return None  # a Korean 6-character code: the app has no Korean daily bars
+        if sym[:1].isdigit():
+            return None  # a Korean 6-character code (it starts with a digit): the app has no Korean daily bars
         got, _pending = _view_bars(s, [sym], start, end, wait=2.0)
         return got.get(sym) or None
 
@@ -115,6 +115,40 @@ def _inputs(s: Any, sample: bool) -> dict[str, Any]:
                      "extended": (b._fills or {}).get("extended") or {}}}
 
 
+def _app_holdings(s: Any) -> dict[str, Any]:
+    """Without a connected broker: the US holdings entered in this app (a manual line or the trade records) with the
+    trade records as executions, so the rules still say what to do with them. Used for the plans only — the
+    diagnosis needs real execution times, which the records (a day, no time) do not have."""
+    from decimal import Decimal
+
+    from marketlens.domain.habits import Fill
+    from marketlens.domain.market_calendar import NY
+
+    with s.sf() as ss:
+        pf = s.portfolio(ss)
+        ledgers = s.ledger(ss)
+    holdings = [{"symbol": h.ticker, "name": h.ticker, "market": "US", "currency": "USD", "quantity": h.quantity, "avg_price": h.cost_basis}
+                for h in pf.holdings if h.quantity > 0 and h.cost_basis > 0]
+    fills = []
+    for g in ledgers:
+        ts = g.get("trades") or []
+        if not g.get("ticker") or g.get("splits") or any(t.kind == "SPLIT" for t in ts):
+            continue  # a split changes the share basis (or the ticker moved on): plan from the holding alone
+        for t in ts:
+            if t.kind in ("BUY", "SELL") and t.quantity > 0:
+                at = datetime.combine(t.day, datetime.min.time().replace(hour=16), tzinfo=NY)  # a day only: its close
+                fills.append(Fill(f"L{t.id}", str(g["ticker"]), t.kind, Decimal(str(t.quantity)), Decimal(str(t.price)), Decimal(str(t.fees)),
+                                  "USD", at, at, account="ledger", source="ledger"))
+    return {"fills": fills, "holdings": holdings, "complete": True, "raw": {}, "bars_for": _bars_fn(s), "splits_for": _splits_fn(s),
+            "app_stop": None, "source": "app", "meta": {"connected": False}}
+
+
+def _plan_inputs(s: Any) -> dict[str, Any]:
+    """The holdings the rules apply to: the broker account when connected, else what was entered in this app."""
+    inp = _inputs(s, False)
+    return inp if inp["meta"].get("connected") else _app_holdings(s)
+
+
 def holding_states(s: Any, inp: dict[str, Any]) -> list[HoldingState]:
     """Each holding with what its plan needs and its price now (live quote → Toss price → latest close)."""
     holdings = inp["holdings"] or []
@@ -127,7 +161,7 @@ def holding_states(s: Any, inp: dict[str, Any]) -> list[HoldingState]:
     for h, st in zip(holdings, states_pre):
         sym = h["symbol"]
         px, at, src = None, None, None
-        if inp["source"] == "toss":
+        if inp["source"] in ("toss", "app"):
             q = s._fresh_quote(sym) if h.get("market") == "US" else None
             if q is not None:
                 px, at, src = q.price, q.timestamp.isoformat(), "실시간"
@@ -144,6 +178,11 @@ def holding_states(s: Any, inp: dict[str, Any]) -> list[HoldingState]:
             highs[sym] = max(b.high for b in bars if b.day >= to_ny(datetime.fromisoformat(opened)).date()) if any(b.day >= to_ny(datetime.fromisoformat(opened)).date() for b in bars) else None
             if px is None:
                 px, at, src = bars[-1].close, bars[-1].day.isoformat(), "최근 종가"
+        if px is None and h.get("market") == "US":  # no live price and no history since opening: the latest close
+            today = s.now().astimezone(KST).date()
+            recent = inp["bars_for"](sym, today - timedelta(days=10), today)
+            if recent:
+                px, at, src = recent[-1].close, recent[-1].day.isoformat(), "최근 종가"
         if px is not None and highs.get(sym) is not None:
             highs[sym] = max(highs[sym] or px, px)
         prices[sym] = (px, at, src)
@@ -165,7 +204,7 @@ def plans(s: Any, inp: dict[str, Any], tr: TradeRules) -> list[dict[str, Any]]:
 
 def rule_states(s: Any) -> tuple[list[HoldingState], TradeRules]:
     """The account's holdings and the saved trade rules, for the live rule alerts (US names: the ones with live prices)."""
-    inp = _inputs(s, False)
+    inp = _plan_inputs(s)
     _r, tr, _h = _rules(s)
     us = {h["symbol"] for h in inp["holdings"] or [] if h.get("market") == "US"}
     return [st for st in holding_states(s, inp) if st.symbol in us], tr
@@ -200,13 +239,13 @@ def habits(req: Request, sample: bool = False) -> dict[str, Any]:
 def habit_plans(req: Request, ticker: str | None = None) -> dict[str, Any]:
     """보유 종목의 '지금 할 일' (the saved rules on the account's holdings) — portfolio, stock page, home."""
     s = _svc(req)
-    inp = _inputs(s, False)
+    inp = _plan_inputs(s)
     _r, tr, _h = _rules(s)
     pl = plans(s, inp, tr)
     if ticker:
         pl = [p for p in pl if p["symbol"] == ticker.upper()]
     return {"plans": pl, "rules": tr.__dict__, "rules_saved": tr.saved_at is not None, "connected": inp["meta"].get("connected", False),
-            "at": s.now().isoformat()}
+            "source": inp["source"], "at": s.now().isoformat()}
 
 
 @router.get("/habits/trades/{trade_id}")

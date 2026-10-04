@@ -61,18 +61,18 @@ export default function Performance() {
   const [params, setParams] = useSearchParams();
   const view = params.get("view") === "mine" ? "mine" : "recs";
   return (
-    <>
-      <div className="perf-switch" style={{ padding: "0 0 12px" }}>
+    <div className="grid">
+      <div className="page-head enter">
+        <div><h1>성과</h1><div className="t-sub">{view === "mine"
+          ? "내 매수·매도 기록으로 왜 수익이 안 나는지, 무엇을 고칠지, 보유 종목은 규칙상 지금 무엇을 할지 봅니다."
+          : "MarketLens의 매수 계열 추천을 그대로 따랐다면 어땠는지 — 결과가 확정된(20거래일 경과) 추천만 셉니다."}</div></div>
+      </div>
+      <div className="perf-switch">
         <Tabs<"recs" | "mine"> label="성과 보기" value={view} onChange={(v) => setParams(v === "mine" ? { view: "mine" } : {}, { replace: true })}
           items={[["recs", "추천 성과"], ["mine", "내 매매 진단"]]} />
       </div>
-      {view === "mine" ? (
-        <div className="grid">
-          <div className="page-head enter"><div><h1>내 매매 진단</h1><div className="t-sub">내 토스증권 체결 기록으로 왜 수익이 안 나는지, 무엇을 고칠지, 보유 종목은 규칙상 지금 무엇을 할지 봅니다.</div></div></div>
-          <MyTrading />
-        </div>
-      ) : <RecommendationPerformance />}
-    </>
+      {view === "mine" ? <MyTrading /> : <RecommendationPerformance />}
+    </div>
   );
 }
 
@@ -102,8 +102,7 @@ function RecommendationPerformance() {
   const progress = Math.min(1, settled / SAMPLE_GOAL);
   return (
     <div className="grid">
-      <div className="page-head enter">
-        <div><h1>성과</h1><div className="t-sub">MarketLens의 매수 계열 추천을 그대로 따랐다면 어땠는지 — 결과가 확정된(20거래일 경과) 추천만 셉니다.</div></div>
+      <div className="row" style={{ justifyContent: "flex-end", marginTop: -8 }}>
         <div className="row">
           <button disabled={!!busy} onClick={() => act("/evaluation/run")}>{busy === "/evaluation/run" ? <><span className="spin" />갱신 중…</> : "결과·모의투자 갱신"}</button>
         </div>

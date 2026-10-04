@@ -730,7 +730,9 @@ tr.row-expired:hover td { opacity: 0.9; }
 .chip-days { display: inline-flex; align-items: center; justify-content: center; min-width: 38px; height: 22px; padding: 0 7px; border-radius: 7px; font-size: 11.5px; font-weight: 700; background: var(--s3); color: var(--sub); }
 .chip-days.soon { background: var(--warn-soft); color: var(--warn); }
 .invalid-list { display: grid; gap: 8px; }
-.invalid-list .it { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--line); }
+.invalid-list .it { display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--line); }
+.invalid-list .names { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.invalid-list .inv { display: inline-flex; align-items: center; gap: 6px; }
 .invalid-list .it a { color: var(--text); font-weight: 700; }
 @media (max-width: 1180px) { .home-grid { grid-template-columns: minmax(0, 1fr); } .home-rail { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .home-rail { grid-template-columns: minmax(0, 1fr); } .today .facts { grid-template-columns: minmax(0, 1fr); } .today .facts > div + div { border-left: 0; padding-left: 0; border-top: 1px solid rgba(148, 160, 200, 0.1); } .today .count { font-size: 44px; } }
@@ -1223,4 +1225,10 @@ tr.detail-row > td { padding: 4px 12px 18px; background: var(--s2); }
   .plan-grid { grid-template-columns: minmax(0, 1fr); }
   .why .cause { font-size: 15.5px; }
   .kpi-v { font-size: 22px; }
+}
+
+/* wide tables on a phone scroll sideways instead of squeezing their columns into each other */
+@media (max-width: 640px) {
+  [data-testid="holdings"] .scroll > table { min-width: 820px; }
+  [data-testid="krw-return"] .scroll > table { min-width: 560px; }
 }

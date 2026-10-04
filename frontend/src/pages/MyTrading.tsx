@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { api, baseUrl } from "../api";
 import { Card, Disclosure, Empty, Err, Loading, Notice, Ribbon, StatePanel, Tabs } from "../components/ui";
 import { useApi } from "../components/useApi";
@@ -62,9 +62,10 @@ export default function MyTrading() {
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const loc = useLocation();  // the app runs under a HashRouter: the in-page anchor is the router's hash, not the window's
   useEffect(() => {
-    if (r.data && window.location.hash === "#rules") document.getElementById("rules")?.scrollIntoView?.({ block: "start" });
-  }, [r.data]);
+    if (r.data && loc.hash === "#rules") document.getElementById("rules")?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+  }, [r.data, loc.hash]);
   const run = async (tag: string, f: () => Promise<unknown>, done?: string) => {
     if (busy) return;
     setBusy(tag); setErr(null); setMsg(null);
@@ -88,12 +89,18 @@ export default function MyTrading() {
       </div>
       {x.is_sample
         ? <Ribbon tone="danger" cap="가상 샘플" testId="sample-banner">실제 거래가 아닌 가상 체결·가상 가격입니다. 화면 읽는 법을 보여주는 용도이며 내 계좌 분석과 섞이지 않습니다.</Ribbon>
-        : <Ribbon tone="info" cap="실제 계좌 · 읽기 전용" testId="real-banner">토스증권에서 체결된 주문(체결 수량·평균 체결가·수수료·세금)만 읽어 계산합니다. 주문을 넣거나 바꾸는 기능은 없습니다.</Ribbon>}
+        : connected && <Ribbon tone="info" cap="실제 계좌 · 읽기 전용" testId="real-banner">토스증권에서 체결된 주문(체결 수량·평균 체결가·수수료·세금)만 읽어 계산합니다. 주문을 넣거나 바꾸는 기능은 없습니다.</Ribbon>}
       <Err error={err} />
       {msg && <Notice tone="info">{msg}</Notice>}
       {!connected ? (
-        <StatePanel kind="insufficient" title="토스증권을 연결하면 내 매매를 진단합니다" what="체결 기록이 있어야 왜 손해가 나는지, 어떤 규칙이 필요한지 계산할 수 있습니다."
-          actions={<><Link className="btn primary" to="/settings">토스증권 연결</Link><button onClick={() => setSample(true)}>가상 샘플로 화면 보기</button></>} />
+        <>
+          <StatePanel kind="insufficient" title="토스증권을 연결하면 내 매매를 진단합니다" what="토스증권이 연결되지 않아 체결 기록을 읽지 않았습니다."
+            unknown="승률·평균 손실·물타기·본전 탈출처럼 실제 사고판 기록이 있어야 나오는 진단은 아직 계산할 수 없습니다."
+            todo="설정에서 토스증권을 연결하세요(조회 전용). 그 전에도 아래 '내 매매 규칙'은 정해 둘 수 있고, 이 앱에 입력한 보유 종목에 바로 적용됩니다."
+            actions={<><Link className="btn primary" to="/settings">토스증권 연결</Link><button onClick={() => setSample(true)}>가상 샘플로 화면 보기</button></>} />
+          <HoldingPlans />
+          <RulesCard x={x} onSaved={r.reload} />
+        </>
       ) : (
         <>
           <WhyLosing x={x} />

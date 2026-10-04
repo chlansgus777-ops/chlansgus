@@ -273,9 +273,11 @@ def holding_plan(h: HoldingState, r: TradeRules) -> dict[str, Any]:
         "app_target": h.app_target, "rules_saved": r.saved_at is not None, "notes": [],
     }
     notes = plan["notes"]
-    if h.opened is None:
-        notes.append("이 포지션을 처음 산 체결이 조회 기간에 없어 추가매수 횟수·고점은 확인한 범위에서만 계산")
-    if h.high_since_open is None:
+    if h.opened is None and h.high_since_open is None:
+        notes.append("첫 매수 기록이 없어 추가매수 횟수는 확인한 범위에서만 세고, 매수 후 고점(추적 손절)은 계산하지 않음")
+    elif h.opened is None:
+        notes.append("첫 매수 기록이 없어 추가매수 횟수·고점은 확인한 범위에서만 계산")
+    elif h.high_since_open is None:
         notes.append("매수 이후 고점 기록이 없어 추적 손절은 계산하지 않음")
     p = h.price
     if p is None:

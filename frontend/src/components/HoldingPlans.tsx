@@ -12,7 +12,7 @@ export interface Plan {
   opened: string | null; app_action: string | null; app_stop: number | null; app_target: number | null; rules_saved: boolean; notes: string[];
   action: "STOP" | "TRAIL" | "TAKE1" | "ADD" | "HOLD" | "NO_PRICE"; action_ko: string; detail: string;
 }
-export interface PlansView { plans: Plan[]; rules: Record<string, number | string | boolean | null>; rules_saved: boolean; connected: boolean; at: string }
+export interface PlansView { plans: Plan[]; rules: Record<string, number | string | boolean | null>; rules_saved: boolean; connected: boolean; source?: "toss" | "app"; at: string }
 
 export const ACTION_TONE: Record<Plan["action"], string> = { STOP: "neg", TRAIL: "sell", TAKE1: "pos", ADD: "buy", HOLD: "", NO_PRICE: "muted" };
 const ACTION_ICON: Record<Plan["action"], string> = { STOP: "■", TRAIL: "▼", TAKE1: "▲", ADD: "+", HOLD: "●", NO_PRICE: "?" };
@@ -171,8 +171,8 @@ export function RulePreview({ ticker, rules, saved, pv }: { ticker: string; rule
 export function HoldingPlans({ ticker, actionsOnly, preview }: { ticker?: string; actionsOnly?: boolean; preview?: Preview }) {
   const p = useApi<PlansView>(ticker ? `/habits/plans?ticker=${encodeURIComponent(ticker)}` : "/habits/plans", [ticker]);
   usePoll(p.reload, 15_000);
-  const x = p.data;
-  if (x && ticker && preview && !x.plans.length && preview.price !== null) {
+  const x = p.data && Array.isArray(p.data.plans) ? p.data : null;  // an older server (or none): nothing to show
+  if (x && ticker && preview && !x.plans.length && preview.price !== null && x.rules) {
     return (
       <Card title="내 규칙으로 산다면" testId="plan-preview" explain="아직 보유하지 않은 종목입니다. 지금 가격에 산다고 가정하고 '내 매매 규칙'을 적용한 매수 전 계획입니다. MarketLens는 주문을 넣지 않습니다."
         right={<Link className="btn sm" to="/performance?view=mine#rules">규칙 바꾸기</Link>}>
@@ -180,7 +180,7 @@ export function HoldingPlans({ ticker, actionsOnly, preview }: { ticker?: string
       </Card>
     );
   }
-  if (!x || !x.connected || !x.plans.length) return null;
+  if (!x || !x.plans.length) return null;
   const rows = actionsOnly ? x.plans.filter((r) => r.action !== "HOLD") : x.plans;
   if (actionsOnly && !rows.length) return null;
   const acting = x.plans.filter((r) => r.action !== "HOLD" && r.action !== "NO_PRICE").length;
@@ -189,6 +189,7 @@ export function HoldingPlans({ ticker, actionsOnly, preview }: { ticker?: string
     <Card title={title} testId={ticker ? "plan-one" : actionsOnly ? "plan-actions" : "plans"}
       explain="저장한 '내 매매 규칙'을 지금 가격에 그대로 적용한 결과입니다. 가격이 손절·익절·추가매수 가격에 닿으면 알림(종 아이콘)으로도 알려드립니다. MarketLens는 주문을 넣지 않습니다 — 실행은 직접 하세요."
       right={<div className="row tight">{!ticker && <span className="caption">{acting ? `행동 필요 ${acting}종목` : "모두 보유 유지"}</span>}<Link className="btn sm" to="/performance?view=mine#rules">규칙 바꾸기</Link></div>}>
+      {x.source === "app" && !actionsOnly && <Notice tone="info">토스증권이 연결되지 않아 이 앱에 입력한 보유(직접 입력·거래 기록) 기준으로 계산했습니다. 매수 이후 고점·추가매수 횟수는 거래 기록이 있을 때만 반영됩니다.</Notice>}
       {!x.rules_saved && <Notice tone="info">아직 내 규칙을 저장하지 않아 기본값(평단 −7% 손절, +10%에서 절반 익절, 수익 중일 때만 추가매수)으로 계산했습니다. <Link to="/performance?view=mine#rules">내 거래 기록으로 만든 제안값 보기 →</Link></Notice>}
       <div className={`plan-grid${rows.length === 1 ? " one" : ""}`}>{rows.map((r) => <PlanCard key={r.symbol} p={r} />)}</div>
     </Card>

@@ -145,3 +145,17 @@ def test_rule_alerts_reach_the_alert_center_on_a_live_price(account):
     rows = [a for a in c.get("/api/alerts").json()["alerts"] if a["kind"].startswith("RULE_")]
     assert len(rows) == 1 and rows[0]["kind"] == "RULE_STOP" and rows[0]["ticker"] == "NVDA" and "$99.75" in rows[0]["text"]
     assert fake.secret not in rows[0]["text"]
+
+
+def test_without_a_broker_the_rules_apply_to_the_holdings_entered_in_the_app(world):  # noqa: F811, ANN001
+    """No Toss account: a holding entered in the app (manual line or trade records) still gets its stop, take-profit
+    and add level under the rules — and a live price below the stop is announced."""
+    c, svc, _fake, _keys = world  # never connected
+    assert c.put("/api/portfolio", json={"cash": 1000, "holdings": [{"ticker": "MK0001", "quantity": 10, "cost_basis": 200}]}).status_code == 200
+    r = c.get("/api/habits/plans").json()
+    assert r["connected"] is False and r["source"] == "app"
+    p = next(x for x in r["plans"] if x["symbol"] == "MK0001")
+    assert p["stop"] == pytest.approx(186.0) and p["take1"] == pytest.approx(220.0) and p["action"] in ("HOLD", "ADD", "TAKE1", "STOP")
+    assert svc.rule_watch.load() == 1
+    svc._on_price("MK0001", 185.0, svc.now())
+    assert any(a["kind"] == "RULE_STOP" and a["ticker"] == "MK0001" for a in c.get("/api/alerts").json()["alerts"])
