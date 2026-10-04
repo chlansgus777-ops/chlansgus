@@ -12,7 +12,7 @@ body:has(.glance):not(:has(.glance.desk)) { background: #07080b; }
   --g-1: #f4f2ff; --g-2: #c3bfdc; --g-3: #908cab; --g-line: rgba(220, 212, 255, 0.09); --g-edge: rgba(220, 212, 255, 0.14);
   --g-pos: #7ee8c3; --g-neg: #ff9db4; --g-warn: #ffd68a; --g-accent: #b9a8ff;
   --g-pos-bg: rgba(126, 232, 195, 0.12); --g-neg-bg: rgba(255, 157, 180, 0.12); --g-warn-bg: rgba(255, 214, 138, 0.12); --g-acc-bg: rgba(185, 168, 255, 0.13);
-  position: relative; box-sizing: border-box; display: flex; flex-direction: column; width: 360px; min-height: 500px; padding: 0 20px 14px;
+  position: relative; box-sizing: border-box; display: flex; flex-direction: column; width: 360px; min-height: 540px; padding: 0 20px 14px;
   border-radius: 26px; border: 1px solid var(--g-edge); color: var(--g-1);
   background: radial-gradient(120% 60% at 0% 0%, rgba(185, 168, 255, 0.16) 0%, transparent 60%),
               radial-gradient(90% 50% at 100% 100%, rgba(126, 232, 195, 0.07) 0%, transparent 60%),
@@ -53,7 +53,25 @@ body:has(.glance):not(:has(.glance.desk)) { background: #07080b; }
 .glance .gl-opt button.on, .glance .gl-opt button.on:hover { background: var(--g-accent); } .gl-opt button.on i { transform: translateX(14px); }
 .gl-opt input { width: 84px; height: 28px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--g-line); background: rgba(255, 255, 255, 0.04); color: var(--g-1); font: 600 12.5px/1 inherit; text-transform: uppercase; outline: none; }
 
-.gl-body { display: flex; flex-direction: column; flex: 1; }
+.gl-body { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; }
+.gl-head, .gl-menu { z-index: 2; }
+
+/* ---- waves: decoration along the bottom edge, behind the content */
+.gl-waves { position: absolute; left: 0; right: 0; bottom: 0; height: 74px; overflow: hidden; pointer-events: none; z-index: 0; }
+.gl-waves svg { position: absolute; bottom: 0; left: 0; width: 200%; height: 100%; will-change: transform; }
+.gl-waves path { fill: var(--wave, #b9a8ff); }
+.gl-waves .w1 { opacity: 0.16; animation: gl-wave 14s linear infinite; }
+.gl-waves .w2 { opacity: 0.11; height: 78%; animation: gl-wave 22s linear infinite reverse; }
+.gl-waves.pos { --wave: #7ee8c3; } .gl-waves.neg { --wave: #ff9db4; }
+@keyframes gl-wave { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+/* ---- my account: one slim line */
+.gl-acct { display: flex; align-items: baseline; gap: 12px; margin-top: 7px; padding: 8px 14px; border-radius: 999px; background: var(--g-well); font-size: 12.5px; }
+.gl-ak { color: var(--g-3); font-weight: 600; }
+.gl-av { color: var(--g-2); } .gl-av b { color: var(--g-1); font-weight: 750; }
+.gl-av b.pos { color: var(--g-pos); } .gl-av b.neg { color: var(--g-neg); }
+.gl-astale { margin-left: auto; color: var(--g-warn); font-size: 11px; }
+.glance .gl-acct:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); }
 
 /* ---- market: a quiet band, read second */
 .gl-market { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 20px; background: var(--g-well); border: 1px solid var(--g-line); }
@@ -61,12 +79,16 @@ body:has(.glance):not(:has(.glance.desk)) { background: #07080b; }
 .gl-market.neg { background: linear-gradient(135deg, var(--g-neg-bg), var(--g-well) 70%); }
 .gl-market.warn { background: linear-gradient(135deg, var(--g-warn-bg), var(--g-well) 70%); }
 .gl-mcol { display: grid; flex: 1; gap: 8px; min-width: 0; }
-.gl-buddy { flex: none; width: 44px; height: 44px; }
-.gl-buddy .body { fill: #d9d4ee; }
-.gl-buddy.pos .body { fill: var(--g-pos); } .gl-buddy.neg .body { fill: var(--g-neg); } .gl-buddy.warn .body { fill: var(--g-warn); } .gl-buddy.flat .body { fill: #cfc8f2; }
-.gl-buddy .eye, .gl-buddy .mouth, .gl-buddy .eye-l { fill: none; stroke: #2a2540; stroke-width: 1.8; stroke-linecap: round; }
-.gl-buddy .eye { fill: #2a2540; stroke: none; } .gl-buddy .shine { fill: #fff; }
-.gl-buddy .cheek { fill: #ff8fae; opacity: 0.55; }
+.gl-buddy { flex: none; width: 48px; height: 48px; overflow: visible; }
+.gl-buddy .ring { fill: rgba(220, 212, 255, 0.14); }
+.gl-buddy.pos .ring { fill: rgba(126, 232, 195, 0.32); } .gl-buddy.neg .ring { fill: rgba(255, 157, 180, 0.32); } .gl-buddy.warn .ring { fill: rgba(255, 214, 138, 0.32); }
+.gl-buddy .body, .gl-buddy .ear { fill: #fffdfa; stroke: #3a3350; stroke-width: 1.2; }
+.gl-buddy .ear-in { fill: #ffd3de; }
+.gl-buddy .cheek { fill: #ff9fb8; opacity: 0.6; }
+.gl-buddy .eye { fill: #2b2540; } .gl-buddy .shine { fill: #fff; }
+.gl-buddy .line { fill: none; stroke: #2b2540; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.gl-buddy .line.thin { stroke-width: 1.2; }
+.gl-buddy .tear { fill: #9fd4ff; }
 .gl-mstate { display: flex; align-items: baseline; gap: 7px; min-width: 0; font-size: 13px; }
 .gl-mk { color: var(--g-3); font-weight: 550; white-space: nowrap; }
 .gl-mv { color: var(--g-1); font-weight: 750; white-space: nowrap; }
@@ -83,7 +105,7 @@ body:has(.glance):not(:has(.glance.desk)) { background: #07080b; }
 .gl-metrics .pos { color: var(--g-pos); } .gl-metrics .neg { color: var(--g-neg); }
 
 /* ---- focus: the centre */
-.gl-focus { display: flex; flex-direction: column; flex: 1; padding-top: 16px; border-radius: 12px; transition: background 500ms ease, box-shadow 500ms ease; }
+.gl-focus { display: flex; flex-direction: column; flex: 1; padding-top: 14px; border-radius: 12px; transition: background 500ms ease, box-shadow 500ms ease; }
 .glance .gl-focus.flash { background: rgba(165, 151, 249, 0.06); box-shadow: 0 0 0 1px rgba(165, 151, 249, 0.3); }
 .gl-fhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
 .gl-name { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
@@ -144,4 +166,4 @@ body:has(.glance):not(:has(.glance.desk)) { background: #07080b; }
 .gl-loading p { margin: 0; }
 .gl-loading .gl-market { margin-bottom: 8px; }
 
-@media (prefers-reduced-motion: reduce) { .glance *, .glance { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { .glance *, .glance { transition: none !important; } .gl-waves svg { animation: none !important; } }

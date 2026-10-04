@@ -101,7 +101,7 @@ fn spawn_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 // ------------------------------------------------------------------ GLANCE MODE (a frameless desktop widget)
 const GLANCE: &str = "glance";
 const GLANCE_W: f64 = 360.0;
-const GLANCE_H: f64 = 500.0;
+const GLANCE_H: f64 = 540.0;
 
 fn api_init_script(app: &AppHandle) -> String {
     let st = app.state::<Backend>();

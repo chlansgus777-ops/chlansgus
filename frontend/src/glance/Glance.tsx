@@ -5,6 +5,7 @@ import { quantityShown } from "../advice";
 import { ACTION_INFO, REGIME_KO } from "../i18n";
 import { splitCandidates, type Dash } from "../pages/Dashboard";
 import type { LiveJudgement } from "../components/liveBoard";
+import type { AccountLive } from "../components/AccountLive";
 import type { StockDetail, SystemInfo } from "../types";
 import { FOCUS_STORAGE_KEY, closeGlance, focusSymbol, isDesktop, openAnalyze, saveOnTop, savedOnTop, setAlwaysOnTop, setFocusSymbol } from "./desktop";
 import "./glance.css";
@@ -24,10 +25,15 @@ export default function Glance() {
   const focus = useFocus(dash.data);
   const others = candidates(dash.data, focus);
   useViewQuotes(["SPY", "QQQ", focus, ...others]);
+  const [showAcct] = usePref(ACCT_KEY);
+  const acct = useApi<AccountLive>(showAcct ? "/portfolio/live" : null);
+  usePoll(acct.reload, 10_000, showAcct);  // the widget needs the account every few seconds, not every second
+  const acctTotals = showAcct && acct.data?.totals && acct.data.totals.count > 0 ? acct.data.totals : null;
   const delayed = !!(sys.error || dash.error || macro.error);
+  const waveTone = acctTotals?.daily_rate != null ? tone(acctTotals.daily_rate) || "flat" : "flat";
   if (!sys.data && !dash.data) {
     return (
-      <Shell session={null} delayed={false}>
+      <Shell session={null} delayed={false} wave="flat">
         <div className="gl-loading" aria-busy="true">
           <div className="gl-market idle"><Buddy mood="sleep" /><p>시장 상태를 불러오는 중…</p></div>
           <div className="gl-ph w40" /><div className="gl-ph w70" /><div className="gl-ph spark" />
@@ -36,8 +42,9 @@ export default function Glance() {
     );
   }
   return (
-    <Shell session={sys.data?.market?.session ?? null} delayed={delayed}>
+    <Shell session={sys.data?.market?.session ?? null} delayed={delayed} wave={waveTone}>
       <Market d={dash.data} m={macro.data} />
+      {acctTotals && <Account t={acctTotals} live={!!acct.data?.live && !acct.error} />}
       {focus ? <Focus ticker={focus} others={others} /> : <div className="gl-quiet">종목 화면을 열면 그 종목을 여기서 따라갑니다</div>}
     </Shell>
   );
@@ -49,11 +56,13 @@ const SESSION: Record<string, { label: string; tone: string }> = {
   OVERNIGHT: { label: "야간", tone: "pre" }, CLOSED: { label: "장 마감", tone: "off" },
 };
 
-function Shell({ session, delayed, children }: { session: string | null; delayed: boolean; children: React.ReactNode }) {
+function Shell({ session, delayed, wave, children }: { session: string | null; delayed: boolean; wave: string; children: React.ReactNode }) {
   const s = session ? SESSION[session] : null;
   const [menu, setMenu] = useState(false);
+  const [waves] = usePref(WAVE_KEY);
   return (
     <div className={`glance${isDesktop() ? " desk" : ""}`} data-testid="glance">
+      {waves && <Waves tone={wave} />}
       <header className="gl-head" data-tauri-drag-region>
         <span className="gl-brand" data-tauri-drag-region><i aria-hidden />MarketLens</span>
         <span className="gl-session" data-tauri-drag-region title={delayed ? "일부 데이터 갱신 지연 — 마지막 값을 표시합니다" : undefined}>
@@ -80,6 +89,8 @@ function Shell({ session, delayed, children }: { session: string | null; delayed
 function Menu({ onClose }: { onClose: () => void }) {
   const [top, setTop] = useState(savedOnTop);
   const [sym, setSym] = useState(focusSymbol() ?? "");
+  const [waves, setWaves] = usePref(WAVE_KEY);
+  const [acct, setAcct] = usePref(ACCT_KEY);
   return (
     <div className="gl-menu" role="dialog" aria-label="Glance 설정" onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}>
       {isDesktop() && (
@@ -88,10 +99,61 @@ function Menu({ onClose }: { onClose: () => void }) {
             onClick={() => { const v = !top; setTop(v); saveOnTop(v); void setAlwaysOnTop(v); }}><i /></button>
         </div>
       )}
+      <div className="gl-opt"><span>물결 효과</span>
+        <button type="button" role="switch" aria-checked={waves} aria-label="물결 효과" className={waves ? "on" : ""} onClick={() => setWaves(!waves)}><i /></button>
+      </div>
+      <div className="gl-opt"><span>내 계좌 수익률</span>
+        <button type="button" role="switch" aria-checked={acct} aria-label="내 계좌 수익률 표시" className={acct ? "on" : ""} onClick={() => setAcct(!acct)}><i /></button>
+      </div>
       <form className="gl-opt" onSubmit={(e) => { e.preventDefault(); if (sym.trim()) followSymbol(sym.trim()); onClose(); }}>
         <span>따라갈 종목</span><input aria-label="따라갈 종목" value={sym} onChange={(e) => setSym(e.target.value.toUpperCase())} placeholder="NVDA" maxLength={12} />
       </form>
     </div>
+  );
+}
+
+/** On/off preferences of the widget (this computer only), shared live between the menu and the view. */
+const WAVE_KEY = "ml.glance.waves", ACCT_KEY = "ml.glance.account";
+function usePref(key: string, dflt = true): [boolean, (v: boolean) => void] {
+  const read = () => { try { const v = localStorage.getItem(key); return v === null ? dflt : v === "1"; } catch { return dflt; } };
+  const [v, setV] = useState(read);
+  useEffect(() => {
+    const on = () => setV(read());
+    window.addEventListener("ml-glance-pref", on);
+    window.addEventListener("storage", on);
+    return () => { window.removeEventListener("ml-glance-pref", on); window.removeEventListener("storage", on); };
+  });
+  return [v, (nv: boolean) => {
+    try { localStorage.setItem(key, nv ? "1" : "0"); } catch { /* storage unavailable: this session only */ }
+    setV(nv);
+    window.dispatchEvent(new Event("ml-glance-pref"));
+  }];
+}
+
+/** Two slow waves along the bottom edge — decoration only; their colour follows today's account move (mint up, pink
+ * down, lavender otherwise). Pure CSS transforms; stopped under reduced motion and switchable in the menu. */
+function Waves({ tone: t }: { tone: string }) {
+  const path = "M0 18 Q 45 6 90 18 T 180 18 T 270 18 T 360 18 T 450 18 T 540 18 T 630 18 T 720 18 V 60 H 0 Z";
+  return (
+    <div className={`gl-waves ${t}`} aria-hidden>
+      <svg viewBox="0 0 720 60" preserveAspectRatio="none" className="w1"><path d={path} /></svg>
+      <svg viewBox="0 0 720 60" preserveAspectRatio="none" className="w2"><path d={path} /></svg>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ my account (optional)
+/** The account's own total and today's return, as /portfolio/live counts them (the Toss app's basis) — percentages only,
+ * no amounts or account details on an always-visible widget. */
+function Account({ t, live }: { t: AccountLive["totals"]; live: boolean }) {
+  if (t.pnl_rate == null && t.daily_rate == null) return null;
+  return (
+    <button type="button" className="gl-acct" onClick={() => void openAnalyze("/portfolio")} data-testid="glance-account" title="포트폴리오 화면 열기">
+      <span className="gl-ak">내 계좌</span>
+      {t.pnl_rate != null && <span className="gl-av">총 <b className={tone(t.pnl_rate)}>{signed(t.pnl_rate)}</b></span>}
+      {t.daily_rate != null && <span className="gl-av">오늘 <b className={tone(t.daily_rate)}>{signed(t.daily_rate)}</b></span>}
+      {!live && <span className="gl-astale">지연</span>}
+    </button>
   );
 }
 
@@ -352,21 +414,30 @@ function Sparkline({ values }: { values: number[] }) {
   );
 }
 
-/** A small round companion whose face is the market state above — the same four states, nothing more (never a new
- * judgement): smiling for 위험 선호, calm for 중립, a wobbly mouth for 주의, a frown for 위험 회피, asleep while the
- * state is not known yet. Static: no blinking, no loop. */
+/** A small white round critter (an original drawing) whose face is the market state above — the same four states,
+ * nothing more (never a new judgement): beaming for 위험 선호, calm for 중립, worried brows for 주의, teary for 위험
+ * 회피, asleep while the state is not known yet. The ring behind it carries the state's colour. */
 function Buddy({ mood }: { mood: string }) {
-  const mouth: Record<string, string> = {
-    pos: "M13 20.5 Q18 25 23 20.5", flat: "M14 21.5 L22 21.5", warn: "M13.5 22 Q15.75 20 18 22 Q20.25 24 22.5 22", neg: "M13 23.5 Q18 19 23 23.5", sleep: "M15.5 22 Q18 23.5 20.5 22",
-  };
   const sleepy = mood === "sleep";
+  const mouth: Record<string, string> = {
+    pos: "M21 29.5 Q24 32.5 27 29.5", flat: "M22 30.2 Q24 31.4 26 30.2", warn: "M21.5 31 Q24 29.4 26.5 31", neg: "M21.5 31.6 Q24 28.8 26.5 31.6", sleep: "M22.5 30.4 Q24 31.2 25.5 30.4",
+  };
   return (
-    <svg className={`gl-buddy ${mood}`} viewBox="0 0 36 36" aria-hidden>
-      <circle cx="18" cy="18" r="17" className="body" />
-      <ellipse cx="11" cy="21.5" rx="2.6" ry="1.6" className="cheek" /><ellipse cx="25" cy="21.5" rx="2.6" ry="1.6" className="cheek" />
-      {sleepy ? <><path d="M11.5 15.5 Q13.5 17 15.5 15.5" className="eye-l" /><path d="M20.5 15.5 Q22.5 17 24.5 15.5" className="eye-l" /></>
-        : <><circle cx="13.5" cy="15.5" r="2" className="eye" /><circle cx="22.5" cy="15.5" r="2" className="eye" /><circle cx="14.2" cy="14.8" r="0.6" className="shine" /><circle cx="23.2" cy="14.8" r="0.6" className="shine" /></>}
-      <path d={mouth[mood] ?? mouth.flat} className="mouth" />
+    <svg className={`gl-buddy ${mood}`} viewBox="0 0 48 48" aria-hidden>
+      <circle cx="24" cy="25" r="22" className="ring" />
+      <circle cx="13.5" cy="12.5" r="5" className="ear" /><circle cx="34.5" cy="12.5" r="5" className="ear" />
+      <circle cx="13.5" cy="12.5" r="2.4" className="ear-in" /><circle cx="34.5" cy="12.5" r="2.4" className="ear-in" />
+      <ellipse cx="24" cy="27" rx="16.5" ry="14.5" className="body" />
+      <ellipse cx="14.5" cy="30" rx="3.2" ry="2" className="cheek" /><ellipse cx="33.5" cy="30" rx="3.2" ry="2" className="cheek" />
+      {sleepy ? <><path d="M16.5 25 Q18.5 26.6 20.5 25" className="line" /><path d="M27.5 25 Q29.5 26.6 31.5 25" className="line" /></>
+        : <>
+            {mood === "pos" ? <><path d="M16.5 25.5 Q18.5 22.8 20.5 25.5" className="line" /><path d="M27.5 25.5 Q29.5 22.8 31.5 25.5" className="line" /></>
+              : <><ellipse cx="18.5" cy="25" rx="1.9" ry="2.3" className="eye" /><ellipse cx="29.5" cy="25" rx="1.9" ry="2.3" className="eye" />
+                  <circle cx="19.1" cy="24.2" r="0.7" className="shine" /><circle cx="30.1" cy="24.2" r="0.7" className="shine" /></>}
+            {mood === "warn" && <><path d="M16 20.6 L20.2 21.6" className="line thin" /><path d="M32 20.6 L27.8 21.6" className="line thin" /></>}
+            {mood === "neg" && <><path d="M16 21.8 L20.2 20.6" className="line thin" /><path d="M32 21.8 L27.8 20.6" className="line thin" /><path d="M31.6 28 q0.9 1.8 0 2.6 q-0.9 -0.8 0 -2.6" className="tear" /></>}
+          </>}
+      <path d={mouth[mood] ?? mouth.flat} className="line" />
     </svg>
   );
 }

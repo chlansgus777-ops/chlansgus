@@ -12,6 +12,7 @@ let fail = new Set<string>();
 let liveBody: unknown;
 let detailBody: unknown;
 let candidates: unknown[];
+let acctBody: unknown;
 const calls: string[] = [];
 
 beforeEach(() => {
@@ -19,6 +20,7 @@ beforeEach(() => {
   fail = new Set();
   calls.length = 0;
   candidates = [];
+  acctBody = {};
   localStorage.setItem("ml.focus", "ANET");
   liveBody = { live: { action: "WAIT", price: 201.82, max_buy: 196, stop: 188, target1: 230, rr: 2.1, current_status: "CURRENT", actionable_now: null, session: "REGULAR" } };
   detailBody = {
@@ -34,6 +36,7 @@ beforeEach(() => {
     if (u.startsWith("/system")) return new Response(JSON.stringify({ mode: "LIVE", market: { session: "REGULAR" } }));
     if (u.startsWith("/dashboard")) return new Response(JSON.stringify({ regime: { primary: "Neutral", readings: [{ regime: "Neutral", score: 1, confidence: 0.72, evidence: [] }] }, top_opportunities: candidates, upcoming_catalysts: [] }));
     if (u.startsWith("/macro")) return new Response(JSON.stringify({ available: true, series: { VIX: { latest: { value: 17.4, quality: "FRESH" }, pct_change_20d: null }, US10Y: { latest: { value: 4.12, quality: "FRESH" }, pct_change_20d: null } } }));
+    if (u.startsWith("/portfolio/live")) return new Response(JSON.stringify(acctBody));
     if (u.startsWith("/stocks/ANET/live")) return new Response(JSON.stringify(liveBody));
     if (u.startsWith("/stocks/ANET")) return new Response(JSON.stringify(detailBody));
     return new Response("{}");
@@ -111,4 +114,24 @@ it("a few other candidates sit in one line, and picking one makes it the focus",
   expect(names).not.toContain("ANET");  // the focus itself is not repeated
   act(() => { (others.querySelector("button") as HTMLButtonElement).click(); });
   expect(localStorage.getItem("ml.focus")).toBe(names[0]);
+});
+
+it("shows the account's own total and today's return as percentages only, and the menu can hide it", async () => {
+  acctBody = { at: "x", live: true, rows: [], notes: [], totals: { count: 2, valued: 2, daily_count: 2, value: 12345.67, purchase: 1, pnl: 456.78, pnl_rate: 0.0324, daily: -50.5, daily_rate: -0.0041 } };
+  show();
+  const row = await screen.findByTestId("glance-account");
+  expect(row.textContent).toContain("총 +3.24%");
+  expect(row.textContent).toContain("오늘 −0.41%");
+  expect(row.textContent).not.toMatch(/12,345|456|\$/);  // no amounts on an always-visible widget
+  act(() => { screen.getByRole("button", { name: "Glance 설정" }).click(); });
+  act(() => { screen.getByRole("switch", { name: "내 계좌 수익률 표시" }).click(); });
+  await waitFor(() => expect(screen.queryByTestId("glance-account")).toBeNull());
+  expect(localStorage.getItem("ml.glance.account")).toBe("0");
+});
+
+it("an empty account (nothing held or no data) shows no account line", async () => {
+  acctBody = { at: "x", live: true, rows: [], notes: [], totals: { count: 0, valued: 0, daily_count: 0, value: null, purchase: null, pnl: null, pnl_rate: null, daily: null, daily_rate: null } };
+  show();
+  await screen.findByTestId("glance-action");
+  expect(screen.queryByTestId("glance-account")).toBeNull();
 });
