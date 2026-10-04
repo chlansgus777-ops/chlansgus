@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { setFocusSymbol } from "../glance/desktop";
 import { advise, planNow, priceZone, quantityShown } from "../advice";
 import { api } from "../api";
 import { CommitteeSummary, CommitteeView } from "../components/CommitteeView";
@@ -91,6 +92,7 @@ function PositionPlanView({ p, shown, why, live }: { p?: PositionPlan; shown: bo
 
 export default function StockDetailPage() {
   const { ticker = "" } = useParams();
+  useEffect(() => { if (ticker) setFocusSymbol(ticker); }, [ticker]);  // Glance follows the last stock opened
   return <StockDetail key={ticker.toUpperCase()} ticker={ticker.toUpperCase()} />;
 }
 

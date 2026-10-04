@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
@@ -98,6 +98,141 @@ fn spawn_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// ------------------------------------------------------------------ GLANCE MODE (a frameless desktop widget)
+const GLANCE: &str = "glance";
+const GLANCE_W: f64 = 320.0;
+const GLANCE_H: f64 = 470.0;
+
+fn api_init_script(app: &AppHandle) -> String {
+    let st = app.state::<Backend>();
+    format!("if (location.hostname === 'tauri.localhost' || (location.protocol === 'tauri:' && location.hostname === 'localhost') || ({} && location.origin === 'http://localhost:5173')) {{ window.__MARKETLENS_API__ = 'http://127.0.0.1:{}'; window.__MARKETLENS_TOKEN__ = '{}'; }}",
+        cfg!(debug_assertions), st.port, st.token)
+}
+
+/// Last position, size and always-on-top of the Glance window (app config dir; restored on the next open).
+#[derive(Clone, Copy)]
+struct GlanceGeom { x: i32, y: i32, w: u32, h: u32, on_top: bool }
+
+fn geom_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("glance.json"))
+}
+
+fn load_geom(app: &AppHandle) -> Option<GlanceGeom> {
+    let raw = std::fs::read_to_string(geom_path(app)?).ok()?;
+    let num = |k: &str| -> Option<i64> {
+        let i = raw.find(&format!("\"{k}\":"))? + k.len() + 3;
+        let rest = raw[i..].trim_start();
+        let end = rest.find(|c: char| !(c == '-' || c.is_ascii_digit())).unwrap_or(rest.len());
+        rest[..end].parse().ok()
+    };
+    Some(GlanceGeom { x: num("x")? as i32, y: num("y")? as i32, w: num("w")?.max(1) as u32, h: num("h")?.max(1) as u32,
+                      on_top: !raw.contains("\"on_top\":false") })
+}
+
+fn save_geom(app: &AppHandle, g: GlanceGeom) {
+    if let Some(p) = geom_path(app) {
+        if let Some(dir) = p.parent() { let _ = std::fs::create_dir_all(dir); }
+        let _ = std::fs::write(p, format!("{{\"x\":{},\"y\":{},\"w\":{},\"h\":{},\"on_top\":{}}}", g.x, g.y, g.w, g.h, g.on_top));
+    }
+}
+
+/// A saved position is used only when the window's top strip lands on a monitor that is connected now
+/// (a monitor unplugged since would otherwise put the widget off screen).
+fn on_some_monitor(app: &AppHandle, g: &GlanceGeom) -> bool {
+    let Some(w) = app.get_webview_window("main") else { return false };
+    let Ok(monitors) = w.available_monitors() else { return false };
+    monitors.iter().any(|m| {
+        let (p, s) = (m.position(), m.size());
+        let (cx, cy) = (g.x + (g.w as i32).min(200) / 2, g.y + 20);
+        cx >= p.x && cx < p.x + s.width as i32 && cy >= p.y && cy < p.y + s.height as i32
+    })
+}
+
+#[tauri::command]
+fn glance_open(app: AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(GLANCE) {
+        let _ = w.unminimize();
+        let _ = w.show();
+        return w.set_focus().map_err(|e| e.to_string());
+    }
+    let saved = load_geom(&app);
+    let on_top = saved.map(|g| g.on_top).unwrap_or(true);
+    // the route is set by the init script (a '#' in the App path could be escaped into the file name)
+    let init = format!("{} if (!location.hash || location.hash === '#/') {{ history.replaceState(null, '', '#/glance'); }}", api_init_script(&app));
+    let w = WebviewWindowBuilder::new(&app, GLANCE, WebviewUrl::App("index.html".into()))
+        .title("MarketLens Glance")
+        .inner_size(GLANCE_W, GLANCE_H)
+        .min_inner_size(280.0, 380.0)
+        .max_inner_size(480.0, 760.0)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .resizable(true)
+        .always_on_top(on_top)
+        .initialization_script(&init)
+        .on_navigation(is_app_url)
+        .build()
+        .map_err(|e| e.to_string())?;
+    match saved {
+        Some(g) if on_some_monitor(&app, &g) => {
+            let _ = w.set_size(PhysicalSize::new(g.w, g.h));
+            let _ = w.set_position(PhysicalPosition::new(g.x, g.y));
+        }
+        _ => {
+            // first open (or the saved monitor is gone): the right edge of the main window's monitor
+            if let Ok(Some(m)) = w.current_monitor() {
+                let (p, s) = (m.position(), m.size());
+                let ws = w.outer_size().unwrap_or(PhysicalSize::new(GLANCE_W as u32, GLANCE_H as u32));
+                let _ = w.set_position(PhysicalPosition::new(p.x + s.width as i32 - ws.width as i32 - 24, p.y + 80));
+            }
+        }
+    }
+    let handle = app.clone();
+    w.on_window_event(move |e| {
+        if matches!(e, WindowEvent::Moved(_) | WindowEvent::Resized(_)) {
+            if let Some(w) = handle.get_webview_window(GLANCE) {
+                if let (Ok(p), Ok(s)) = (w.outer_position(), w.inner_size()) {
+                    let on_top = load_geom(&handle).map(|g| g.on_top).unwrap_or(true);
+                    save_geom(&handle, GlanceGeom { x: p.x, y: p.y, w: s.width, h: s.height, on_top });
+                }
+            }
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn glance_close(app: AppHandle) -> Result<(), String> {
+    match app.get_webview_window(GLANCE) {
+        Some(w) => w.close().map_err(|e| e.to_string()),
+        None => Ok(()),
+    }
+}
+
+#[tauri::command]
+fn glance_set_on_top(app: AppHandle, on: bool) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(GLANCE) {
+        w.set_always_on_top(on).map_err(|e| e.to_string())?;
+        let (p, s) = (w.outer_position().map_err(|e| e.to_string())?, w.inner_size().map_err(|e| e.to_string())?);
+        save_geom(&app, GlanceGeom { x: p.x, y: p.y, w: s.width, h: s.height, on_top: on });
+    }
+    Ok(())
+}
+
+/// Analyze Mode at ``path`` (a route of the app, e.g. "/stocks/NVDA"): the main window, shown and focused.
+#[tauri::command]
+fn main_show(app: AppHandle, path: String) -> Result<(), String> {
+    let w = app.get_webview_window("main").ok_or("main window missing")?;
+    let _ = w.unminimize();
+    let _ = w.show();
+    let _ = w.set_focus();
+    let safe: String = path.chars().filter(|c| c.is_ascii_alphanumeric() || "/.-_?=&".contains(*c)).collect();
+    if safe.starts_with('/') {
+        let _ = w.eval(&format!("if (document.querySelector('#root')) {{ location.hash = '#{safe}'; }}"));
+    }
+    Ok(())
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -108,6 +243,7 @@ fn main() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![glance_open, glance_close, glance_set_on_top, main_show])
         .setup(|app| {
             let port = free_port();
             let token = new_token();

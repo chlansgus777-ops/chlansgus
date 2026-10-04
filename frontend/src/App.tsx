@@ -6,8 +6,9 @@ import { PhoneGate } from "./components/Phone";
 import { StatusBar, StatusProvider, useStatus } from "./components/status";
 import { BrandMark, IHelp, IHome, IMarket, IPerf, IPortfolio, ISettings, IStocks } from "./components/icons";
 import type { SystemInfo } from "./types";
-import Home from "./pages/Home";
-import { useViewMode } from "./components/viewMode";
+import Dashboard from "./pages/Dashboard";
+import Glance from "./glance/Glance";
+import { openGlance } from "./glance/desktop";
 const Stocks = lazy(() => import("./pages/Stocks"));
 const StockDetail = lazy(() => import("./pages/StockDetail"));
 const Portfolio = lazy(() => import("./pages/Portfolio"));
@@ -41,6 +42,8 @@ export function versionLabel(sys: SystemInfo): string {
 }
 
 export default function App() {
+  const loc = useLocation();
+  if (loc.pathname === "/glance") return <PhoneGate><Glance /></PhoneGate>;  // its own surface: no menu, no status bar
   return (
     <PhoneGate>
       <StatusProvider>
@@ -50,15 +53,9 @@ export default function App() {
   );
 }
 
-/** 간략 / 자세히 — how much each screen shows (remembered on this PC). */
-function ViewSwitch() {
-  const [mode, set] = useViewMode();
-  return (
-    <div className="view-switch" role="radiogroup" aria-label="화면 보기 방식" data-testid="view-switch">
-      <button type="button" role="radio" aria-checked={mode === "brief"} className={mode === "brief" ? "on" : ""} onClick={() => set("brief")}>간략</button>
-      <button type="button" role="radio" aria-checked={mode === "full"} className={mode === "full" ? "on" : ""} onClick={() => set("full")}>자세히</button>
-    </div>
-  );
+/** GLANCE MODE: the quiet desktop object (its own window on the desktop app). */
+function GlanceButton() {
+  return <button type="button" className="glance-open" onClick={() => void openGlance()} data-testid="open-glance" title="시장 상태와 관심 종목 판단만 작게 띄웁니다">Glance 모드</button>;
 }
 
 function Shell() {
@@ -77,7 +74,7 @@ function Shell() {
           </NavLink>
         ))}
         <div className="grow" />
-        <ViewSwitch />
+        <GlanceButton />
         <NavLink to="/settings" title="설정" className={({ isActive }) => `util${isActive ? " active" : ""}`}><ISettings />설정</NavLink>
         <NavLink to="/guide" title="용어·도움말" className={({ isActive }) => `util${isActive ? " active" : ""}`}><IHelp />용어·도움말</NavLink>
         <div className="foot">주문은 넣지 않습니다. 모든 매매는 직접 판단·실행하세요. 가격은 미국 달러(USD).
@@ -93,7 +90,7 @@ function Shell() {
         )}
         <main className="main" key={loc.pathname.split("/").slice(0, 2).join("/")}>
           <PageBoundary key={loc.pathname}><Suspense fallback={<Loading what="화면" rows={2} />}><Routes>
-            <Route path="/" element={<Home />} />
+            <Route path="/" element={<Dashboard />} />
             <Route path="/stocks" element={<Stocks />} />
             <Route path="/stocks/:ticker" element={<StockDetail />} />
             <Route path="/portfolio" element={<Portfolio />} />
