@@ -26,6 +26,7 @@ interface Dash {
   portfolio: { holdings: number; cash: number; cash_entered?: boolean };
   provider_health: { name: string; kind: string; status: string }[];
   performance: { equity: number; starting_capital: number; return: number | null; max_drawdown: number | null; as_of: string; curve: number[] } | null;
+  paper_counts?: Record<string, number>;
   recommendation_changes: { ticker: string; text: string; action: string }[];
   watchlist_alerts: { ticker: string; level: string; text: string }[];
   readiness?: ReadinessInfo;
@@ -71,6 +72,19 @@ export function riskLine(r: OppRow): string {
 function CardPrice({ r }: { r: OppRow }) {
   const { row } = useQuote(r.ticker);
   return row?.price != null ? <LivePrice ticker={r.ticker} size="sm" showState={false} /> : <span style={{ whiteSpace: "nowrap" }}>{price(r.price)}</span>;
+}
+
+/** Before the first result: how many paper positions exist and why there is no curve yet — never a bare "0". */
+function PaperCounts({ c }: { c?: Record<string, number> }) {
+  const n = (k: string) => c?.[k] ?? 0;
+  const total = n("PENDING") + n("OPEN") + n("CLOSED") + n("SKIPPED");
+  if (!total) return <div className="caption" data-testid="paper-none">아직 모의 포지션이 없습니다. 스캔에서 매수 계열 추천이 나오면 다음 거래일 시가에 모의로 들어가고, 장 마감 뒤 자동으로 결과를 계산합니다.</div>;
+  return (
+    <div className="caption" data-testid="paper-counts">
+      모의 포지션 {total}개 — 진입 대기 {n("PENDING")} · 보유 {n("OPEN")} · 종료 {n("CLOSED")}{n("SKIPPED") ? ` · 건너뜀 ${n("SKIPPED")}` : ""}.
+      {" "}결과 곡선은 장 마감 뒤(앱을 켜면 밀린 날까지) 자동으로 계산됩니다.
+    </div>
+  );
 }
 
 function groupBy<T>(xs: T[], key: (x: T) => string): [string, T[]][] {
@@ -321,7 +335,7 @@ export default function Dashboard() {
                 <LineChart values={x.performance.curve} height={56} />
                 <div className="caption">기준일 {day(x.performance.as_of)} · 시작 자본 {price(x.performance.starting_capital)}</div>
               </>
-            ) : <div className="caption">아직 결과가 확정된 모의 포지션이 없습니다. 성과 화면에서 ‘결과 갱신’을 누르면 계산합니다.</div>}
+            ) : <PaperCounts c={x.paper_counts} />}
           </div>
           <CoverageCard s={ss ?? null} />
           <div className="rail-card">

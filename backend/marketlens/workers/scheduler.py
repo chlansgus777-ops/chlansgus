@@ -8,7 +8,7 @@ from datetime import datetime
 
 from marketlens.application.evaluation_service import EvaluationService
 from marketlens.domain.enums import TradingSession
-from marketlens.domain.market_calendar import classify_session, last_completed_session, session_close_utc, to_ny
+from marketlens.domain.market_calendar import classify_session, last_completed_session, session_close_utc
 
 log = logging.getLogger("marketlens.scheduler")
 
@@ -24,6 +24,7 @@ class BackgroundScheduler:
         self._last_scan: datetime | None = None
         self._last_wanted: datetime | None = None
         self._last_eval_day = None
+        self._eval_failed_at: datetime | None = None
 
     def start(self) -> None:
         self._thread.start()
@@ -66,6 +67,28 @@ class BackgroundScheduler:
             why = "장전·시간외에는 판단용 현재가가 없어 정규장·장 마감 뒤에 스캔 (토스증권을 연결하면 장전·시간외에도 스캔)"
         self.svc.schedule_state = {"enabled": True, "interval_minutes": round(interval / 60), "last_auto_scan": self._last_scan.isoformat() if self._last_scan else None,
                                    "next_due": nxt.isoformat() if nxt else None, "why": why}
+
+    EVAL_KEY = "evaluation_through"  # the last completed session the results and paper account include
+    EVAL_RETRY_S = 600
+
+    def _evaluated_through(self):  # type: ignore[no-untyped-def]
+        from datetime import date
+
+        from marketlens.infrastructure.db import repository as repo
+
+        try:
+            with self.svc.sf() as s:
+                raw = repo.get_setting(s, self.EVAL_KEY)
+            return date.fromisoformat(raw) if raw else None
+        except Exception:  # noqa: BLE001 - unknown: evaluate (it is idempotent)
+            return None
+
+    def _mark_evaluated(self, day) -> None:  # type: ignore[no-untyped-def]
+        from marketlens.infrastructure.db import repository as repo
+
+        with self.svc.sf() as s:
+            repo.set_setting(s, self.EVAL_KEY, day.isoformat())
+            s.commit()
 
     def _data_ready(self) -> bool:
         try:
@@ -114,11 +137,27 @@ class BackgroundScheduler:
                 self.svc.scan_wanted = None  # this scan used the account as it is now
                 self._last_wanted = now
             self._publish(now, session, live, interval)  # the next due time at once, not a minute later
-        day = to_ny(now).date()
-        if session == TradingSession.AFTER_HOURS and self._last_eval_day != day:
-            if getattr(self.svc, "store", None) is not None:
-                self.svc.sync_market()  # LIVE: pull today's grouped daily bars / shares before evaluating
+        # results and the paper account follow every completed session — after today's close, and on the first
+        # tick after a start when the app was off at that time (owner 2026-10-04: "왜 모의투자가 0건이야" — the
+        # evaluation ran only while the app happened to be open after the US close, 05–09 KST)
+        target = last_completed_session(now)
+        if self._last_eval_day == target or (self._eval_failed_at is not None and (now - self._eval_failed_at).total_seconds() < self.EVAL_RETRY_S):
+            return
+        if self._evaluated_through() == target:
+            self._last_eval_day = target
+            return
+        if live and not self._data_ready():
+            return  # nothing to evaluate on before the data is prepared; asked again at the next tick
+        try:
+            if live:
+                self.svc.sync_market()  # LIVE: pull the completed sessions' grouped daily bars / shares before evaluating
             ev = EvaluationService(self.svc)
             ev.update_outcomes(now)
             ev.update_paper(now)
-            self._last_eval_day = day
+            self._mark_evaluated(target)
+        except Exception:  # noqa: BLE001 - a failed evaluation never stops the scans; it is tried again later
+            log.exception("scheduled evaluation failed; retrying in %d min", self.EVAL_RETRY_S // 60)
+            self._eval_failed_at = now
+            return
+        self._eval_failed_at = None
+        self._last_eval_day = target

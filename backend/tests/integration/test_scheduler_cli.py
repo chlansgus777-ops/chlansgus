@@ -77,3 +77,70 @@ def test_with_the_toss_feed_pre_market_and_after_hours_scan_too():
     feed["live"] = False  # the feed stopped: back to the free-quote rule
     s.step(datetime(2026, 9, 25, 12, 5, tzinfo=timezone.utc))
     assert svc.scans == 1 and "토스증권을 연결하면" in svc.schedule_state["why"]
+
+
+def test_results_and_the_paper_account_catch_up_after_the_app_was_off(monkeypatch):
+    """Owner 2026-10-04 "왜 지금까지 모의투자가 0건이야": the evaluation ran only when the app happened to be open after
+    the US close (05–09 KST). Now the first tick after a start brings the results and the paper account up to the last
+    completed session — once (remembered across restarts), and a failure never stops the scans."""
+    from contextlib import contextmanager
+
+    import marketlens.workers.scheduler as sch
+
+    settings: dict[str, str] = {}
+
+    class Repo:
+        @staticmethod
+        def get_setting(_s, k):
+            return settings.get(k)
+
+        @staticmethod
+        def set_setting(_s, k, v):
+            settings[k] = v
+
+    monkeypatch.setattr("marketlens.infrastructure.db.repository.get_setting", Repo.get_setting)
+    monkeypatch.setattr("marketlens.infrastructure.db.repository.set_setting", Repo.set_setting)
+    runs: list[str] = []
+    fail = {"on": False}
+
+    class Ev:
+        def __init__(self, _svc):
+            pass
+
+        def update_outcomes(self, now):
+            if fail["on"]:
+                raise RuntimeError("provider down")
+            runs.append("outcomes")
+
+        def update_paper(self, now):
+            runs.append("paper")
+
+    monkeypatch.setattr(sch, "EvaluationService", Ev)
+
+    class Sess:
+        def commit(self):
+            pass
+
+    svc = FakeSvc()
+
+    @contextmanager
+    def sf():
+        yield Sess()
+
+    svc.sf = sf
+    s = BackgroundScheduler(svc)
+    s.step(datetime(2026, 9, 28, 14, 0, tzinfo=timezone.utc))  # Monday 10:00 ET: the app was off over the weekend
+    assert runs == ["outcomes", "paper"] and settings[s.EVAL_KEY] == "2026-09-25"  # Friday, the last completed session
+    s.step(datetime(2026, 9, 28, 14, 30, tzinfo=timezone.utc))
+    assert len(runs) == 2  # once per completed session
+    s2 = BackgroundScheduler(svc)  # a restart: remembered, not run again
+    s2.step(datetime(2026, 9, 28, 15, 0, tzinfo=timezone.utc))
+    assert len(runs) == 2
+    fail["on"] = True
+    s2.step(datetime(2026, 9, 28, 20, 30, tzinfo=timezone.utc))  # after Monday's close: the evaluation fails…
+    assert settings[s.EVAL_KEY] == "2026-09-25" and svc.scans >= 1  # …the scans went on
+    fail["on"] = False
+    s2.step(datetime(2026, 9, 28, 20, 35, tzinfo=timezone.utc))  # retried only after the gap
+    assert settings[s.EVAL_KEY] == "2026-09-25"
+    s2.step(datetime(2026, 9, 28, 20, 45, tzinfo=timezone.utc))
+    assert settings[s.EVAL_KEY] == "2026-09-28"

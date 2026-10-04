@@ -236,6 +236,15 @@ def all_paper_positions(s: Session) -> list[PaperPositionRow]:
     return list(s.scalars(select(PaperPositionRow).order_by(PaperPositionRow.recommended_at)))
 
 
+def paper_counts(s: Session, mode: str) -> dict[str, int]:
+    """Paper positions of this data mode by status (PENDING · OPEN · CLOSED · SKIPPED)."""
+    from sqlalchemy import func
+
+    q = (select(PaperPositionRow.status, func.count()).join(RecommendationRow, RecommendationRow.id == PaperPositionRow.recommendation_id)
+         .where(RecommendationRow.mode == mode).group_by(PaperPositionRow.status))
+    return {str(st): int(n) for st, n in s.execute(q)}
+
+
 # ---------------------------------------------------------------- portfolio & watchlist
 def holdings(s: Session) -> list[HoldingRow]:
     return list(s.scalars(select(HoldingRow).order_by(HoldingRow.ticker)))

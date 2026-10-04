@@ -476,8 +476,11 @@ def dashboard(req: Request) -> dict[str, Any]:
         last = acct["equity"][-1][1]
         perf = {"equity": last, "starting_capital": acct.get("starting_capital"), "return": (last / acct["starting_capital"] - 1) if acct.get("starting_capital") else None,
                 "max_drawdown": acct.get("max_drawdown"), "as_of": acct.get("as_of"), "curve": [v for _, v in acct["equity"][-60:]]}
+    with s.sf() as ss:
+        paper_counts = repo.paper_counts(ss, s.mode.value)
     return {
         "performance": perf,
+        "paper_counts": paper_counts,
         "recommendation_changes": changes[:8],
         "watchlist_alerts": alerts[:8],
         "scan": _scan_head(scan),
