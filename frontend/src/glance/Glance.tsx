@@ -29,9 +29,8 @@ export default function Glance() {
     return (
       <Shell session={null} delayed={false}>
         <div className="gl-loading" aria-busy="true">
-          <div className="gl-ph band" />
+          <div className="gl-market idle"><Buddy mood="sleep" /><p>시장 상태를 불러오는 중…</p></div>
           <div className="gl-ph w40" /><div className="gl-ph w70" /><div className="gl-ph spark" />
-          <p>시장 상태를 불러오는 중…</p>
         </div>
       </Shell>
     );
@@ -135,11 +134,13 @@ function Market({ d, m }: { d: Dash | null | undefined; m: MacroResp | null | un
   if (vix !== null) items.push({ k: "VIX", v: vix.toFixed(1), t: "" });
   if (tnx !== null) items.push({ k: "10년물", v: `${tnx.toFixed(2)}%`, t: "" });
   return (
-    <section className="gl-market">
+    <section className={`gl-market ${st?.tone ?? "idle"}`}>
+      <Buddy mood={st ? st.tone || "flat" : "sleep"} />
+      <div className="gl-mcol">
       <button type="button" className="gl-mstate" onClick={() => void openAnalyze("/market")} data-testid="glance-market"
         title={conf !== null ? "데이터 충족도: 국면 판단에 쓴 거시 데이터가 얼마나 갖춰졌는지(확률 아님)" : undefined}>
         <span className="gl-mk">미국 시장</span>
-        {st ? <span className={`gl-mv ${st.tone}`}><i aria-hidden />{st.label}</span> : <span className="gl-mv muted">판단 대기</span>}
+        {st ? <span className={`gl-mv ${st.tone}`}>{st.label}</span> : <span className="gl-mv muted">판단 대기</span>}
         {st && primary && !BASIC.has(primary) && <span className="gl-msub">{regimeShort(primary)}</span>}
         {conf !== null && <span className="gl-mconf">데이터 {conf}%</span>}
         <span className="gl-chev" aria-hidden>›</span>
@@ -149,6 +150,7 @@ function Market({ d, m }: { d: Dash | null | undefined; m: MacroResp | null | un
           {items.map((x) => <div key={x.k}><dt>{x.k}</dt><dd className={x.t}>{x.v}</dd></div>)}
         </dl>
       )}
+      </div>
     </section>
   );
 }
@@ -218,7 +220,7 @@ function Focus({ ticker, others }: { ticker: string; others: string[] }) {
   const dist = (lv: number | null) => (lv !== null && price !== null && price > 0 ? lv / price - 1 : null);
   const levels = [
     { k: "매수 상한", v: buyBelow, cls: "lead", title: "이 가격 이하에서만 계획대로 매수(최대 매수가)" },
-    { k: "목표", v: target, cls: "", title: "1차 목표가" },
+    { k: "목표", v: target, cls: "tgt", title: "1차 목표가" },
     { k: "무효화", v: invalid, cls: "neg", title: "종가가 이 아래로 마감하면 분석 무효(손절 기준가 · 종가 기준) — 주문 가격이 아닙니다" },
   ].filter((x) => x.v !== null);
   return (
@@ -226,7 +228,7 @@ function Focus({ ticker, others }: { ticker: string; others: string[] }) {
       <button type="button" className="gl-fhead" onClick={open} aria-label={`${ticker} 종목 화면 열기`}>
         <span className="gl-name"><b>{name ?? ticker}</b>{name && <small>{ticker}</small>}</span>
         <span className={`gl-action ${ACTION_TONE[action] ?? ""}`} data-testid="glance-action" title={ACTION_INFO[action]?.help}>
-          {ACTION_INFO[action]?.label ?? action}<small>{action}</small>
+          <i aria-hidden />{ACTION_INFO[action]?.label ?? action}<small>{action}</small>
         </span>
       </button>
       {price !== null && (
@@ -322,18 +324,50 @@ function useFlash(v: string | null): boolean {
 
 function Sparkline({ values }: { values: number[] }) {
   const lo = Math.min(...values), hi = Math.max(...values);
-  const w = 300, h = 44;
-  const xy = values.map((v, i) => [(i / (values.length - 1)) * w, h - 3 - ((v - lo) / (hi - lo || 1)) * (h - 6)] as const);
-  const line = xy.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const w = 320, h = 40;
+  const pts = values.map((v, i) => [2 + (i / (values.length - 1)) * (w - 8), h - 4 - ((v - lo) / (hi - lo || 1)) * (h - 12)] as const);
+  // a soft curve through the closes: each point is a control point, the midpoints are on the line
+  let d = `M${pts[0]![0].toFixed(1)},${pts[0]![1].toFixed(1)}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [x, y] = pts[i]!, [nx, ny] = pts[i + 1]!;
+    d += ` Q${x.toFixed(1)},${y.toFixed(1)} ${((x + nx) / 2).toFixed(1)},${((y + ny) / 2).toFixed(1)}`;
+  }
+  const [lx, ly] = pts[pts.length - 1]!;
+  d += ` L${lx.toFixed(1)},${ly.toFixed(1)}`;
   const up = values[values.length - 1]! >= values[0]!;
   return (
     <figure className={`gl-spark ${up ? "up" : "down"}`} aria-label={`최근 ${values.length}거래일 종가 흐름`}>
       <figcaption>종가 {values.length}일</figcaption>
-      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden>
-        <polygon points={`0,${h} ${line} ${w},${h}`} className="area" />
-        <polyline points={line} fill="none" vectorEffect="non-scaling-stroke" />
+      <svg viewBox={`0 0 ${w} ${h}`} aria-hidden>
+        <defs>
+          <linearGradient id="gl-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" className="f0" /><stop offset="1" className="f1" />
+          </linearGradient>
+        </defs>
+        <path d={`${d} L${lx.toFixed(1)},${h} L${pts[0]![0].toFixed(1)},${h} Z`} fill="url(#gl-fill)" className="area" />
+        <path d={d} className="line" fill="none" />
+        <circle cx={lx} cy={ly} r="5" className="halo" /><circle cx={lx} cy={ly} r="2.6" className="dot" />
       </svg>
     </figure>
+  );
+}
+
+/** A small round companion whose face is the market state above — the same four states, nothing more (never a new
+ * judgement): smiling for 위험 선호, calm for 중립, a wobbly mouth for 주의, a frown for 위험 회피, asleep while the
+ * state is not known yet. Static: no blinking, no loop. */
+function Buddy({ mood }: { mood: string }) {
+  const mouth: Record<string, string> = {
+    pos: "M13 20.5 Q18 25 23 20.5", flat: "M14 21.5 L22 21.5", warn: "M13.5 22 Q15.75 20 18 22 Q20.25 24 22.5 22", neg: "M13 23.5 Q18 19 23 23.5", sleep: "M15.5 22 Q18 23.5 20.5 22",
+  };
+  const sleepy = mood === "sleep";
+  return (
+    <svg className={`gl-buddy ${mood}`} viewBox="0 0 36 36" aria-hidden>
+      <circle cx="18" cy="18" r="17" className="body" />
+      <ellipse cx="11" cy="21.5" rx="2.6" ry="1.6" className="cheek" /><ellipse cx="25" cy="21.5" rx="2.6" ry="1.6" className="cheek" />
+      {sleepy ? <><path d="M11.5 15.5 Q13.5 17 15.5 15.5" className="eye-l" /><path d="M20.5 15.5 Q22.5 17 24.5 15.5" className="eye-l" /></>
+        : <><circle cx="13.5" cy="15.5" r="2" className="eye" /><circle cx="22.5" cy="15.5" r="2" className="eye" /><circle cx="14.2" cy="14.8" r="0.6" className="shine" /><circle cx="23.2" cy="14.8" r="0.6" className="shine" /></>}
+      <path d={mouth[mood] ?? mouth.flat} className="mouth" />
+    </svg>
   );
 }
 
