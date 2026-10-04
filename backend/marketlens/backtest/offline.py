@@ -26,6 +26,7 @@ from marketlens.domain.market import Quote
 from marketlens.domain.market_calendar import session_close_utc
 from marketlens.infrastructure.health import HealthRegistry
 from marketlens.providers.contracts import PROVIDER_KINDS, NotSupported, ProviderUnavailable
+from marketlens.infrastructure.resilience import BreakerConfig
 from marketlens.providers.router import ProviderChain
 
 REPLAY_KEY = "replay-no-network"  # the FRED provider needs *a* key to be configured; the replay strips it from lookups
@@ -84,7 +85,12 @@ def build_offline_registry(eng: Engine, store: BacktestStore) -> tuple[Any, Repl
     impl: dict[str, list[Any]] = {k: [p] for k, p in blocked.items()}
     impl["price"] = [LocalQuoteProvider(store)]
     impl["macro"] = [fred]
-    chains = {k: ProviderChain(k, impl[k], DataMode.LIVE, health, sleep=lambda _s: None) for k in PROVIDER_KINDS}
+    # a breaker that never opens: the chains answer from the stored point-in-time data, so a name without a quote
+    # at t is that name's answer, never a reason to skip the next names. The default breaker opened after five such
+    # misses for 60 s of wall-clock time — which names lost their price then depended on the runner's speed and
+    # where the legs resumed, and the 7-year run and its reproduction differed (entry R/R coverage, 2026-10-04).
+    never = BreakerConfig(failure_threshold=1 << 62)
+    chains = {k: ProviderChain(k, impl[k], DataMode.LIVE, health, breaker_cfg=never, sleep=lambda _s: None) for k in PROVIDER_KINDS}
     return ProviderRegistry(DataMode.LIVE, health, chains), replay, blocked
 
 

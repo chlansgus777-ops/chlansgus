@@ -218,13 +218,15 @@ class Engine:
         return ln.splits if ln else []
 
     def step(self, t: datetime) -> dict[str, Any]:
-        from marketlens.application.data_access import DataAccess
+        from marketlens.application.data_access import DataAccess, TTLCache
         from marketlens.application.scanner import Scanner
 
         self.store.set_time(t)
         n_urls = len(self.replay.urls) if self.replay is not None else 0
         self._key_of = {label: ln.key for label, ln in self.store.labels().items()}
-        data = DataAccess(self.reg, self.cfg.cache_ttl, store=self.store, now_fn=lambda: t)  # a fresh cache every week
+        # a fresh cache every week whose clock stands still: every name of the week is analysed at t, however long the
+        # runner takes (a 15 s price TTL on the wall clock made a slow week's later names read differently)
+        data = DataAccess(self.reg, self.cfg.cache_ttl, cache=TTLCache(clock=lambda: 0.0), store=self.store, now_fn=lambda: t)
         sc = Scanner(data, self.cfg, self.seed, self.theses, previous_lookup=self._previous)
         ctx = sc.build_context(t)
         excluded: dict[str, str] = {}
@@ -385,7 +387,7 @@ class Week:
 
 def _week_scanner(eng: Engine, week: Week) -> tuple[Any, Any]:
     """The scanner and context of ``week`` in this process (built once per week; the parent's own for 1 process)."""
-    from marketlens.application.data_access import DataAccess
+    from marketlens.application.data_access import DataAccess, TTLCache
     from marketlens.application.scanner import Scanner
 
     if eng._week_ctx is not None and eng._week_ctx[0] == week.t:
@@ -393,7 +395,7 @@ def _week_scanner(eng: Engine, week: Week) -> tuple[Any, Any]:
     if eng.store.t != week.t:
         eng.store.set_time(week.t)
     n_urls = len(eng.replay.urls) if eng.replay is not None else 0
-    data = DataAccess(eng.reg, eng.cfg.cache_ttl, store=eng.store, now_fn=lambda: week.t)
+    data = DataAccess(eng.reg, eng.cfg.cache_ttl, cache=TTLCache(clock=lambda: 0.0), store=eng.store, now_fn=lambda: week.t)
     sc = Scanner(data, eng.cfg, eng.seed, eng.theses, previous_lookup=lambda label, _ts: week.previous.get(label, (None, None)))
     ctx = sc.build_context(week.t)
     ctx.rs_universe, ctx.rs_session = week.rs_universe, week.rs_session
