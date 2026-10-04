@@ -226,6 +226,7 @@ def _report(s: Any, sample: bool) -> tuple[dict[str, Any], dict[str, Any]]:
                          rules_history=hist if not sample else [], app_stop=inp["app_stop"], plans=pl, source=inp["source"], meta=inp["meta"])
     rep["plans"] = pl
     rep["rules_saved"] = tr.saved_at is not None
+    rep["rule_conflicts"] = tr.conflicts()
     return rep, inp
 
 
@@ -244,7 +245,7 @@ def habit_plans(req: Request, ticker: str | None = None) -> dict[str, Any]:
     pl = plans(s, inp, tr)
     if ticker:
         pl = [p for p in pl if p["symbol"] == ticker.upper()]
-    return {"plans": pl, "rules": tr.__dict__, "rules_saved": tr.saved_at is not None, "connected": inp["meta"].get("connected", False),
+    return {"plans": pl, "rules": tr.__dict__, "rules_saved": tr.saved_at is not None, "rule_conflicts": tr.conflicts(), "connected": inp["meta"].get("connected", False),
             "source": inp["source"], "at": s.now().isoformat()}
 
 
@@ -285,7 +286,8 @@ def save_rules(req: Request, body: RulesIn) -> dict[str, Any]:
     cur = _get(s, H.RULES_KEY, {})
     try:
         pat = Rules.from_dict(body.pattern if body.pattern is not None else cur.get("pattern"))
-        tr = TradeRules.from_dict({**(body.trade if body.trade is not None else cur.get("trade") or {}), "saved_at": None})
+        merged = {**(body.trade if body.trade is not None else cur.get("trade") or {}), "saved_at": None}
+        tr = TradeRules.checked(merged) if body.trade is not None else TradeRules.from_dict(merged)
     except (ValueError, TypeError) as e:
         raise HTTPException(422, str(e)) from None
     now = s.now().isoformat()

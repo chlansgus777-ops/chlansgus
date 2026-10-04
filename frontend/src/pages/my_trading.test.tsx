@@ -140,3 +140,14 @@ it("a name not held: the plan for buying it now under my rules, compared with th
   expect(card.textContent).toContain("1.43");     // (440 − 400) ÷ (400 − 372)
   expect(card.textContent).toContain("앱 분석 손절가 $380.00가 내 규칙 손절보다 위");
 });
+
+it("an add level at the first take-profit is a contradiction: said, and the rules cannot be saved", async () => {
+  page();
+  await screen.findByTestId("rules-card");
+  fireEvent.change(screen.getByLabelText("1차 익절 (평단 대비 %)"), { target: { value: "5" } });
+  expect(screen.getByTestId("rules-clash").textContent).toContain("+2.5%");
+  expect((screen.getByRole("button", { name: "규칙 저장" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText("평단보다 이만큼 올랐을 때"), { target: { value: "2.5" } });
+  expect(screen.queryByTestId("rules-clash")).toBeNull();
+  expect((screen.getByRole("button", { name: "규칙 저장" }) as HTMLButtonElement).disabled).toBe(false);
+});

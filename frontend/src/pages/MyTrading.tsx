@@ -219,13 +219,15 @@ function RulesCard({ x, onSaved }: { x: Report; onSaved: () => void }) {
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   const ex = 100;  // the preview: a purchase at 100
+  // the same check the server makes on save: an add at or above the first take-profit would fire with it
+  const clash = t.add_mode === "winners_only" && t.max_adds > 0 && t.add_trigger_pct >= t.take1_pct;
   const preview = ([
     { key: "stop", label: "손절", value: ex * (1 + t.stop_pct / 100), tone: "neg" },
     { key: "avg", label: "매수가", value: ex, tone: "neutral" },
     { key: "take1", label: `익절 ${Math.round(t.take1_fraction * 100)}%`, value: ex * (1 + t.take1_pct / 100), tone: "pos" },
-    ...(t.add_mode === "winners_only" ? [{ key: "add", label: "추가매수", value: ex * (1 + t.add_trigger_pct / 100), tone: "buy" }] : []),
+    ...(t.add_mode === "winners_only" && !clash ? [{ key: "add", label: "추가매수", value: ex * (1 + t.add_trigger_pct / 100), tone: "buy" }] : []),
   ] as Level[]).filter((l) => Number.isFinite(l.value));
-  const diff = sug ? (["stop_pct", "take1_pct", "add_mode"] as const).filter((k) => sug.rules[k] !== t[k]) : [];
+  const diff = sug ? (["stop_pct", "take1_pct", "add_mode", "add_trigger_pct"] as const).filter((k) => sug.rules[k] !== t[k]) : [];
   return (
     <div id="rules">
       <Card title="내 매매 규칙 — 기계적으로 따를 기준" testId="rules-card"
@@ -235,7 +237,7 @@ function RulesCard({ x, onSaved }: { x: Report; onSaved: () => void }) {
           <div className="suggest" data-testid="rules-suggested">
             <div className="suggest-head"><b>내 거래 기록으로 계산한 제안</b>
               <button className="sm primary" disabled={x.is_sample} onClick={() => setT({ ...t, ...sug.rules, saved_at: t.saved_at })}>제안값을 입력칸에 넣기</button></div>
-            <div className="chips">{diff.map((k) => <span key={k} className="chip">{k === "stop_pct" ? "손절" : k === "take1_pct" ? "1차 익절" : "추가매수"} <s>{k === "add_mode" ? ADD_KO[t[k]] : `${t[k]}%`}</s> → <b>{k === "add_mode" ? ADD_KO[sug.rules[k]] : `${sug.rules[k]}%`}</b></span>)}</div>
+            <div className="chips">{diff.map((k) => <span key={k} className="chip">{k === "stop_pct" ? "손절" : k === "take1_pct" ? "1차 익절" : k === "add_trigger_pct" ? "추가매수 기준" : "추가매수"} <s>{k === "add_mode" ? ADD_KO[t[k]] : `${t[k]}%`}</s> → <b>{k === "add_mode" ? ADD_KO[sug.rules[k]] : `${sug.rules[k]}%`}</b></span>)}</div>
             <ul className="caption">{sug.why.map((w, i) => <li key={i}>{w}</li>)}</ul>
           </div>
         )}
@@ -260,6 +262,7 @@ function RulesCard({ x, onSaved }: { x: Report; onSaved: () => void }) {
                 <PercentField label="첫 매수 수량 대비" value={Math.round(t.add_fraction * 100)} step={10} min={10} max={200} onChange={(v) => setT({ ...t, add_fraction: v / 100 })} />
                 <label className="pfield"><span className="pf-l">추가매수 최대 횟수</span><span className="pf-in"><input aria-label="추가매수 최대 횟수" type="number" step={1} min={0} max={5} value={t.max_adds} onChange={(e) => setT({ ...t, max_adds: Number(e.target.value) })} /><em>회</em></span></label>
               </>}
+              {clash && <div className="caption warn" data-testid="rules-clash">추가매수 기준(+{t.add_trigger_pct}%)이 1차 익절(+{t.take1_pct}%)과 같거나 높습니다. 같은 가격에서 '절반 매도'와 '추가매수'가 겹치니, 추가매수 기준을 1차 익절보다 낮게 정하세요(예: +{Math.max(0.5, Math.floor(Math.round(t.take1_pct) / 2 / 0.5) * 0.5)}%).</div>}
               {t.add_mode === "any" && <div className="caption warn">물타기를 허용하면 손실 중인 종목에 돈이 더 들어가 손절이 어려워집니다.</div>}
             </fieldset>
           </div>
@@ -270,12 +273,12 @@ function RulesCard({ x, onSaved }: { x: Report; onSaved: () => void }) {
               <li><b className="neg">{money(ex * (1 + t.stop_pct / 100), "USD")}</b> 아래로 내려가면 전부 판다</li>
               <li><b className="pos">{money(ex * (1 + t.take1_pct / 100), "USD")}</b>에 닿으면 {Math.round(t.take1_fraction * 100)}%를 판다</li>
               <li>그 뒤 나머지는 최고가에서 {Math.abs(t.trail_pct)}% 내려오면 판다</li>
-              <li>{t.add_mode === "none" ? "추가매수는 하지 않는다" : t.add_mode === "winners_only" ? <>추가매수는 <b className="buy">{money(ex * (1 + t.add_trigger_pct / 100), "USD")}</b> 이상일 때만, 첫 매수의 {Math.round(t.add_fraction * 100)}%씩 {t.max_adds}번까지</> : `추가매수는 가격 조건 없이 첫 매수의 ${Math.round(t.add_fraction * 100)}%씩 ${t.max_adds}번까지`}</li>
+              <li>{t.add_mode === "none" ? "추가매수는 하지 않는다" : clash ? <span className="warn">추가매수 기준이 1차 익절과 겹쳐 실행되지 않는다 — 고쳐야 함</span> : t.add_mode === "winners_only" ? <>추가매수는 <b className="buy">{money(ex * (1 + t.add_trigger_pct / 100), "USD")}</b> 이상일 때만, 첫 매수의 {Math.round(t.add_fraction * 100)}%씩 {t.max_adds}번까지</> : `추가매수는 가격 조건 없이 첫 매수의 ${Math.round(t.add_fraction * 100)}%씩 ${t.max_adds}번까지`}</li>
             </ol>
           </div>
         </div>
         <div className="row" style={{ marginTop: 12 }}>
-          <button className="primary" disabled={busy || x.is_sample || (!dirty && x.rules_saved)} onClick={() => void save(t, null)}>{busy ? "저장 중…" : "규칙 저장"}</button>
+          <button className="primary" disabled={busy || x.is_sample || clash || (!dirty && x.rules_saved)} onClick={() => void save(t, null)}>{busy ? "저장 중…" : "규칙 저장"}</button>
           {dirty && !x.is_sample && <button className="ghost" onClick={() => setT(x.trade_rules)}>되돌리기</button>}
           {x.is_sample && <span className="caption">가상 샘플에서는 규칙을 저장하지 않습니다</span>}
         </div>

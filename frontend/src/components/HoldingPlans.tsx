@@ -2,17 +2,17 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Card, Notice } from "./ui";
 import { useApi, usePoll } from "./useApi";
-import { shares } from "../format";
+import { day, shares } from "../format";
 
 /** One holding under the owner's saved rules (marketlens.domain.habit_diagnosis.holding_plan). */
 export interface Plan {
   symbol: string; name: string; market: string | null; currency: string; quantity: number; avg_price: number; price: number | null; price_at: string | null;
   price_source: string | null; pnl_pct: number | null; stop: number; stop_source: string; take1: number; take1_fraction: number; take1_done: boolean;
   trail: number | null; high_since_open: number | null; add_mode: string; add_level: number | null; add_qty: number; adds_done: number; max_adds: number;
-  opened: string | null; app_action: string | null; app_stop: number | null; app_target: number | null; rules_saved: boolean; notes: string[];
+  opened: string | null; app_action: string | null; app_stop: number | null; app_target: number | null; rules_saved: boolean; notes: string[]; rule_conflicts?: string[];
   action: "STOP" | "TRAIL" | "TAKE1" | "ADD" | "HOLD" | "NO_PRICE"; action_ko: string; detail: string;
 }
-export interface PlansView { plans: Plan[]; rules: Record<string, number | string | boolean | null>; rules_saved: boolean; connected: boolean; source?: "toss" | "app"; at: string }
+export interface PlansView { plans: Plan[]; rules: Record<string, number | string | boolean | null>; rules_saved: boolean; rule_conflicts?: string[]; connected: boolean; source?: "toss" | "app"; at: string }
 
 export const ACTION_TONE: Record<Plan["action"], string> = { STOP: "neg", TRAIL: "sell", TAKE1: "pos", ADD: "buy", HOLD: "", NO_PRICE: "muted" };
 const ACTION_ICON: Record<Plan["action"], string> = { STOP: "■", TRAIL: "▼", TAKE1: "▲", ADD: "+", HOLD: "●", NO_PRICE: "?" };
@@ -80,13 +80,15 @@ export function planLevels(p: Plan): Level[] {
   const lv: Level[] = [{ key: "stop", label: "손절", value: p.stop, tone: "neg" }, { key: "avg", label: "평단", value: p.avg_price, tone: "neutral" }];
   if (!p.take1_done) lv.push({ key: "take1", label: `익절 ${Math.round(p.take1_fraction * 100)}%`, value: p.take1, tone: "pos" });
   if (p.trail !== null) lv.push({ key: "trail", label: "추적 손절", value: p.trail, tone: "sell" });
-  if (p.add_level !== null && p.add_mode !== "none" && p.adds_done < p.max_adds) lv.push({ key: "add", label: "추가매수", value: p.add_level, tone: "buy" });
+  const clash = (p.rule_conflicts?.length ?? 0) > 0 && !p.take1_done;  // the add would sit on the take-profit: not a level
+  if (!clash && p.add_level !== null && p.add_mode !== "none" && p.adds_done < p.max_adds) lv.push({ key: "add", label: "추가매수", value: p.add_level, tone: "buy" });
   if (p.price !== null) lv.push({ key: "now", label: "지금", value: p.price, tone: "now" });
   return lv;
 }
 
 function addRule(p: Plan): ReactNode {
   if (p.add_mode === "none") return "안 함";
+  if ((p.rule_conflicts?.length ?? 0) > 0 && !p.take1_done) return <span className="warn">규칙 충돌<small>익절과 같은 가격 — 고치세요</small></span>;
   if (p.adds_done >= p.max_adds) return <>완료<small>{p.adds_done}/{p.max_adds}회</small></>;
   return <>{p.add_level !== null ? `${money(p.add_level, p.currency)} 이상` : "가격 조건 없음"}<small>{shares(p.add_qty)}주 · {p.max_adds - p.adds_done}회 남음</small></>;
 }
@@ -111,7 +113,7 @@ export function PlanCard({ p }: { p: Plan }) {
         <div><dt>추가매수</dt><dd>{addRule(p)}</dd></div>
       </dl>
       <footer className="caption">
-        {p.price_source ?? "가격 없음"}{p.opened ? ` · 첫 매수 ${p.opened}` : ""}
+        {p.price_source ?? "가격 없음"}{p.opened ? ` · 첫 매수 ${day(p.opened)}` : ""}
         {p.notes.map((n, i) => <div key={i}>· {n}</div>)}
       </footer>
     </article>
@@ -189,6 +191,7 @@ export function HoldingPlans({ ticker, actionsOnly, preview }: { ticker?: string
     <Card title={title} testId={ticker ? "plan-one" : actionsOnly ? "plan-actions" : "plans"}
       explain="저장한 '내 매매 규칙'을 지금 가격에 그대로 적용한 결과입니다. 가격이 손절·익절·추가매수 가격에 닿으면 알림(종 아이콘)으로도 알려드립니다. MarketLens는 주문을 넣지 않습니다 — 실행은 직접 하세요."
       right={<div className="row tight">{!ticker && <span className="caption">{acting ? `행동 필요 ${acting}종목` : "모두 보유 유지"}</span>}<Link className="btn sm" to="/performance?view=mine#rules">규칙 바꾸기</Link></div>}>
+      {(x.rule_conflicts?.length ?? 0) > 0 && <div data-testid="rule-conflict"><Notice tone="warn">{x.rule_conflicts![0]} <Link to="/performance?view=mine#rules">규칙 고치기 →</Link></Notice></div>}
       {x.source === "app" && !actionsOnly && <Notice tone="info">토스증권이 연결되지 않아 이 앱에 입력한 보유(직접 입력·거래 기록) 기준으로 계산했습니다. 매수 이후 고점·추가매수 횟수는 거래 기록이 있을 때만 반영됩니다.</Notice>}
       {!x.rules_saved && <Notice tone="info">아직 내 규칙을 저장하지 않아 기본값(평단 −7% 손절, +10%에서 절반 익절, 수익 중일 때만 추가매수)으로 계산했습니다. <Link to="/performance?view=mine#rules">내 거래 기록으로 만든 제안값 보기 →</Link></Notice>}
       <div className={`plan-grid${rows.length === 1 ? " one" : ""}`}>{rows.map((r) => <PlanCard key={r.symbol} p={r} />)}</div>

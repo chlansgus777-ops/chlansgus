@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from marketlens.application.habits import build_report, fills_from_toss, opening_inventory
-from marketlens.domain.habit_diagnosis import AddEvent, HoldingState, OrderResult, TradeRules, diagnose, holding_plan
+from marketlens.domain.habit_diagnosis import AddEvent, HoldingState, OrderResult, TradeRules, diagnose, holding_plan, suggest
 from marketlens.domain.habits import Fill, Rules, StopPlan, early_exit, evaluate, match_fifo, stop_review
 from marketlens.domain.market import Bar
 
@@ -309,3 +309,20 @@ def test_rule_watch_announces_each_change_once_on_live_prices():
     w.load()
     w.observe("AAA", 94.0, now)
     assert got[-1][0][1] == "RULE_STOP" and "$95.00" in got[-1][0][3]
+
+
+def test_an_add_level_on_the_first_take_profit_is_refused_and_never_suggested():
+    """Owner 2026-10-04 "왜 추매랑 익절이랑 구간이 똑같아?": +5 % add and +5 % take-profit put "buy more" and "sell
+    half" on one price. Saving refuses it, the suggestion keeps the add below the take-profit, and a holding under
+    such saved rules says so instead of offering the add."""
+    bad = {"take1_pct": 5, "add_trigger_pct": 5}
+    with pytest.raises(ValueError, match="1차 익절"):
+        TradeRules.checked(bad)
+    r = TradeRules.from_dict(bad)  # saved before this check: still read, flagged
+    assert r.conflicts()
+    p = holding_plan(_h(106.0), r)
+    assert p["action"] == "TAKE1" and p["rule_conflicts"] and any("규칙을 고치세요" in n for n in p["notes"])
+    assert holding_plan(_h(103.0), r)["action"] == "HOLD"  # no add at +3 % under +5 % either way
+    assert not TradeRules(add_mode="none", take1_pct=5, add_trigger_pct=5).conflicts()
+    sug = suggest([], [], TradeRules(take1_pct=5, add_trigger_pct=5))["rules"]
+    assert sug["add_trigger_pct"] < sug["take1_pct"] and sug["add_trigger_pct"] == 2.5

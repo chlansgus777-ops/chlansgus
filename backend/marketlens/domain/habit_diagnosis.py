@@ -46,6 +46,23 @@ class TradeRules:
             raise ValueError("추가매수 방식·비율·횟수를 확인하세요")
         return r
 
+    def conflicts(self) -> list[str]:
+        """Rules that contradict each other (owner 2026-10-04: add +5 % and take-profit +5 % put 추가매수 and 1차 익절 on
+        the same price — "sell half" and "buy more" at once, and the take-profit always wins, so the add never runs)."""
+        out = []
+        if self.add_mode == "winners_only" and self.max_adds > 0 and self.add_trigger_pct >= self.take1_pct:
+            out.append(f"추가매수 기준(평단 +{self.add_trigger_pct:g}%)이 1차 익절(+{self.take1_pct:g}%)과 같거나 높아, 같은 가격에서 "
+                       "'절반 매도'와 '추가매수'가 겹칩니다. 추가매수 기준을 1차 익절보다 낮게 정하세요(예: 익절의 절반).")
+        return out
+
+    @staticmethod
+    def checked(d: dict[str, Any] | None) -> "TradeRules":
+        """``from_dict`` that also refuses contradicting rules — for saving (saved rules are read with ``from_dict``)."""
+        r = TradeRules.from_dict(d)
+        if r.conflicts():
+            raise ValueError(r.conflicts()[0])
+        return r
+
 
 # ------------------------------------------------------------------ diagnosis
 @dataclass
@@ -212,6 +229,9 @@ def suggest(orders: Sequence[OrderResult], adds: Sequence[AddEvent], rules: Trad
             why.append(f"이긴 거래의 보유 중 최고 상승 중앙값 {median(mfes):+.1f}% → 1차 익절 {tp:+g}%")
     else:
         why.append(f"이긴 거래가 {len(wins)}건뿐이라 기본값을 제안합니다(5건 이상이면 내 거래에서 계산)")
+    if s["add_mode"] == "winners_only" and s["add_trigger_pct"] >= s["take1_pct"]:
+        s["add_trigger_pct"] = max(0.5, round(s["take1_pct"]) / 2 // 0.5 * 0.5)  # half the take-profit, on a 0.5 % step
+        why.append(f"추가매수 기준은 1차 익절(+{s['take1_pct']:g}%)보다 낮은 +{s['add_trigger_pct']:g}%로 — 같은 가격이면 '절반 매도'와 '추가매수'가 겹칩니다")
     if any(a.below_avg_pct <= -3.0 for a in adds):
         s["add_mode"] = "winners_only"
         why.append("물타기 기록이 있어 추가매수는 수익 중일 때만으로 제안합니다")
@@ -262,6 +282,7 @@ def holding_plan(h: HoldingState, r: TradeRules) -> dict[str, Any]:
     if trail is not None:
         trail = max(trail, avg)  # once the first target was reached the rest is never given back below cost
     add_level = avg * (1 + r.add_trigger_pct / 100) if r.add_mode == "winners_only" else None
+    clash = bool(r.conflicts()) and not h.sold_since_open  # before the first take-profit the two would fire together
     add_qty = round((h.first_qty or h.quantity) * r.add_fraction, 6)
     plan: dict[str, Any] = {
         "symbol": h.symbol, "currency": h.currency, "quantity": h.quantity, "avg_price": avg, "price": h.price, "price_at": h.price_at,
@@ -273,6 +294,9 @@ def holding_plan(h: HoldingState, r: TradeRules) -> dict[str, Any]:
         "app_target": h.app_target, "rules_saved": r.saved_at is not None, "notes": [],
     }
     notes = plan["notes"]
+    plan["rule_conflicts"] = r.conflicts()
+    if clash:
+        notes.append("추가매수 기준이 1차 익절과 같거나 높아 추가매수는 하지 않음 — 규칙을 고치세요")
     if h.opened is None and h.high_since_open is None:
         notes.append("첫 매수 기록이 없어 추가매수 횟수는 확인한 범위에서만 세고, 매수 후 고점(추적 손절)은 계산하지 않음")
     elif h.opened is None:
@@ -289,7 +313,7 @@ def holding_plan(h: HoldingState, r: TradeRules) -> dict[str, Any]:
         plan |= {"action": "TRAIL", "action_ko": "추적 손절", "detail": f"현재가 {m(p)} ≤ 고점 {m(h.high_since_open or p)} 대비 {r.trail_pct:g}% ({m(trail)}) — 규칙상 남은 수량 매도"}
     elif not h.sold_since_open and p >= take1:
         plan |= {"action": "TAKE1", "action_ko": "1차 익절", "detail": f"현재가 {m(p)} ≥ 1차 익절가 {m(take1)} — 규칙상 {r.take1_fraction:.0%} 매도, 나머지는 추적 손절"}
-    elif r.add_mode != "none" and h.adds_done < r.max_adds and (add_level is None or p >= add_level) and not h.app_thesis_broken \
+    elif r.add_mode != "none" and not clash and h.adds_done < r.max_adds and (add_level is None or p >= add_level) and not h.app_thesis_broken \
             and h.app_action not in ("SELL", "AVOID", "REDUCE") and (r.add_mode == "any" or p > avg):
         lvl = f"평단 +{r.add_trigger_pct:g}% ({m(add_level)}) 이상" if add_level is not None else "조건 없음"
         plan |= {"action": "ADD", "action_ko": "추가매수 가능", "detail": f"현재가 {m(p)}: {lvl} · 추가매수 {h.adds_done}/{r.max_adds}회 → {add_qty:g}주까지 규칙상 가능"}
@@ -299,7 +323,7 @@ def holding_plan(h: HoldingState, r: TradeRules) -> dict[str, Any]:
             nxt.append(f"추적 손절 {m(trail)} ({(trail / p - 1) * 100:+.1f}%)")
         if not h.sold_since_open:
             nxt.append(f"1차 익절 {m(take1)} ({(take1 / p - 1) * 100:+.1f}%)")
-        if add_level is not None and h.adds_done < r.max_adds and r.add_mode != "none":
+        if add_level is not None and h.adds_done < r.max_adds and r.add_mode != "none" and not clash:
             nxt.append(f"추가매수 {m(add_level)} 이상")
         plan |= {"action": "HOLD", "action_ko": "보유 유지", "detail": "다음 행동 가격: " + " · ".join(nxt)}
         if r.add_mode == "winners_only" and p < avg:
