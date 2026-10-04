@@ -7,7 +7,7 @@ import { splitCandidates, type Dash } from "../pages/Dashboard";
 import type { LiveJudgement } from "../components/liveBoard";
 import type { AccountLive } from "../components/AccountLive";
 import type { StockDetail, SystemInfo } from "../types";
-import { FOCUS_STORAGE_KEY, closeGlance, focusSymbol, isDesktop, openAnalyze, saveOnTop, savedOnTop, setAlwaysOnTop, setFocusSymbol } from "./desktop";
+import { FOCUS_STORAGE_KEY, clearFocusSymbol, closeGlance, focusSymbol, isDesktop, openAnalyze, saveOnTop, savedOnTop, setAlwaysOnTop, setFocusSymbol } from "./desktop";
 import "./glance.css";
 
 /** GLANCE MODE (owner 2026-10-04, redesign v2): a quiet desktop object. The eye lands on the focus symbol — its price
@@ -60,8 +60,21 @@ function Shell({ session, delayed, wave, children }: { session: string | null; d
   const s = session ? SESSION[session] : null;
   const [menu, setMenu] = useState(false);
   const [waves] = usePref(WAVE_KEY);
+  const hidden = usePageHidden();
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menu) return undefined;
+    const down = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if (t && ref.current && !ref.current.querySelector(".gl-menu")?.contains(t) && !ref.current.querySelector(".gl-ctrl")?.contains(t)) setMenu(false);
+    };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(false); };
+    window.addEventListener("pointerdown", down);
+    window.addEventListener("keydown", key);
+    return () => { window.removeEventListener("pointerdown", down); window.removeEventListener("keydown", key); };
+  }, [menu]);
   return (
-    <div className={`glance${isDesktop() ? " desk" : ""}`} data-testid="glance">
+    <div ref={ref} className={`glance${isDesktop() ? " desk" : ""}${hidden ? " paused" : ""}`} data-testid="glance">
       {waves && <Waves tone={wave} />}
       <header className="gl-head" data-tauri-drag-region>
         <span className="gl-brand" data-tauri-drag-region><i aria-hidden />MarketLens</span>
@@ -92,7 +105,7 @@ function Menu({ onClose }: { onClose: () => void }) {
   const [waves, setWaves] = usePref(WAVE_KEY);
   const [acct, setAcct] = usePref(ACCT_KEY);
   return (
-    <div className="gl-menu" role="dialog" aria-label="Glance 설정" onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}>
+    <div className="gl-menu" role="dialog" aria-label="Glance 설정">
       {isDesktop() && (
         <div className="gl-opt"><span>항상 위에 표시</span>
           <button type="button" role="switch" aria-checked={top} aria-label="항상 위에 표시" className={top ? "on" : ""}
@@ -105,10 +118,14 @@ function Menu({ onClose }: { onClose: () => void }) {
       <div className="gl-opt"><span>내 계좌 수익률</span>
         <button type="button" role="switch" aria-checked={acct} aria-label="내 계좌 수익률 표시" className={acct ? "on" : ""} onClick={() => setAcct(!acct)}><i /></button>
       </div>
-      <CharPicker />
       <form className="gl-opt" onSubmit={(e) => { e.preventDefault(); if (sym.trim()) followSymbol(sym.trim()); onClose(); }}>
         <span>따라갈 종목</span><input aria-label="따라갈 종목" value={sym} onChange={(e) => setSym(e.target.value.toUpperCase())} placeholder="NVDA" maxLength={12} />
       </form>
+      {focusSymbol() && (
+        <button type="button" className="gl-link" onClick={() => { clearFocusSymbol(); window.dispatchEvent(new Event("ml-focus")); onClose(); }}>
+          자동으로 (추천 1순위 따라가기)
+        </button>
+      )}
     </div>
   );
 }
@@ -123,82 +140,12 @@ function usePref(key: string, dflt = true): [boolean, (v: boolean) => void] {
     window.addEventListener("ml-glance-pref", on);
     window.addEventListener("storage", on);
     return () => { window.removeEventListener("ml-glance-pref", on); window.removeEventListener("storage", on); };
-  });
+  }, [key]);  // eslint-disable-line react-hooks/exhaustive-deps -- read() only depends on key
   return [v, (nv: boolean) => {
     try { localStorage.setItem(key, nv ? "1" : "0"); } catch { /* storage unavailable: this session only */ }
     setV(nv);
     window.dispatchEvent(new Event("ml-glance-pref"));
   }];
-}
-
-/** The owner's own character pictures, chosen from this PC and kept only in this PC's app storage (never uploaded,
- * never part of the program): one base picture, and optionally one per market mood. Each is shrunk to 160px. */
-const PIC_SLOTS: [string, string][] = [["base", "기본"], ["pos", "위험 선호"], ["flat", "중립"], ["warn", "주의"], ["neg", "위험 회피"], ["sleep", "로딩"]];
-const picKey = (slot: string) => `ml.glance.char.${slot}`;
-function readPics(): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [slot] of PIC_SLOTS) {
-    try { const v = localStorage.getItem(picKey(slot)); if (v && v.startsWith("data:image/")) out[slot] = v; } catch { /* no storage */ }
-  }
-  return out;
-}
-function useCharPics(): Record<string, string> {
-  const [p, setP] = useState(readPics);
-  useEffect(() => {
-    const on = () => setP(readPics());
-    window.addEventListener("ml-glance-pref", on);
-    window.addEventListener("storage", on);
-    return () => { window.removeEventListener("ml-glance-pref", on); window.removeEventListener("storage", on); };
-  }, []);
-  return p;
-}
-async function shrink(file: File): Promise<string> {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = url; });
-    const side = 160, c = document.createElement("canvas");
-    c.width = side; c.height = side;
-    const k = Math.min(img.width, img.height);  // centre square crop
-    c.getContext("2d")!.drawImage(img, (img.width - k) / 2, (img.height - k) / 2, k, k, 0, 0, side, side);
-    return c.toDataURL("image/png");
-  } finally { URL.revokeObjectURL(url); }
-}
-
-function CharPicker() {
-  const pics = useCharPics();
-  const [open, setOpen] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const set = (slot: string, v: string | null) => {
-    try { if (v) localStorage.setItem(picKey(slot), v); else localStorage.removeItem(picKey(slot)); setErr(null); }
-    catch { setErr("저장 공간이 부족합니다"); }
-    window.dispatchEvent(new Event("ml-glance-pref"));
-  };
-  const pick = (slot: string) => {
-    const inp = document.createElement("input");
-    inp.type = "file"; inp.accept = "image/*";
-    inp.onchange = () => { const f = inp.files?.[0]; if (f) shrink(f).then((v) => set(slot, v), () => setErr("그림을 읽지 못했습니다")); };
-    inp.click();
-  };
-  const slots = open ? PIC_SLOTS : PIC_SLOTS.slice(0, 1);
-  return (
-    <div className="gl-chars">
-      <div className="gl-opt"><span>캐릭터 그림</span>
-        <button type="button" className="gl-link" onClick={() => setOpen((v) => !v)} aria-expanded={open}>{open ? "접기" : "기분별"}</button>
-      </div>
-      <div className="gl-slots">
-        {slots.map(([slot, label]) => (
-          <div key={slot} className="gl-slot">
-            <button type="button" className="gl-slot-pic" onClick={() => pick(slot)} aria-label={`${label} 그림 고르기`}>
-              {pics[slot] ? <img src={pics[slot]} alt="" /> : <span>+</span>}
-            </button>
-            <small>{label}</small>
-            {pics[slot] && <button type="button" className="gl-link" onClick={() => set(slot, null)} aria-label={`${label} 그림 지우기`}>지우기</button>}
-          </div>
-        ))}
-      </div>
-      {err && <small className="gl-err">{err}</small>}
-    </div>
-  );
 }
 
 /** Two slow waves along the bottom edge — decoration only; their colour follows today's account move (mint up, pink
@@ -226,6 +173,17 @@ function Account({ t, live }: { t: AccountLive["totals"]; live: boolean }) {
       {!live && <span className="gl-astale">지연</span>}
     </button>
   );
+}
+
+/** True while the window is minimised or covered (the decoration then stops; values keep polling). */
+function usePageHidden(): boolean {
+  const [h, setH] = useState(() => typeof document !== "undefined" && document.visibilityState === "hidden");
+  useEffect(() => {
+    const on = () => setH(document.visibilityState === "hidden");
+    document.addEventListener("visibilitychange", on);
+    return () => document.removeEventListener("visibilitychange", on);
+  }, []);
+  return h;
 }
 
 function followSymbol(t: string) {
@@ -389,9 +347,9 @@ function Focus({ ticker, others }: { ticker: string; others: string[] }) {
         </p>
       )}
       {others.length > 0 && <Others list={others} />}
-      <button type="button" className={`gl-changes${changes ? " on" : ""}`} onClick={open} data-testid="glance-changes">
-        {detail.data ? (changes ? <><i aria-hidden />지난 분석 대비 {changes}건 변화<span className="gl-chev" aria-hidden>›</span></> : "중요한 변화 없음") : ""}
-      </button>
+      {detail.data && <button type="button" className={`gl-changes${changes ? " on" : ""}`} onClick={open} data-testid="glance-changes">
+        {changes ? <><i aria-hidden />지난 분석 대비 {changes}건 변화<span className="gl-chev" aria-hidden>›</span></> : "중요한 변화 없음"}
+      </button>}
     </section>
   );
 }
@@ -485,40 +443,21 @@ function Sparkline({ values }: { values: number[] }) {
   );
 }
 
-/** A small white round critter (an original drawing) whose face is the market state above — the same four states,
- * nothing more (never a new judgement): beaming for 위험 선호, calm for 중립, worried brows for 주의, teary for 위험
- * 회피, asleep while the state is not known yet. The ring behind it carries the state's colour. */
+/** A small round companion whose face is the market state above — the same four states, nothing more (never a new
+ * judgement): smiling for 위험 선호, calm for 중립, a wobbly mouth for 주의, a frown for 위험 회피, asleep while the
+ * state is not known yet. Static: no blinking, no loop. */
 function Buddy({ mood }: { mood: string }) {
-  const pics = useCharPics();
-  const pic = pics[mood] ?? pics.base;
-  if (pic) {
-    // the owner's own picture (chosen on this PC): the ring keeps the market state's colour
-    return (
-      <span className={`gl-buddy gl-pic ${mood}`} aria-hidden>
-        <img src={pic} alt="" draggable={false} />
-      </span>
-    );
-  }
-  const sleepy = mood === "sleep";
   const mouth: Record<string, string> = {
-    pos: "M21 29.5 Q24 32.5 27 29.5", flat: "M22 30.2 Q24 31.4 26 30.2", warn: "M21.5 31 Q24 29.4 26.5 31", neg: "M21.5 31.6 Q24 28.8 26.5 31.6", sleep: "M22.5 30.4 Q24 31.2 25.5 30.4",
+    pos: "M13 20.5 Q18 25 23 20.5", flat: "M14 21.5 L22 21.5", warn: "M13.5 22 Q15.75 20 18 22 Q20.25 24 22.5 22", neg: "M13 23.5 Q18 19 23 23.5", sleep: "M15.5 22 Q18 23.5 20.5 22",
   };
+  const sleepy = mood === "sleep";
   return (
-    <svg className={`gl-buddy ${mood}`} viewBox="0 0 48 48" aria-hidden>
-      <circle cx="24" cy="25" r="22" className="ring" />
-      <circle cx="13.5" cy="12.5" r="5" className="ear" /><circle cx="34.5" cy="12.5" r="5" className="ear" />
-      <circle cx="13.5" cy="12.5" r="2.4" className="ear-in" /><circle cx="34.5" cy="12.5" r="2.4" className="ear-in" />
-      <ellipse cx="24" cy="27" rx="16.5" ry="14.5" className="body" />
-      <ellipse cx="14.5" cy="30" rx="3.2" ry="2" className="cheek" /><ellipse cx="33.5" cy="30" rx="3.2" ry="2" className="cheek" />
-      {sleepy ? <><path d="M16.5 25 Q18.5 26.6 20.5 25" className="line" /><path d="M27.5 25 Q29.5 26.6 31.5 25" className="line" /></>
-        : <>
-            {mood === "pos" ? <><path d="M16.5 25.5 Q18.5 22.8 20.5 25.5" className="line" /><path d="M27.5 25.5 Q29.5 22.8 31.5 25.5" className="line" /></>
-              : <><ellipse cx="18.5" cy="25" rx="1.9" ry="2.3" className="eye" /><ellipse cx="29.5" cy="25" rx="1.9" ry="2.3" className="eye" />
-                  <circle cx="19.1" cy="24.2" r="0.7" className="shine" /><circle cx="30.1" cy="24.2" r="0.7" className="shine" /></>}
-            {mood === "warn" && <><path d="M16 20.6 L20.2 21.6" className="line thin" /><path d="M32 20.6 L27.8 21.6" className="line thin" /></>}
-            {mood === "neg" && <><path d="M16 21.8 L20.2 20.6" className="line thin" /><path d="M32 21.8 L27.8 20.6" className="line thin" /><path d="M31.6 28 q0.9 1.8 0 2.6 q-0.9 -0.8 0 -2.6" className="tear" /></>}
-          </>}
-      <path d={mouth[mood] ?? mouth.flat} className="line" />
+    <svg className={`gl-buddy ${mood}`} viewBox="0 0 36 36" aria-hidden>
+      <circle cx="18" cy="18" r="17" className="body" />
+      <ellipse cx="11" cy="21.5" rx="2.6" ry="1.6" className="cheek" /><ellipse cx="25" cy="21.5" rx="2.6" ry="1.6" className="cheek" />
+      {sleepy ? <><path d="M11.5 15.5 Q13.5 17 15.5 15.5" className="eye-l" /><path d="M20.5 15.5 Q22.5 17 24.5 15.5" className="eye-l" /></>
+        : <><circle cx="13.5" cy="15.5" r="2" className="eye" /><circle cx="22.5" cy="15.5" r="2" className="eye" /><circle cx="14.2" cy="14.8" r="0.6" className="shine" /><circle cx="23.2" cy="14.8" r="0.6" className="shine" /></>}
+      <path d={mouth[mood] ?? mouth.flat} className="mouth" />
     </svg>
   );
 }

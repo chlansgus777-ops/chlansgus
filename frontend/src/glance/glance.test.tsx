@@ -136,18 +136,36 @@ it("an empty account (nothing held or no data) shows no account line", async () 
   expect(screen.queryByTestId("glance-account")).toBeNull();
 });
 
-it("uses the owner's own character picture when one was chosen on this PC, by market mood with the base as fallback", async () => {
-  const pic = (t: string) => `data:image/png;base64,${t}`;
-  localStorage.setItem("ml.glance.char.base", pic("BASE"));
+
+it("the menu closes on Escape or a click outside it, and can hand the focus back to the automatic pick", async () => {
+  candidates = [{ id: 1, ticker: "MU", action: "BUY", current_status: "CURRENT", actionable_now: true, price: 10, data_quality: "FRESH", vetoes: [] }];
   show();
   await screen.findByTestId("glance-action");
-  const img = () => document.querySelector(".gl-buddy.gl-pic img") as HTMLImageElement | null;
-  expect(img()?.getAttribute("src")).toBe(pic("BASE"));  // Neutral has no picture of its own: the base one
-  localStorage.setItem("ml.glance.char.flat", pic("FLAT"));
-  act(() => { window.dispatchEvent(new Event("ml-glance-pref")); });
-  await waitFor(() => expect(img()?.getAttribute("src")).toBe(pic("FLAT")));
-  localStorage.setItem("ml.glance.char.flat", "javascript:alert(1)");  // only image data is ever shown
-  localStorage.removeItem("ml.glance.char.base");
-  act(() => { window.dispatchEvent(new Event("ml-glance-pref")); });
-  await waitFor(() => expect(img()).toBeNull());
+  const menuBtn = () => screen.getByRole("button", { name: "Glance 설정" });
+  act(() => { menuBtn().click(); });
+  expect(screen.getByRole("dialog", { name: "Glance 설정" })).toBeTruthy();
+  act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+  expect(screen.queryByRole("dialog", { name: "Glance 설정" })).toBeNull();
+  act(() => { menuBtn().click(); });
+  act(() => { screen.getByTestId("glance-focus").dispatchEvent(new Event("pointerdown", { bubbles: true })); });
+  expect(screen.queryByRole("dialog", { name: "Glance 설정" })).toBeNull();
+  act(() => { menuBtn().click(); });
+  act(() => { screen.getByRole("button", { name: /자동으로/ }).click(); });
+  expect(localStorage.getItem("ml.focus")).toBeNull();
+  await waitFor(() => expect(screen.getByTestId("glance-focus").textContent).toContain("MU"));  // the engine's first buy
+});
+
+it("no empty change line while the stock's analysis is still loading", async () => {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((ok) => { release = ok; });
+  const base = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (/\/stocks\/ANET(\?|$)/.test(String(url).split("/api")[1] ?? "")) await gate;
+    return (base as (u: string) => Promise<Response>)(url);
+  }));
+  show();
+  await screen.findByTestId("glance-action");
+  expect(screen.queryByTestId("glance-changes")).toBeNull();
+  release();
+  await waitFor(() => expect(screen.getByTestId("glance-changes").textContent).toContain("2건 변화"));
 });

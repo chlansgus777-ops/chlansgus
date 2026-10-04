@@ -102,6 +102,7 @@ fn spawn_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 const GLANCE: &str = "glance";
 const GLANCE_W: f64 = 360.0;
 const GLANCE_H: f64 = 540.0;
+const GLANCE_MIN_W: f64 = 330.0;
 
 fn api_init_script(app: &AppHandle) -> String {
     let st = app.state::<Backend>();
@@ -162,12 +163,13 @@ fn glance_open(app: AppHandle) -> Result<(), String> {
     let w = WebviewWindowBuilder::new(&app, GLANCE, WebviewUrl::App("index.html".into()))
         .title("MarketLens Glance")
         .inner_size(GLANCE_W, GLANCE_H)
-        .min_inner_size(320.0, 420.0)
+        .min_inner_size(GLANCE_MIN_W, GLANCE_H)
         .max_inner_size(520.0, 760.0)
         .decorations(false)
         .transparent(true)
         .shadow(false)
         .resizable(true)
+        .maximizable(false)
         .always_on_top(on_top)
         .initialization_script(&init)
         .on_navigation(is_app_url)
@@ -175,7 +177,11 @@ fn glance_open(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     match saved {
         Some(g) if on_some_monitor(&app, &g) => {
-            let _ = w.set_size(PhysicalSize::new(g.w, g.h));
+            // a size saved by an older, shorter layout never cuts the content off
+            let sf = w.scale_factor().unwrap_or(1.0);
+            let min_w = (GLANCE_MIN_W * sf).round() as u32;
+            let min_h = (GLANCE_H * sf).round() as u32;
+            let _ = w.set_size(PhysicalSize::new(g.w.max(min_w), g.h.max(min_h)));
             let _ = w.set_position(PhysicalPosition::new(g.x, g.y));
         }
         _ => {

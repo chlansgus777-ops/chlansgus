@@ -49,6 +49,13 @@ export function setFocusSymbol(t: string): void {
     /* storage unavailable: Glance falls back to its own pick */
   }
 }
+export function clearFocusSymbol(): void {
+  try {
+    localStorage.removeItem(FOCUS_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
 export function focusSymbol(): string | null {
   try {
     const v = localStorage.getItem(FOCUS_KEY);
