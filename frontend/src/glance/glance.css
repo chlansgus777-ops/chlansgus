@@ -282,3 +282,12 @@ body:has(.glance):not(:has(.glance.desk)) { background: #07070b; }
 .gl-bgchip.lattice { background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.2) 0 1px, transparent 1px 6px), repeating-linear-gradient(-45deg, rgba(255,255,255,.2) 0 1px, transparent 1px 6px); background-size: auto; }
 .gl-bgchip.aurora { background-image: linear-gradient(rgba(170,150,255,.45) 1px, transparent 1px), linear-gradient(90deg, rgba(120,190,255,.45) 1px, transparent 1px); background-size: 10px 10px; }
 .gl-bgchip.none { background-image: none; }
+
+/* window opacity slider */
+.gl-alpha input[type="range"] { flex: 1; min-width: 0; height: 4px; margin: 0 2px; border-radius: 2px; appearance: none; -webkit-appearance: none; cursor: pointer;
+  background: linear-gradient(90deg, var(--g-accent) var(--p, 100%), var(--g-s2) var(--p, 100%)); outline: none; }
+.gl-alpha input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px var(--g-acc-soft); }
+.gl-alpha input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: #fff; }
+.gl-alpha input[type="range"]:focus-visible { outline: 1.5px solid var(--g-accent); outline-offset: 4px; }
+.gl-alpha b { width: 34px; color: var(--g-1); font-size: 12px; font-weight: 600; text-align: right; }
+.glance { transition: opacity 120ms linear; }

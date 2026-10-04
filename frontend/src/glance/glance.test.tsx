@@ -2,7 +2,7 @@
 /** GLANCE MODE (owner 2026-10-04, redesign v2): the focus symbol's price and call as the centre, the market as a quiet
  * band, the plan's three prices — all read from the existing endpoints; optional rows without data fold away, never
  * N/A; a partial failure is a small amber "갱신 지연", not an error box. All data here is made up. */
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { resetApiCache } from "../components/useApi";
@@ -203,3 +203,17 @@ it("tapping the market line opens the sectors, strongest first, each as its benc
   expect(screen.queryByTestId("glance-sectors")).toBeNull();
 });
 
+
+it("the menu's window transparency applies to the whole widget, is remembered, and never goes past 70%", async () => {
+  show();
+  await screen.findByTestId("glance-action");
+  act(() => { screen.getByRole("button", { name: "Glance 설정" }).click(); });
+  const slider = screen.getByRole("slider", { name: "창 투명도" }) as HTMLInputElement;
+  expect(slider.value).toBe("0");  // solid by default
+  expect(screen.getByTestId("glance").style.opacity).toBe("");
+  act(() => { fireEvent.change(slider, { target: { value: "40" } }); });
+  expect(screen.getByTestId("glance").style.opacity).toBe("0.6");
+  expect(localStorage.getItem("ml.glance.opacity")).toBe("60");
+  act(() => { fireEvent.change(slider, { target: { value: "90" } }); });
+  expect(localStorage.getItem("ml.glance.opacity")).toBe("30");
+});

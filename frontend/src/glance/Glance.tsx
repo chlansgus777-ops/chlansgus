@@ -61,6 +61,7 @@ function Shell({ session, delayed, wave, children }: { session: string | null; d
   const [menu, setMenu] = useState(false);
   const [waves] = usePref(WAVE_KEY);
   const [bg] = useBgPattern();
+  const [alpha] = useOpacity();
   const hidden = usePageHidden();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -75,7 +76,8 @@ function Shell({ session, delayed, wave, children }: { session: string | null; d
     return () => { window.removeEventListener("pointerdown", down); window.removeEventListener("keydown", key); };
   }, [menu]);
   return (
-    <div ref={ref} className={`glance${isDesktop() ? " desk" : ""}${hidden ? " paused" : ""}`} data-bg={bg} data-testid="glance">
+    <div ref={ref} className={`glance${isDesktop() ? " desk" : ""}${hidden ? " paused" : ""}`} data-bg={bg} data-testid="glance"
+      style={alpha < 100 ? { opacity: alpha / 100 } : undefined}>
       <div className="gl-bg" aria-hidden><i className="gl-grid" /></div>
       {waves && <Waves tone={wave} />}
       <header className="gl-head" data-tauri-drag-region>
@@ -107,6 +109,7 @@ function Menu({ onClose }: { onClose: () => void }) {
   const [waves, setWaves] = usePref(WAVE_KEY);
   const [acct, setAcct] = usePref(ACCT_KEY);
   const [bg, setBg] = useBgPattern();
+  const [alpha, setAlpha] = useOpacity();
   return (
     <div className="gl-menu" role="dialog" aria-label="Glance 설정">
       {isDesktop() && (
@@ -117,6 +120,12 @@ function Menu({ onClose }: { onClose: () => void }) {
       )}
       <div className="gl-opt"><span>물결 효과</span>
         <button type="button" role="switch" aria-checked={waves} aria-label="물결 효과" className={waves ? "on" : ""} onClick={() => setWaves(!waves)}><i /></button>
+      </div>
+      <div className="gl-opt gl-alpha"><span>창 투명도</span>
+        {/* shown as transparency: 0% = solid, right = more see-through (stored as opacity) */}
+        <input type="range" min={0} max={100 - OPACITY_MIN} step={5} value={100 - alpha} aria-label="창 투명도"
+          aria-valuetext={`${100 - alpha}%`} onChange={(e) => setAlpha(100 - Number(e.target.value))} style={{ ["--p" as string]: `${((100 - alpha) / (100 - OPACITY_MIN)) * 100}%` }} />
+        <b>{100 - alpha}%</b>
       </div>
       <div className="gl-opt gl-bgopt"><span>배경 무늬</span>
         <div role="radiogroup" aria-label="배경 무늬">
@@ -211,6 +220,27 @@ function Account({ t, rows, live }: { t: AccountLive["totals"]; rows: AccountLiv
       )}
     </div>
   );
+}
+
+/** How opaque the whole widget is, text included (this computer only): 100 = solid, down to 30 = see-through. */
+const OPACITY_KEY = "ml.glance.opacity", OPACITY_MIN = 30;
+function useOpacity(): [number, (v: number) => void] {
+  const read = () => {
+    try { const v = Number(localStorage.getItem(OPACITY_KEY)); return Number.isFinite(v) && v >= OPACITY_MIN && v <= 100 ? Math.round(v) : 100; } catch { return 100; }
+  };
+  const [v, setV] = useState(read);
+  useEffect(() => {
+    const on = () => setV(read());
+    window.addEventListener("ml-glance-pref", on);
+    window.addEventListener("storage", on);
+    return () => { window.removeEventListener("ml-glance-pref", on); window.removeEventListener("storage", on); };
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps -- read() is stable
+  return [v, (nv: number) => {
+    const c = Math.min(100, Math.max(OPACITY_MIN, Math.round(nv)));
+    try { localStorage.setItem(OPACITY_KEY, String(c)); } catch { /* this session only */ }
+    setV(c);
+    window.dispatchEvent(new Event("ml-glance-pref"));
+  }];
 }
 
 /** The background pattern (this computer only). */
