@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions"
+        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions | whymacro"
         required: true
         default: "probe"
       resume_run_id:
@@ -96,6 +96,16 @@ jobs:
           echo "=== application"; python3 -c "import json;print(json.dumps(json.load(open('bt-out/results.json')).get('application'), ensure_ascii=False, indent=1))"
           echo "=== summary (one line, last: what the session that drives the run reads)"
           python3 -c "import json;d=json.load(open('summary.json'));d['strategy'].pop('equity_weekly',None);print(json.dumps(d, ensure_ascii=False, separators=(',',':')))"
+      - name: Backtest database (whymacro)
+        if: inputs.task == 'whymacro'
+        uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          run-id: ${{ inputs.data_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: The app's macro request at one analysis time against the replayed answers (whymacro; run_args "--t YYYY-MM-DD")
+        if: inputs.task == 'whymacro'
+        run: gunzip -f backtest.db.gz && cd backend && python -m marketlens.backtest.why_macro --db ../backtest.db ${{ inputs.run_args }}
       - name: Results of a finished run (actions)
         if: inputs.task == 'actions'
         uses: actions/download-artifact@v4
