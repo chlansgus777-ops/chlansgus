@@ -149,8 +149,10 @@ fn on_some_monitor(app: &AppHandle, g: &GlanceGeom) -> bool {
     })
 }
 
+// async: on Windows, building a window inside a synchronous command deadlocks (WebView2 waits on the thread the
+// command runs on — Tauri's WebviewWindowBuilder docs, "Known issues"); the button then did nothing
 #[tauri::command]
-fn glance_open(app: AppHandle) -> Result<(), String> {
+async fn glance_open(app: AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window(GLANCE) {
         let _ = w.unminimize();
         let _ = w.show();
