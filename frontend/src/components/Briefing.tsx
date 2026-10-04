@@ -130,6 +130,15 @@ export function BriefingView({ x, onRefresh, showCandidates = true }: { x: Brief
             {x.alerts.map((a) => <div key={a.id} className={`brief-row lvl-${a.level}`}><span className="txt">{a.text}</span></div>)}
           </div>
         )}
+        {/* nothing to flag: say so (what was checked) instead of leaving half the card blank */}
+        {!x.watch.length && !x.events.length && !x.alerts.length && !(showCandidates && x.candidates.length) && (
+          <div className="brief-col brief-check" data-testid="brief-all-clear">
+            <h3>오늘 점검</h3>
+            <div className="brief-row ok"><span className="tag">✓</span><span className="txt">{acc.holdings ? `보유 ${acc.holdings}종목 중 손절·목표가 근처인 종목 없음` : "보유 종목 없음"}</span></div>
+            <div className="brief-row ok"><span className="tag">✓</span><span className="txt">받은 일정 중 오늘·내일 일정 없음</span></div>
+            <div className="brief-row ok"><span className="tag">✓</span><span className="txt">밤사이 새 알림 없음</span></div>
+          </div>
+        )}
       </div>
       {!x.live && x.notes.length > 0 && <div className="brief-notes">{x.notes.join(" · ")}</div>}
       {acc.notes?.map((note, i) => <div className="brief-notes" key={i}>{note}</div>)}

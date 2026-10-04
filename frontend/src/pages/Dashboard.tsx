@@ -298,6 +298,22 @@ export default function Dashboard() {
             </Card></div>
           )}
 
+          {/* the paper account and the scan's reach side by side under the main column, so the two columns end together */}
+          <div className="home-pair">
+            <div className="rail-card">
+              <div className="head"><h2><IPerf />모의투자</h2><Link to="/performance">성과 →</Link></div>
+              <div className="caption" style={{ marginBottom: 8 }}>{sysMode === "MOCK" ? "모의 데이터로 만든 시뮬레이션 — 실전 성과가 아닙니다" : "실데이터 가격으로 계산한 시뮬레이션 — 실제 주문이 아닙니다"}</div>
+              {x.performance ? (
+                <>
+                  <div className="row spread"><span className="t-key-sm"><Change v={x.performance.return} /></span><span className="caption"><Term k="max_drawdown">최대 낙폭</Term> {pct(x.performance.max_drawdown)}</span></div>
+                  <LineChart values={x.performance.curve} height={56} />
+                  <div className="caption">기준일 {day(x.performance.as_of)} · 시작 자본 {price(x.performance.starting_capital)}</div>
+                </>
+              ) : <PaperCounts c={x.paper_counts} />}
+            </div>
+            <CoverageCard s={ss ?? null} />
+          </div>
+
           {x.recommendation_changes.length > 0 && (
             <Card title="추천이 바뀐 종목" sub explain="직전 분석과 비교해 판정이 달라진 종목">
               <div className="reading">{x.recommendation_changes.map((c) => <div key={c.ticker} className="stmt"><span className="kind k-CALC">변경</span><div className="body"><Link to={`/stocks/${c.ticker}`}><b>{c.ticker}</b></Link> {c.text}</div></div>)}</div>
@@ -326,18 +342,6 @@ export default function Dashboard() {
               <div className="kv"><span className="k">보유 종목</span><span>{x.portfolio.holdings}개</span><span className="k">현금</span><span>{x.portfolio.cash_entered === false ? <span className="muted" title={`매수 수량은 가정 금액 ${price(x.portfolio.cash)} 기준으로 계산합니다`}>미입력</span> : price(x.portfolio.cash)}</span></div>
             ) : <div className="caption">아직 입력한 보유 종목이 없습니다. 입력하면 새 종목을 넣을 때 쏠림·한도를 자동으로 확인합니다.</div>}
           </div>
-          <div className="rail-card">
-            <div className="head"><h2><IPerf />모의투자</h2><Link to="/performance">성과 →</Link></div>
-            <div className="caption" style={{ marginBottom: 8 }}>{sysMode === "MOCK" ? "모의 데이터로 만든 시뮬레이션 — 실전 성과가 아닙니다" : "실데이터 가격으로 계산한 시뮬레이션 — 실제 주문이 아닙니다"}</div>
-            {x.performance ? (
-              <>
-                <div className="row spread"><span className="t-key-sm"><Change v={x.performance.return} /></span><span className="caption"><Term k="max_drawdown">최대 낙폭</Term> {pct(x.performance.max_drawdown)}</span></div>
-                <LineChart values={x.performance.curve} height={56} />
-                <div className="caption">기준일 {day(x.performance.as_of)} · 시작 자본 {price(x.performance.starting_capital)}</div>
-              </>
-            ) : <PaperCounts c={x.paper_counts} />}
-          </div>
-          <CoverageCard s={ss ?? null} />
           <div className="rail-card">
             <div className="head"><h2><IShield />데이터 연결</h2><Link to="/settings?tab=status">자세히 →</Link></div>
             {down.length ? <Notice tone="warn">일부 공급자가 중단되었습니다({down.map((h) => h.kind).join(", ")}). 해당 데이터는 ‘없음’으로 표시되고 판단에서 보수적으로 처리됩니다.</Notice>

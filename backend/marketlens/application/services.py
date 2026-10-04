@@ -28,6 +28,7 @@ from marketlens.application.broker import BrokerSync
 from marketlens.application.toss_quotes import TossQuoteFeed, live_quote
 from marketlens.domain.broker import merge_broker
 from marketlens.application.live_judge import LiveJudge, plans_from_rows
+from marketlens.application.ma_watch import MaWatch, levels_from_result
 from marketlens.application.rule_watch import RuleWatch
 from marketlens.application.refresher import Refresher, Snapshot
 from marketlens.application.registry import ProviderRegistry, build_registry
@@ -261,6 +262,8 @@ class MarketLensService:
         self.judge.on_reanalyze = self.request_reanalysis
         # the owner's own trade rules on the held names (내 규칙 알림): same prices, same alert center
         self.rule_watch = RuleWatch(add=self.judge.add, now=self.now)
+        self.ma_watch = MaWatch(add=self.judge.add, now=self.now)
+        self.ma_watch.loader = self._ma_levels
         self.quotes.on_price = self._on_price
         self._reanalyzed: dict[str, float] = {}
         self._briefing: tuple[str, float, dict[str, Any]] | None = None  # (KST day, monotonic time built, briefing)
@@ -720,6 +723,7 @@ class MarketLensService:
         """Every live price: the recommendation's verdict, then the owner's own rules on a held name."""
         self.judge.observe(ticker, price, ts)
         self.rule_watch.observe(ticker, price, ts)
+        self.ma_watch.observe(ticker, price, ts)
 
     def invalidate_live_plans(self) -> None:
         """Drop the plans after a change; they are reloaded by the next quote route or stream tick (≤ STATUS_EVERY_S),
@@ -781,6 +785,20 @@ class MarketLensService:
             issued_at = issued_at.replace(tzinfo=timezone.utc)
         return issued_at < datetime.fromisoformat(self._account_changed_at)
 
+    def _ma_levels(self) -> list[Any]:
+        """The 20 / 50 / 200-day lines of every held and watched name, from its newest analysis, on today's share basis."""
+        out = []
+        with self.sf() as s:
+            names = {h.ticker for h in self.portfolio(s).holdings} | {w.ticker for w in repo.watchlist(s)}
+            for t in sorted(names):
+                r = self.latest_company_recommendation(s, t)
+                if r is None:
+                    continue
+                lv = levels_from_result(t, r.result, r.as_of, self.levels_now(r).get("split_factor") or 1.0)
+                if lv is not None:
+                    out.append(lv)
+        return out
+
     def _load_live_plans(self) -> int:
         with self.sf() as s:
             pf = self.portfolio(s)
@@ -810,6 +828,7 @@ class MarketLensService:
         self.quotes.set_pinned("candidates", [p.ticker for p in bullish[: self.LIVE_CANDIDATES]])
         self.quotes.set_pinned("top", top)  # the list's top names get the live price (re-judged every few seconds)
         self.quotes.touch_all()  # every row goes out again with its new verdict
+        self.ma_watch.load()  # the held / watched names' moving-average lines, on the same background cadence
         return len(plans)
 
     # Owner 2026-09-29 ("9800X3D"): the whole pool every second — ~5 ms a name, so 100 names are a fraction of one core.
