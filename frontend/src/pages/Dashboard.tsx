@@ -17,7 +17,7 @@ import type { OppRow, ScanInfo } from "../types";
 
 export type { ScanStatus } from "../components/status";
 
-interface Dash {
+export interface Dash {
   scan: ScanInfo | null;
   regime: { primary: string; readings: { regime: string; score: number; confidence: number; evidence: string[] }[] };
   top_opportunities: OppRow[];
