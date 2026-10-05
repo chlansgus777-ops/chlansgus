@@ -51,6 +51,8 @@ export function PhoneSettings() {
                 </div>
               </div>
               <div className="caption">처음 켤 때 Windows 방화벽 창이 뜨면 ‘개인 네트워크’에 <b>허용</b>을 누르세요. 공용 와이파이·인터넷에서는 연결되지 않습니다.</div>
+              {/* independent review 2026-10-06 F08: the home-network link is plain http — say so where it is switched on */}
+              <div className="caption warn" data-testid="phone-plain-http">이 연결은 암호화되지 않습니다(http). 집처럼 믿을 수 있는 와이파이에서만 켜고, 카페·회사 등 남과 같이 쓰는 와이파이에서는 꺼 두세요. 쓰지 않을 때는 끄는 것이 안전합니다.</div>
               <div>
                 <div className="t-kicker">연결된 폰</div>
                 {d.devices.length ? (

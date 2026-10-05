@@ -950,6 +950,8 @@ a.brief-row:hover .txt { color: var(--text); }
 .bt-els .verdict.pos { color: var(--pos); background: rgba(52, 211, 153, 0.12); }
 .bt-els .verdict.warn { color: var(--warn); background: var(--warn-soft); }
 .bt-els .verdict.neg { color: var(--neg); background: rgba(255, 107, 107, 0.12); }
+.bt-scope { margin-bottom: 12px; padding: 8px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.55; color: var(--text-2); background: var(--warn-soft); border: 1px solid rgba(243, 201, 106, 0.25); }
+.bt-swing { margin-top: 16px; display: grid; gap: 8px; }
 .bt-apply { margin-top: 14px; display: grid; gap: 4px; font-size: 13px; color: var(--text-2); line-height: 1.5; }
 .bt-src { margin-top: 10px; font-size: 11.5px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 @media (max-width: 900px) { .bt-kpis { grid-template-columns: minmax(0, 1fr); } }

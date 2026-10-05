@@ -9,6 +9,7 @@ import "./live.css";
 /** Where the price stands against the stored plan, right now (re-judged on every quote by the backend). */
 export function zoneView(j: Judge): { tone: "buy" | "warn" | "danger" | "info" | "muted"; label: string; sub: string } | null {
   const rr = j.rr_now !== null ? `손익비 ${j.rr_now.toFixed(2)}` : "";
+  const old = j.quote_current ? "" : " · 마지막 확인 가격 기준";  // a stale price never reads as now
   switch (j.zone) {
     case "BUY_ZONE":
       return j.valid_now
@@ -18,10 +19,16 @@ export function zoneView(j: Judge): { tone: "buy" | "warn" | "danger" | "info" |
       return { tone: "warn", label: "최대 매수가 초과", sub: j.to_max_pct !== null ? `${pct(-j.to_max_pct, 1, false)} 위 · 기다리기` : "기다리기" };
     case "RR_LOW":
       return { tone: "warn", label: "손익비 부족", sub: `${rr} < ${j.min_rr}` };
+    // held or not reads differently (owner 2026-10-05: "매수하지도 않은 종목이 1차 목표가 도달"; review F07): for a name not
+    // held the level is the plan's, and the price passing it means the plan no longer fits — not a result of the owner's
     case "STOP_HIT":
-      return { tone: "danger", label: "손절 기준 도달", sub: j.held ? "보유 중 — 매도 검토" : `손절 ${price(j.stop)}` };
+      return j.held
+        ? { tone: "danger", label: "손절 기준 도달", sub: `보유 중 — 매도 검토${old}` }
+        : { tone: "warn", label: "계획 손절선 아래", sub: `손절 ${price(j.stop)} 아래 — 이 매수 계획은 무효${old}` };
     case "TARGET_HIT":
-      return { tone: "info", label: "1차 목표 도달", sub: j.held ? "보유 중 — 일부 차익 검토" : `목표 ${price(j.target)}` };
+      return j.held
+        ? { tone: "info", label: "1차 목표 도달", sub: `보유 중 — 일부 차익 검토${old}` }
+        : { tone: "muted", label: "계획 목표가 위", sub: `목표 ${price(j.target)} 위 — 지금 사기엔 늦음, 새 분석을 기다리세요${old}` };
     case "HOLD_RANGE":
       return { tone: "muted", label: "보유 구간", sub: [j.to_stop_pct !== null ? `손절까지 ${pct(j.to_stop_pct, 1)}` : "", j.to_target_pct !== null ? `목표까지 ${pct(j.to_target_pct, 1)}` : ""].filter(Boolean).join(" · ") };
     default:

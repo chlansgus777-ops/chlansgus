@@ -69,7 +69,8 @@ class ProviderUnavailableForView(Exception):
     """A screen's background read found no data (the reason is shown; the last good value is kept)."""
 
 
-REANALYZE_WHY = {"STOP_HIT": "손절 기준 도달", "TARGET_HIT": "목표가 도달", "STALE": "지난 장 이전 분석 — 화면에 떠 있어 새로 분석"}
+REANALYZE_WHY = {"STOP_HIT": "손절 기준 도달", "TARGET_HIT": "목표가 도달", "BIG_MOVE": "분석 뒤 5% 넘게 움직임",
+                 "STALE": "지난 장 이전 분석 — 화면에 떠 있어 새로 분석"}
 PLAN_PRICE_FIELDS = ("ideal_entry", "acceptable_low", "acceptable_high", "max_buy", "add_zone_low", "add_zone_high", "stop", "target1", "target2",
                      "support_used", "resistance_used")
 
@@ -1007,8 +1008,11 @@ class MarketLensService:
                 "review_reason": review_reason, "account": self._account_version,
                 "data_quality": execution_quality(res.data_quality, res.data_quality.overall.value), "vetoes": [v.value for v in res.decision.vetoes],
                 "max_buy": p.max_buy if p else None, "ideal_entry": p.ideal_entry if p else None, "stop": p.stop if p else None,
+                "max_buy_exact": p.max_buy_exact if p else None, "stop_exact": p.stop_exact if p else None,
                 "target1": p.target1 if p else None, "target2": p.target2 if p else None, "rr": p.rr_at_current if p else None,
                 "downside": p.downside_pct if p else None, "buy_zone_low": p.acceptable_low if p else None, "buy_zone_high": p.acceptable_high if p else None,
+                "add_zone_low": p.add_zone_low if p else None, "add_zone_high": p.add_zone_high if p else None,
+                "plan": p is not None,  # False = at this price there is no plan (not "not sent"): the page shows none
             }
             done += 1
         if len(self._rejudge_inputs) > 3 * self.LIVE_POOL:  # rows of older scans
@@ -1047,8 +1051,12 @@ class MarketLensService:
         lj = self.rejudged(p.rec_id)
         if not lj:
             return p
+        # the re-judged plan is measured from the price it was re-judged at (independent review F01: the old analysis
+        # price stayed, so a CURRENT re-judgement 4 % below it read "재확인 필요"); its age stays the analysis's own
+        exact = lambda k: lj.get(f"{k}_exact") if lj.get(f"{k}_exact") is not None else lj.get(k)  # noqa: E731
         return _replace(p, action=lj["action"], bullish=lj["action"] in {a.value for a in BULLISH_ACTIONS},
-                        data_ok=lj["current_status"] == "CURRENT", max_buy=lj["max_buy"], stop=lj["stop"], target1=lj["target1"],
+                        data_ok=lj["current_status"] == "CURRENT", rec_price=lj.get("price") or p.rec_price,
+                        max_buy=exact("max_buy"), stop=exact("stop"), target1=lj["target1"],
                         ideal_entry=lj["ideal_entry"], live_price=True)
 
     LIVE_POOL_AGE = 30.0  # seconds the pool list is reused (a new selection or a single re-analysis shows within this)
@@ -1273,7 +1281,9 @@ class MarketLensService:
 
         # every level of the plan, not only the headline ones (independent review 2026-09-28 F03: the stock page drew the
         # buy zone, second target and chart from the analysis snapshot — pre-split prices beside post-split ones)
-        return {"split_factor": f, "price": adj(row.price)} | {k: adj(entry.get(k)) for k in PLAN_PRICE_FIELDS}
+        # the exact max buy and stop next to the shown (cent) ones: every comparison uses the exact (review F02)
+        exact = {f"{k}_exact": adj(entry.get(f"{k}_exact")) for k in ("max_buy", "stop")}
+        return {"split_factor": f, "price": adj(row.price)} | {k: adj(entry.get(k)) for k in PLAN_PRICE_FIELDS} | exact
 
     def security_master(self, day: date) -> dict[str, Any]:
         """ticker → Security from the stored security master (LIVE) or the universe provider (MOCK), read at most every
@@ -1332,7 +1342,7 @@ class MarketLensService:
             return RecommendationFreshness("NEEDS_REVALIDATION", row.data_quality, 0, "계좌가 변경되어 비중·집중도 재검토가 필요합니다. 종목을 다시 분석하세요.")
         lv = levels if levels is not None else self.levels_now(row)
         bullish = row.final_action in {a.value for a in BULLISH_ACTIONS}
-        plan = PlanCheck(lv["price"], lv["max_buy"], lv["stop"], lv["target1"], self.base_cfg.decision.min_rr, bullish)
+        plan = PlanCheck(lv["price"], lv.get("max_buy_exact") or lv["max_buy"], lv.get("stop_exact") or lv["stop"], lv["target1"], self.base_cfg.decision.min_rr, bullish)
         f = self.data.peek_quote(row.ticker)
         live = self.quotes.latest(row.ticker)  # the app-wide stream/snapshot state: no provider call
         if f is None and live is None and fetch_quote:

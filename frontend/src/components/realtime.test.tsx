@@ -36,13 +36,24 @@ describe("the live zone", () => {
     expect(zoneView(J({ zone: "ABOVE_MAX", to_max_pct: -0.013 }))!.sub).toContain("1.3%");
     expect(zoneView(J({ zone: "NO_PLAN" }))).toBeNull();
   });
+  // owner 2026-10-05 "매수하지도 않은 종목이 1차 목표가 도달이라고 뜨고있어" · review F07
+  it("a name not held never reads as reaching ITS target or stop, and an old price says so", () => {
+    const t = zoneView(J({ zone: "TARGET_HIT", held: false, valid_now: false }))!;
+    expect(t.label).toBe("계획 목표가 위");
+    expect(t.label + t.sub).not.toContain("도달");
+    expect(zoneView(J({ zone: "TARGET_HIT", held: true }))!.label).toBe("1차 목표 도달");
+    const s = zoneView(J({ zone: "STOP_HIT", held: false, valid_now: false }))!;
+    expect(s.label).toBe("계획 손절선 아래");
+    expect(s.sub).toContain("무효");
+    expect(zoneView(J({ zone: "STOP_HIT", held: true, quote_current: false }))!.sub).toContain("마지막 확인 가격 기준");
+  });
   it("changes with the next quote without any reload, and replaces the stored status of the same recommendation", () => {
     render(<MemoryRouter><LiveZone ticker="NVDA" recId={7} /><UnlessLive ticker="NVDA" recId={7}><span>현재 유효</span></UnlessLive></MemoryRouter>);
     expect(screen.getByText("현재 유효")).toBeTruthy();  // no verdict yet: the stored status shows
     act(() => applyRows([row(1, J())]));
     expect(screen.getByTestId("zone-NVDA").dataset.zone).toBe("BUY_ZONE");
     expect(screen.queryByText("현재 유효")).toBeNull();  // never both side by side
-    act(() => applyRows([row(2, J({ zone: "STOP_HIT", valid_now: false }))]));
+    act(() => applyRows([row(2, J({ zone: "STOP_HIT", valid_now: false, held: true }))]));
     expect(screen.getByTestId("zone-NVDA").textContent).toContain("손절 기준 도달");
     act(() => applyRows([row(3, J({ rec_id: 8 }))]));  // another recommendation's plan: not this row's
     expect(screen.queryByTestId("zone-NVDA")).toBeNull();

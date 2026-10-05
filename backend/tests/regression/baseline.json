@@ -49,7 +49,7 @@
   },
   "entry": [
    112.74,
-   115.11,
+   115.1,
    119.85,
    0.32
   ],
@@ -81,7 +81,7 @@
   },
   "entry": [
    360.93,
-   369.45,
+   369.44,
    386.48,
    1.16
   ],
@@ -126,7 +126,7 @@
   "vetoes": []
  },
  "XOM": {
-  "action": "BUY SMALL",
+  "action": "WATCH",
   "changes": [
    "\uc774 \uc885\ubaa9\uc758 \uccab \ubd84\uc11d"
   ],
@@ -143,14 +143,14 @@
   },
   "entry": [
    306.08,
-   311.27,
+   311.26,
    321.65,
    2.26
   ],
   "issues": {
    "ISSUE_OIL_b0d427e2": 9.68
   },
-  "raw_action": "BUY SMALL",
+  "raw_action": "WATCH",
   "scoring_model_version": "scoring-2.2.0",
   "total": 65.83,
   "vetoes": []

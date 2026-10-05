@@ -13,9 +13,12 @@ def test_max_buy_derived_from_min_rr():
     p = build_entry_plan(t.last_close, t, cfg)
     assert p is not None
     assert p.max_buy == pytest.approx((p.target1 + 2 * p.stop) / 3, abs=0.02)
-    # at exactly max buy, R/R equals the minimum
-    rr_at_max = (p.target1 - p.max_buy) / (p.max_buy - p.stop)
+    # at exactly max buy, R/R equals the minimum (the exact level, before the cent shown on screen)
+    rr_at_max = (p.target1 - p.max_buy_exact) / (p.max_buy_exact - p.stop_exact)
     assert rr_at_max == pytest.approx(2.0, abs=0.02)
+    # the shown max buy is rounded DOWN (independent review F02), so buying at it never gives less than the minimum
+    assert p.max_buy <= p.max_buy_exact < p.max_buy + 0.01
+    assert (p.target1 - p.max_buy) / (p.max_buy - p.stop_exact) >= 2.0
     assert p.stop < p.ideal_entry <= p.max_buy < p.target1 <= p.target2
 
 

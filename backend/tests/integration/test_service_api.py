@@ -25,7 +25,10 @@ class CountingLLM(MockLLMProvider):
 def make_service(mode=DataMode.MOCK, llm=None, universe=200):
     eng = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(eng)
-    st = Settings(mode=mode, database_url="sqlite:///:memory:", sec_user_agent=None, llm_provider="mock" if mode == DataMode.MOCK else "none")
+    # the AI committee is off in the app (2026-10-05); these services exercise the research engine and its safety rules,
+    # so they switch it on explicitly (tests/integration/test_ai_retired.py checks the app's off state)
+    st = Settings(mode=mode, database_url="sqlite:///:memory:", sec_user_agent=None, llm_provider="mock" if mode == DataMode.MOCK else "none",
+                  enable_ai_committee=True)
     reg = build_mock_registry(now=NOW, universe_size=universe) if mode == DataMode.MOCK else build_live_registry(st)
     clock = {"t": NOW}
     svc = MarketLensService(st, make_session_factory(eng), registry=reg, llm=llm or (MockLLMProvider() if mode == DataMode.MOCK else UnavailableLLM()), now_fn=lambda: clock["t"])

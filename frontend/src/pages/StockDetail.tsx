@@ -212,8 +212,15 @@ function StockDetail({ ticker }: { ticker: string }) {
   const rawEv = a.evidence.find((x) => x.metric === "price.current" && typeof x.value === "number");
   const rawQuote = rawEv ? (rawEv.value as number) : null;
   const e0 = planNow(a.entry, stored, a.price);
-  const e = lj && e0 ? { ...e0, max_buy: lj.max_buy ?? e0.max_buy, stop: lj.stop ?? e0.stop, target1: lj.target1 ?? e0.target1, target2: lj.target2 ?? e0.target2,
-                         ideal_entry: lj.ideal_entry ?? e0.ideal_entry, rr_at_current: lj.rr ?? e0.rr_at_current } : e0;
+  // the live plan replaces the stored one as a whole (independent review F06): every level and zone from the same
+  // re-judgement, and "no plan at this price" is none — never the stored levels filling the gaps
+  const livePlan = lj ? (lj.plan === false || lj.max_buy == null || lj.stop == null || lj.target1 == null ? null : lj) : undefined;
+  const e = livePlan === undefined ? e0 : livePlan === null || !e0 ? null : {
+    ...e0, max_buy: livePlan.max_buy!, stop: livePlan.stop!, target1: livePlan.target1!, target2: livePlan.target2 ?? e0.target2,
+    ideal_entry: livePlan.ideal_entry ?? livePlan.max_buy!, rr_at_current: livePlan.rr,
+    acceptable_low: livePlan.buy_zone_low ?? livePlan.ideal_entry ?? livePlan.max_buy!, acceptable_high: livePlan.buy_zone_high ?? livePlan.max_buy!,
+    add_zone_low: livePlan.add_zone_low ?? e0.add_zone_low, add_zone_high: livePlan.add_zone_high ?? e0.add_zone_high,
+  };
   const finalAction = lj ? lj.action : rec.action;
   const recStatus = lvj.error ? "UNVERIFIED" : lj ? lj.current_status ?? "NEEDS_REVALIDATION" : rec.current_status;
   const adv = advise({ action: finalAction, price: priceNow, maxBuy: e?.max_buy, idealEntry: e?.ideal_entry, stop: e?.stop, rr: e?.rr_at_current, eventRisk: a.event_risk.level, vetoes: lj ? lj.vetoes : a.decision.vetoes, sizeLimit: a.decision.size_limit, status: recStatus, sectorKnown: a.sector_known });
@@ -250,7 +257,7 @@ function StockDetail({ ticker }: { ticker: string }) {
         <div className="sticky-sum" aria-label={`${a.ticker} 요약`}>
           <b>{a.ticker}</b>
           <LivePrice ticker={a.ticker} size="sm" />
-          <Action a={finalAction} status={rec.current_status} quality={rec.execution_quality ?? rec.data_quality} />
+          <Action a={finalAction} status={recStatus} quality={lj ? lj.data_quality : rec.execution_quality ?? rec.data_quality} />
           {e ? <span className="caption">최대 매수 <b className="num">{price(e.max_buy)}</b> · 손절 <b className="num">{price(e.stop)}</b></span> : null}
           <button className="sm ghost" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>맨 위로</button>
         </div>
@@ -352,7 +359,9 @@ function StockDetail({ ticker }: { ticker: string }) {
       )}
 
       {/* ② 판단 이유: what changed and why it matters, then what supports / argues against the call */}
-      <Section no={2} title="판단 이유" sub="무엇이 달라졌고, 무엇이 판단을 지지하거나 반대하나 — 문장마다 사실·계산·해석을 표시" />
+      <Section no={2} title="판단 이유" sub={lj
+        ? `분석 시점(${stamp(a.as_of)})의 이유입니다 — 위 결론과 가격 계획은 지금 가격으로 다시 계산한 것`  // review F06
+        : "무엇이 달라졌고, 무엇이 판단을 지지하거나 반대하나 — 문장마다 사실·계산·해석을 표시"} />
       <div className="card">
         <div className="card-head"><h3 className="t-card">최근 무엇이 달라졌나</h3><span className="caption">분석 {stampEt(rec.as_of)} 기준</span></div>
         {brief ? <StmtList items={brief.changed} index={evIndex} empty="지난 분석 이후 달라진 점이 없습니다." />

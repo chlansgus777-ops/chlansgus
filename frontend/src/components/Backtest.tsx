@@ -1,6 +1,7 @@
 import { Card, Empty, LineChart } from "./ui";
 import { useApi } from "./useApi";
 import { pct } from "../format";
+import { BUY_SCORE, SMALL_SCORE } from "../thresholds";
 import { COMPONENT_KO } from "../i18n";
 
 /** 과거 검증 (PREREGISTRATION §12: shown whether or not anything was adopted) — the committed summary of the measured
@@ -18,6 +19,12 @@ export type BacktestSummary = {
   strategy?: { assumption: string; start?: string; end?: string; cagr?: number | null; spy_cagr?: number | null; excess_cagr?: number | null; sharpe?: number | null; max_drawdown?: number | null; trades?: number | null; equity_weekly?: [string, number][] };
   application?: { s12: Decision; s13: Decision; final_weights: Record<string, number> | null; operating_weights: Record<string, number> | null; changed: boolean | null };
   leak_checks?: { truncated_all_equal: boolean | null; shuffle_mean_ic: number | null };
+  /** the buy thresholds the run used (§16: 68 · 62) — compared with today's on screen */
+  thresholds?: { buy: number; buy_small: number; prereg?: string } | null;
+  /** §17: price-only short-term strategies, apart from the score */
+  swing?: { prereg: string; assumption: string; spy: { train_cagr: number; holdout_cagr: number; holdout_sharpe: number };
+    periods: { train: [string, string]; holdout: [string, string] };
+    strategies: Record<string, { name: string; train_cagr: number; holdout_cagr: number; holdout_sharpe: number; holdout_max_drawdown: number; holdout_trades: number; holdout_win_rate: number; adopt: boolean }> } | null;
 };
 
 const SIGNAL_KO: Record<string, string> = { high52: "52주 신고가 근접도", rs_rank: "상대강도 순위", fscore: "F-스코어", ear: "실적 발표 후 추세" };
@@ -58,16 +65,21 @@ export function BacktestView({ b }: { b: BacktestSummary }) {
   const changed = app?.changed && app.final_weights && app.operating_weights
     ? Object.keys(app.final_weights).filter((k) => app.final_weights![k] !== app.operating_weights![k]) : [];
   return (
-    <Card title={`과거 검증 (${b.window?.[0]?.slice(0, 4) ?? "?"}~${b.window?.[1]?.slice(0, 4) ?? "?"} · 매주 · 앱 규칙 그대로)`} testId="backtest"
+    <Card title={`과거 검증 (${b.window?.[0]?.slice(0, 4) ?? "?"}~${b.window?.[1]?.slice(0, 4) ?? "?"} · 매주 · 과거 자료로 확인할 수 있는 요소만)`} testId="backtest"
           explain={<>{b.disclaimer} 그때 공개된 자료만으로 매주 분석하고, 그 뒤의 실제 수익과 비교했습니다. 자료 {b.data?.weeks ?? "?"}주 · 판정 {b.data?.verdict ?? "?"}.</>}>
+      {/* independent review 2026-10-06 F05: what the run did NOT use, and whether its thresholds are today's */}
+      <div className="bt-scope" data-testid="backtest-scope">
+        실적·추정치와 촉매 점수는 과거 자료가 없어 빼고 계산했습니다(그 몫은 다른 요소에 나눔).
+        {b.thresholds ? <> 이 검증의 매수 기준은 {b.thresholds.buy}·{b.thresholds.buy_small}점, 지금 앱은 {BUY_SCORE}·{SMALL_SCORE}점{b.thresholds.buy === BUY_SCORE && b.thresholds.buy_small === SMALL_SCORE ? "으로 같습니다." : " — 지금 기준은 아직 검증 전입니다."}</> : null}
+      </div>
       <div className="bt-kpis">
-        <div><div className="t">앱 규칙 전략 연수익</div><div className={`v ${((st?.cagr ?? 0) >= 0) ? "pos" : "neg"}`}>{pct(st?.cagr ?? null, 1)}</div><div className="s">SPY {pct(st?.spy_cagr ?? null, 1)} · 초과 {pct(st?.excess_cagr ?? null, 1)}</div></div>
+        <div><div className="t">앱 판정대로 매매 (모의) 연수익</div><div className={`v ${((st?.cagr ?? 0) >= 0) ? "pos" : "neg"}`}>{pct(st?.cagr ?? null, 1)}</div><div className="s">SPY {pct(st?.spy_cagr ?? null, 1)} · 초과 {pct(st?.excess_cagr ?? null, 1)}</div></div>
         <div><div className="t">최대 낙폭</div><div className="v neg">{pct(st?.max_drawdown ?? null, 1)}</div><div className="s">샤프 {st?.sharpe == null ? "N/A" : st.sharpe.toFixed(2)} · 거래 {st?.trades ?? "N/A"}회</div></div>
         <div><div className="t">점수 상위 − 하위 5분위</div><div className={`v ${((q?.top_minus_bottom?.mean ?? 0) >= 0) ? "pos" : "neg"}`}>{pct(q?.top_minus_bottom?.mean ?? null, 2)}</div>
           <div className="s">60거래일 · 90% 구간 {pct(q?.top_minus_bottom?.ci90_block12?.[0] ?? null, 1)} ~ {pct(q?.top_minus_bottom?.ci90_block12?.[1] ?? null, 1)}</div></div>
       </div>
       {st?.equity_weekly && st.equity_weekly.length > 1 && (
-        <div className="bt-chart"><div className="t-sub">앱 규칙 전략 평가금액 ($100,000 시작 · {st.assumption})</div><LineChart values={st.equity_weekly.map((p) => p[1])} height={110} /></div>
+        <div className="bt-chart"><div className="t-sub">앱 판정대로 매매한 모의 평가금액 ($100,000 시작 · {st.assumption})</div><LineChart values={st.equity_weekly.map((p) => p[1])} height={110} /></div>
       )}
       {q && (
         <div className="bt-quint" aria-label="점수 5분위별 SPY 대비 초과 수익">
@@ -98,9 +110,32 @@ export function BacktestView({ b }: { b: BacktestSummary }) {
         <div>{decisionLine(app?.s13 ?? null, "수익 신호 반영(13절)")}</div>
         <div className="muted">{changed.length ? `운영 가중치 변경: ${changed.map((k) => `${compName(k)} ${app!.operating_weights![k]}→${Math.round(app!.final_weights![k]! * 10) / 10}`).join(", ")}` : "운영 가중치는 바뀌지 않았습니다."}</div>
       </div>
+      {b.swing && <SwingTable s={b.swing} />}
       <div className="bt-src muted">결과 {b.source?.results_sha256.slice(0, 12)} · 자료 {b.source?.data_sha256.slice(0, 12)} · 코드 {b.source?.commit?.slice(0, 7)}{b.source?.workflow_run ? ` · 실행 #${b.source.workflow_run}` : ""}
         {b.leak_checks?.truncated_all_equal != null ? ` · 미래 자료 누수 검사 ${b.leak_checks.truncated_all_equal ? "통과" : "실패"}` : ""}</div>
     </Card>
+  );
+}
+
+/** §17: the short-term price rules the owner asked about, measured once with the rule fixed beforehand. */
+function SwingTable({ s }: { s: NonNullable<BacktestSummary["swing"]> }) {
+  const any = Object.values(s.strategies).some((x) => x.adopt);
+  return (
+    <div className="bt-swing" data-testid="backtest-swing">
+      <div className="t-sub">단타 전략 검증 ({s.prereg} · {s.assumption})</div>
+      <table className="bt-els">
+        <thead><tr><th>전략</th><th className="num">학습 연수익</th><th className="num">검증 연수익</th><th className="num">검증 최대 낙폭</th><th className="num">승률</th><th>앱 반영</th></tr></thead>
+        <tbody>
+          {Object.entries(s.strategies).map(([k, x]) => (
+            <tr key={k}><td>{x.name}</td><td className="num">{pct(x.train_cagr, 1)}</td><td className={`num ${x.holdout_cagr >= 0 ? "pos" : "neg"}`}>{pct(x.holdout_cagr, 1)}</td>
+              <td className="num">{pct(x.holdout_max_drawdown, 0)}</td><td className="num">{pct(x.holdout_win_rate, 0, false)}</td>
+              <td><span className={`verdict ${x.adopt ? "pos" : "muted"}`}>{x.adopt ? "반영" : "기준 미달"}</span></td></tr>
+          ))}
+          <tr className="ref"><td>SPY 그냥 보유</td><td className="num">{pct(s.spy.train_cagr, 1)}</td><td className="num">{pct(s.spy.holdout_cagr, 1)}</td><td /><td /><td /></tr>
+        </tbody>
+      </table>
+      <div className="caption">{any ? "기준을 통과한 전략만 실시간 신호로 넣었습니다." : "미리 정한 기준(검증 구간 수익 > 0, 샤프 > SPY, 학습 구간 수익 > 0)을 통과한 전략이 없어 앱에 넣지 않았습니다. 승률은 60% 안팎이지만 한 번에 버는 폭이 작아 거래 비용을 넘지 못했습니다."}</div>
+    </div>
   );
 }
 

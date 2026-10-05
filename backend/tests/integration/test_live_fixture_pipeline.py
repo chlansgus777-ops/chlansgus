@@ -24,7 +24,8 @@ from tests.live_fixtures import NOW, live_transport
 def live():
     seen: list[str] = []
     st = Settings(mode=DataMode.LIVE, database_url="sqlite:///:memory:", sec_user_agent="MarketLens test test@example.com",
-                  finnhub_api_key="fixture-key", fred_api_key="fixture-key", polygon_api_key="fixture-key", alphavantage_api_key="fixture-key", llm_provider="none")
+                  finnhub_api_key="fixture-key", fred_api_key="fixture-key", polygon_api_key="fixture-key", alphavantage_api_key="fixture-key", llm_provider="none",
+                  enable_ai_committee=True)  # the engine with no LLM must say UNAVAILABLE, never fall back to the mock
     reg = build_live_registry(st, transport=live_transport(seen), sleep=lambda _s: None)
     eng = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(eng)

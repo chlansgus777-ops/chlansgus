@@ -342,7 +342,8 @@ describe("data preparation stays reachable (owner: '데이터 준비 시작은 �
     serve([[/\/dashboard/, dash([row()], { readiness: ready })], [/\/scan\/status/, { state: null, coverage: null }], [/\/sync\/status/, { job: null }], [/\/system/, system("LIVE")], [/./, {}]]);
     render(<MemoryRouter><StatusProvider><Dashboard /></StatusProvider></MemoryRouter>);
     expect(await screen.findByRole("button", { name: "데이터 준비 시작" })).toBeTruthy();
-    expect(screen.getByTestId("goto-data-prep")).toBeTruthy();
+    // the small top-right shortcut to it was removed (owner 2026-10-05: "홈탭에 있는 데이터준비 작은버튼 없애줘")
+    expect(screen.queryByTestId("goto-data-prep")).toBeNull();
   });
   it("MOCK: no preparation button (nothing to download)", async () => {
     serve([[/\/dashboard/, dash([row()])], [/\/scan\/status/, { state: null, coverage: null }], [/\/system/, system("MOCK")], [/./, {}]]);

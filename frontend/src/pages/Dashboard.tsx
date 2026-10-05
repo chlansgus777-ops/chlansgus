@@ -1,7 +1,7 @@
 import { sectorKo } from "../i18n";
 import { Fragment } from "react";
 import { Link } from "react-router-dom";
-import { IArrow, IDownload, IEvent, IPortfolio, IStar } from "../components/icons";
+import { IArrow, IEvent, IPortfolio, IStar } from "../components/icons";
 import { Action, Card, Empty, Err, Loading, Notice, ScoreMeter, StaleData, StatePanel } from "../components/ui";
 import { NotReady, ReadinessBanner, SyncControl, type ReadinessInfo } from "../components/Readiness";
 import { type ScanStatus, usePageTime, useStatus } from "../components/status";
@@ -215,9 +215,6 @@ export default function Dashboard() {
         <div>
           <h1>오늘</h1>
           <div className="t-sub">{x.scan ? <>{lv.at ? <><span className="live-dot" aria-hidden />실시간 판정 · 1초 · </> : null}후보 선정 {stampEt(x.scan.as_of)} ({ago(x.scan.as_of, nowMs)}){scope ? ` · ${scope}` : ""}</> : choosing ? "시장 분석을 실행 중입니다. 준비된 결과부터 표시합니다." : "데이터 준비와 자동 분석 상태는 설정에서 확인할 수 있습니다."}</div>
-        </div>
-        <div className="actions">
-          {sysMode === "LIVE" && <button data-testid="goto-data-prep" onClick={() => document.getElementById("data-prep")?.scrollIntoView({ behavior: "smooth", block: "start" })}><IDownload />데이터 준비</button>}
         </div>
       </div>
 

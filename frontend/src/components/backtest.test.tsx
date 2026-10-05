@@ -49,3 +49,22 @@ it("names every element in Korean", () => {
   expect(elementName("component.fundamental")).toBe("펀더멘털");
   expect(elementName("signal.rs_rank")).toBe("상대강도 순위 (참고)");
 });
+
+// independent review 2026-10-06 F05: the card says what the run left out and whether its thresholds are today's;
+// §17's short-term strategies are shown with the rule's verdict, never as a recommendation
+it("says what the run left out, flags thresholds that differ from today's, and shows the short-term verdicts", () => {
+  const swing: BacktestSummary["swing"] = {
+    prereg: "§17", assumption: "다음 날 시가 체결 · 비용 0.1%/회", spy: { train_cagr: 0.095, holdout_cagr: 0.191, holdout_sharpe: 1.2 },
+    periods: { train: ["2017-01-06", "2023-10-20"], holdout: ["2024-01-19", "2026-09-25"] },
+    strategies: { B1: { name: "급락 반등(추세 위)", train_cagr: -0.009, holdout_cagr: 0.093, holdout_sharpe: 0.45, holdout_max_drawdown: -0.285, holdout_trades: 1296, holdout_win_rate: 0.61, adopt: false } },
+  };
+  render(<BacktestView b={{ ...B, thresholds: { buy: 50, buy_small: 40 }, swing }} />);
+  expect(screen.getByTestId("backtest-scope").textContent).toContain("실적·추정치와 촉매 점수는 과거 자료가 없어 빼고");
+  expect(screen.getByTestId("backtest-scope").textContent).toContain("지금 기준은 아직 검증 전");
+  const sw = screen.getByTestId("backtest-swing").textContent!;
+  expect(sw).toContain("급락 반등(추세 위)");
+  expect(sw).toContain("+9.3%");
+  expect(sw).toContain("기준 미달");
+  expect(sw).toContain("SPY 그냥 보유");
+  expect(screen.getByTestId("backtest").textContent).not.toContain("앱 규칙 그대로");
+});

@@ -6,6 +6,8 @@ Maximum buy price is derived from the minimum acceptable reward/risk:
 
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass
 
 from marketlens.domain.indicators import TechnicalSnapshot
@@ -141,10 +143,10 @@ def build_entry_plan(
         return None
     return EntryPlan(
         current_price=price,
-        ideal_entry=round(ideal, 2),
-        acceptable_low=round(low, 2),
-        acceptable_high=round(max_buy, 2),
-        max_buy=round(max_buy, 2),
+        ideal_entry=min(round(ideal, 2), _floor_cent(max_buy)),  # never shown above the max buy
+        acceptable_low=min(round(low, 2), _floor_cent(max_buy)),
+        acceptable_high=_floor_cent(max_buy),
+        max_buy=_floor_cent(max_buy),
         add_zone_low=round(add_low, 2),
         add_zone_high=round(add_high, 2),
         stop=round(stop, 2),
@@ -162,6 +164,12 @@ def build_entry_plan(
         add_zone_low_exact=add_low,
         add_zone_high_exact=add_high,
     )
+
+
+def _floor_cent(v: float) -> float:
+    """The shown max buy never admits a price above the exact one (independent review F02: 100.006 showed as 100.01
+    and 100.008 read as inside the buy zone)."""
+    return math.floor(v * 100 + 1e-9) / 100
 
 
 @dataclass(frozen=True, slots=True)

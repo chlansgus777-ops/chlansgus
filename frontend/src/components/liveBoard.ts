@@ -10,6 +10,7 @@ export type LiveJudgement = {
   at: string; quote_ts: string; price: number | null; source: string; session: string; price_quality?: string; action: string; score: number; data_quality: string;
   vetoes: string[]; max_buy: number | null; ideal_entry: number | null; stop: number | null; target1: number | null; target2: number | null;
   rr: number | null; downside: number | null; buy_zone_low: number | null; buy_zone_high: number | null;
+  add_zone_low?: number | null; add_zone_high?: number | null; plan?: boolean;
 };
 export type LiveBoard = { at: string; every_s: number; rows: Record<string, LiveJudgement> };
 

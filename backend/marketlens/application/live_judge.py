@@ -32,6 +32,10 @@ BUY_ZONE, ABOVE_MAX, RR_LOW, STOP_HIT, TARGET_HIT, HOLD_RANGE, NO_PLAN = (
     "BUY_ZONE", "ABOVE_MAX", "RR_LOW", "STOP_HIT", "TARGET_HIT", "HOLD_RANGE", "NO_PLAN")
 REANALYZE_MOVE = 0.05  # a move this large since the analysis asks for a fresh analysis of the name
 ALERTS_KEPT = 200
+# owner 2026-10-05 + independent review F04: a price wobbling at the max buy re-entered the buy zone again and again,
+# one "매수 구간 진입" each time — the buy-zone alerts of a name (entering and leaving) say it at most once in this
+# window. Stop and target alerts are never held back.
+BUY_ALERT_COOLDOWN = timedelta(minutes=5)
 
 
 @dataclass(frozen=True)
@@ -72,6 +76,11 @@ class Alert:
                 "price": self.price, "rec_id": self.rec_id} | self.extra
 
 
+def _cent(v: float | None) -> float | None:
+    """A level as shown (the comparisons use the exact plan; independent review F02)."""
+    return None if v is None else round(v, 2)
+
+
 def _pct(a: float | None, b: float | None) -> float | None:
     return None if a is None or b in (None, 0) else a / b - 1  # type: ignore[operator]
 
@@ -107,7 +116,7 @@ def judge(p: LivePlan, price: float, quote_ts: datetime | None, now: datetime, p
     return {
         "rec_id": p.rec_id, "as_of": p.as_of.isoformat(), "action": p.action, "action_ko": ACTION_KO.get(Action(p.action), p.action) if p.action in Action._value2member_map_ else p.action,
         "bullish": p.bullish, "zone": zone, "rr_now": rr, "min_rr": p.min_rr,
-        "max_buy": p.max_buy, "stop": p.stop, "target": p.target1, "ideal_entry": p.ideal_entry,
+        "max_buy": _cent(p.max_buy), "stop": _cent(p.stop), "target": _cent(p.target1), "ideal_entry": _cent(p.ideal_entry),
         "to_max_pct": _pct(p.max_buy, price), "to_stop_pct": _pct(p.stop, price), "to_target_pct": _pct(p.target1, price),
         "move_pct": move, "quote_current": current, "quote_age_s": age,
         # "buy now" needs everything at once: a buy call made on fresh data, the price inside the plan, a current quote
@@ -128,6 +137,8 @@ class LiveJudge:
         self._lock = threading.Lock()
         self._plans: dict[str, LivePlan] = {}
         self._zone: dict[str, tuple[int, str]] = {}  # ticker → (rec_id, zone) last announced
+        self._buy_said: dict[str, datetime] = {}  # ticker → when a buy-zone alert (in or out) was last recorded
+        self._move_asked: set[tuple[str, int]] = set()  # (ticker, rec_id) whose big move already asked for a re-analysis
         self._alerts: deque[Alert] = deque(maxlen=ALERTS_KEPT)
         self._next_id = 1
         self._alert_cv = threading.Condition(self._lock)
@@ -175,25 +186,50 @@ class LiveJudge:
         if prev is None:
             if zone in (STOP_HIT, TARGET_HIT) and p.held:  # already beyond a level when first seen: still worth saying once
                 self._event(p, j, zone, price)
-            return
-        if prev[1] == zone:
-            return
-        self._event(p, j, zone, price, prev[1])
+        elif prev[1] != zone:
+            self._event(p, j, zone, price, prev[1])
+        # a large move since the analysis asks for a fresh one whether or not the zone changed (independent review F03:
+        # 100 → 94 stayed inside the buy zone and nothing was asked) — once per analysis; the service throttles too
+        if j["needs_reanalysis"] and zone not in (STOP_HIT, TARGET_HIT) and self.on_reanalyze is not None:
+            key = (p.ticker, p.rec_id)
+            with self._lock:
+                first = key not in self._move_asked
+                self._move_asked.add(key)
+            if first:
+                self.on_reanalyze(p.ticker, "BIG_MOVE")
+
+    def _buy_alert_due(self, ticker: str) -> bool:
+        """Whether a buy-zone alert of ``ticker`` may be recorded now (BUY_ALERT_COOLDOWN); records it if so."""
+        now = self._now()
+        with self._lock:
+            last = self._buy_said.get(ticker)
+            if last is not None and now - last < BUY_ALERT_COOLDOWN:
+                return False
+            self._buy_said[ticker] = now
+            return True
 
     def _event(self, p: LivePlan, j: dict[str, Any], zone: str, price: float, prev: str | None = None) -> None:
         t = p.ticker
         who = "보유 종목" if p.held else "관심 종목" if p.watched else "후보"
         if zone == BUY_ZONE and j["valid_now"]:
-            self.add(t, "BUY_ZONE", "positive", f"{t} 매수 구간 진입 — ${price:,.2f} (최대 매수가 ${p.max_buy:,.2f} 이하, 손익비 {j['rr_now']:.2f})", price, p.rec_id)
+            if self._buy_alert_due(t):
+                    self.add(t, "BUY_ZONE", "positive", f"{t} 매수 구간 진입 — ${price:,.2f} (최대 매수가 ${p.max_buy:,.2f} 이하, 손익비 {j['rr_now']:.2f})", price, p.rec_id)
         elif zone == STOP_HIT:
-            lvl = "danger" if p.held else "warning"
-            self.add(t, "STOP_HIT", lvl, f"{t} 손절 기준 도달 — ${price:,.2f} ≤ ${p.stop:,.2f}" + (" · 보유 중: 매도 검토" if p.held else f" ({who})"), price, p.rec_id)
+            # held or not reads differently (owner 2026-10-05; review F07): a name not held has no stop of the owner's
+            if p.held:
+                self.add(t, "STOP_HIT", "danger", f"{t} 손절 기준 도달 — ${price:,.2f} ≤ ${p.stop:,.2f} · 보유 중: 매도 검토", price, p.rec_id)
+            else:
+                self.add(t, "STOP_HIT", "warning", f"{t} 계획 손절선 아래 — ${price:,.2f} ≤ ${p.stop:,.2f} ({who}: 이 매수 계획은 무효)", price, p.rec_id)
         elif zone == TARGET_HIT:
-            self.add(t, "TARGET_HIT", "positive" if p.held else "info", f"{t} 1차 목표가 도달 — ${price:,.2f} ≥ ${p.target1:,.2f}" + (" · 보유 중: 일부 차익 검토" if p.held else ""), price, p.rec_id)
+            if p.held:
+                self.add(t, "TARGET_HIT", "positive", f"{t} 1차 목표가 도달 — ${price:,.2f} ≥ ${p.target1:,.2f} · 보유 중: 일부 차익 검토", price, p.rec_id)
+            else:
+                self.add(t, "TARGET_HIT", "info", f"{t} 계획 목표가 위로 — ${price:,.2f} ≥ ${p.target1:,.2f} ({who}: 지금 사기엔 늦음)", price, p.rec_id)
         elif prev == BUY_ZONE and zone in (ABOVE_MAX, RR_LOW):
             why = f"최대 매수가 ${p.max_buy:,.2f} 초과" if zone == ABOVE_MAX else f"손익비 {j['rr_now']:.2f} < {p.min_rr:g}"
-            self.add(t, "LEFT_BUY_ZONE", "info", f"{t} 매수 구간 이탈 — ${price:,.2f} ({why})", price, p.rec_id)
-        if j["needs_reanalysis"] and self.on_reanalyze is not None:
+            if self._buy_alert_due(t):
+                self.add(t, "LEFT_BUY_ZONE", "info", f"{t} 매수 구간 이탈 — ${price:,.2f} ({why})", price, p.rec_id)
+        if zone in (STOP_HIT, TARGET_HIT) and self.on_reanalyze is not None:
             self.on_reanalyze(t, zone)
 
     # ------------------------------------------------------------------ alerts
@@ -215,6 +251,12 @@ class LiveJudge:
             return self._next_id - 1
 
 
+def _exact(lv: dict[str, Any], k: str) -> float | None:
+    """The exact level when the analysis stored one (the comparisons never use the cent-rounded display value)."""
+    v = lv.get(f"{k}_exact")
+    return v if v is not None else lv.get(k)
+
+
 def plans_from_rows(rows: list[Any], levels: Callable[[Any], dict[str, Any]], min_rr: float, held: dict[str, tuple[float, float]],
                     watched: set[str]) -> list[LivePlan]:
     """LivePlans from stored recommendation rows (newest per ticker first in ``rows``); ``levels`` = levels_now."""
@@ -228,7 +270,7 @@ def plans_from_rows(rows: list[Any], levels: Callable[[Any], dict[str, Any]], mi
         out[r.ticker] = LivePlan(
             ticker=r.ticker, rec_id=r.id, as_of=r.as_of if r.as_of.tzinfo else r.as_of.replace(tzinfo=timezone.utc), action=r.final_action,
             bullish=r.final_action in bullish, data_ok=execution_quality((r.result or {}).get("data_quality"), r.data_quality) in ("FRESH", "DELAYED"), rec_price=lv.get("price"),
-            max_buy=lv.get("max_buy"), stop=lv.get("stop"), target1=lv.get("target1"), ideal_entry=lv.get("ideal_entry"), min_rr=min_rr,
+            max_buy=_exact(lv, "max_buy"), stop=_exact(lv, "stop"), target1=lv.get("target1"), ideal_entry=lv.get("ideal_entry"), min_rr=min_rr,
             held=h is not None, held_cost=h[0] if h else None, held_qty=h[1] if h else None, watched=r.ticker in watched)
     return list(out.values())
 

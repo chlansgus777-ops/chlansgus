@@ -268,7 +268,7 @@ class Settings:
     fast_model: str = "claude-haiku-4-5"
     deep_model: str = "claude-opus-5"
     enable_paper_trading: bool = True
-    enable_ai_committee: bool = True
+    enable_ai_committee: bool = False  # retired from the app (2026-10-05); research runs switch it on explicitly
     mock_universe_size: int = 600
     log_level: str = "INFO"
     scheduler: bool = False

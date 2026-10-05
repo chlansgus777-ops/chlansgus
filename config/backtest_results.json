@@ -1,1 +1,439 @@
-{"application":{"changed":true,"final_weights":{"catalyst":10.0,"earnings_revision":15.0,"entry_rr":10.0,"fundamental":30.0,"macro":5.0,"return_signals":0.0,"risk":10.0,"technical":10.0,"valuation":10.0},"operating_weights":{"catalyst":10.0,"earnings_revision":15.0,"entry_rr":15.0,"fundamental":25.0,"macro":10.0,"return_signals":0.0,"risk":10.0,"technical":10.0,"valuation":15.0},"s12":{"adopted":true,"drawdown":true,"ic":true,"log":["valuation: 효과 없음 (IC +0.0115) → −5점","macro: 효과 없음 (IC -0.0123) → −5점","entry_rr: 효과 없음 (IC +0.0002) → −5점","fundamental: 유효 (IC +0.0377) → +5.00점","남은 10.00점은 나눠 줄 유효 요소가 없어 합계 정규화(점수는 가중 평균이라 0–100 유지)"],"new":{"max_drawdown":-0.02669905,"mean_ic":0.01255304,"top_minus_bottom":0.00083373,"weeks":128},"old":{"max_drawdown":-0.03095611,"mean_ic":0.01228969,"top_minus_bottom":-0.00221756,"weeks":128},"proposed":{"catalyst":10.0,"earnings_revision":15.0,"entry_rr":10.0,"fundamental":30.0,"macro":5.0,"return_signals":0.0,"risk":10.0,"technical":10.0,"valuation":10.0},"quintile":true,"why":"검증 기간 조건 3개 모두 만족 → 채택"},"s13":{"adopted":false,"candidate":null,"train":{"criteria":{"a":false,"b":true,"c":false,"d":true},"holm_p":1.0,"mean_ic":0.02372027,"verdict":"약함"},"why":"학습 기간 판정 약함 → 0점 유지, 채택 시험 안 함"}},"available":true,"data":{"adjust_allowed":true,"prefix":"","verdict":"충분","weeks":560},"disclaimer":"과거 시뮬레이션이며 미래 수익을 보장하지 않습니다.","elements":{"component.catalyst":{"coverage_mean":null,"criteria":null,"holm_p":null,"mean_ic":null,"mean_ic_h20":null,"verdict":"검증 불가","weeks":null},"component.earnings_revision":{"coverage_mean":null,"criteria":null,"holm_p":null,"mean_ic":null,"mean_ic_h20":null,"verdict":"검증 불가","weeks":null},"component.entry_rr":{"coverage_mean":0.99999832,"criteria":{"a":false,"b":false,"c":false,"d":true},"holm_p":0.69840716,"mean_ic":-0.00212536,"mean_ic_h20":-0.00162005,"verdict":"약함","weeks":488},"component.fundamental":{"coverage_mean":0.41317638,"criteria":{"a":true,"b":true,"c":true,"d":true},"holm_p":0.00054841,"mean_ic":0.03056694,"mean_ic_h20":0.01801944,"verdict":"유효","weeks":488},"component.macro":{"coverage_mean":0.93442623,"criteria":{"a":false,"b":false,"c":false,"d":true},"holm_p":0.48391479,"mean_ic":-0.01482054,"mean_ic_h20":-0.01206503,"verdict":"약함","weeks":456},"component.return_signals":{"coverage_mean":0.97787486,"criteria":{"a":false,"b":true,"c":false,"d":true},"holm_p":0.69840716,"mean_ic":0.02391873,"mean_ic_h20":0.01164785,"verdict":"약함","weeks":488},"component.risk":{"coverage_mean":1.0,"criteria":{"a":false,"b":true,"c":true,"d":true},"holm_p":0.36492347,"mean_ic":0.03480902,"mean_ic_h20":0.0195498,"verdict":"약함","weeks":488},"component.technical":{"coverage_mean":0.99445869,"criteria":{"a":false,"b":false,"c":false,"d":true},"holm_p":0.69840716,"mean_ic":0.01937543,"mean_ic_h20":0.00558173,"verdict":"약함","weeks":488},"component.valuation":{"coverage_mean":0.16898956,"criteria":{"a":false,"b":false,"c":false,"d":false},"holm_p":0.53286779,"mean_ic":0.01423082,"mean_ic_h20":0.00513609,"verdict":"효과 없음","weeks":488},"score":{"coverage_mean":1.0,"criteria":{"a":true,"b":true,"c":true,"d":true},"holm_p":0.00471263,"mean_ic":0.03385877,"mean_ic_h20":0.01560099,"verdict":"유효","weeks":488},"sell_score":{"coverage_mean":1.0,"criteria":{"a":true,"b":true,"c":true,"d":true},"holm_p":0.00835948,"mean_ic":0.03144057,"mean_ic_h20":0.01430478,"verdict":"유효","weeks":488},"signal.ear":{"coverage_mean":0.0,"criteria":null,"holm_p":null,"mean_ic":null,"mean_ic_h20":null,"verdict":"측정 불가(값 없음)","weeks":0},"signal.fscore":{"coverage_mean":0.2471541,"criteria":null,"holm_p":null,"mean_ic":0.02119722,"mean_ic_h20":0.01215071,"verdict":"참고용(판정 안 함)","weeks":112},"signal.high52":{"coverage_mean":0.9780841,"criteria":null,"holm_p":null,"mean_ic":0.02428822,"mean_ic_h20":0.01181146,"verdict":"참고용(판정 안 함)","weeks":481},"signal.rs_rank":{"coverage_mean":0.97787333,"criteria":null,"holm_p":null,"mean_ic":0.00813056,"mean_ic_h20":0.00369264,"verdict":"참고용(판정 안 함)","weeks":481}},"leak_checks":{"canary":{"key":"MEDP@1900-01-01","next":"2023-12-22T20:00:00-05:00","t":"2023-12-15T20:00:00-05:00","unchanged_at_t":true,"visible_after":true},"shuffle_mean_ic":0.0065782,"truncated_all_equal":true},"periods":{"gap":{"first":"2023-10-27T20:00:00-04:00","last":"2024-01-12T20:00:00-05:00","weeks":12},"holdout":{"first":"2024-01-19T20:00:00-05:00","last":"2026-09-25T20:00:00-04:00","weeks":141},"train":{"first":"2017-01-06T20:00:00-05:00","last":"2023-10-20T20:00:00-04:00","weeks":355}},"quintiles":{"assumption":"비용 1× · 상장폐지 손실 30% · 60거래일","rows":{"1":{"excess_spy":-0.02894588,"hit_rate_vs_spy":0.40606405,"mean_ret":0.00743247},"2":{"excess_spy":-0.02404614,"hit_rate_vs_spy":0.41274973,"mean_ret":0.01233221},"3":{"excess_spy":-0.02373316,"hit_rate_vs_spy":0.41704924,"mean_ret":0.01264519},"4":{"excess_spy":-0.02852109,"hit_rate_vs_spy":0.41028896,"mean_ret":0.00785726},"5":{"excess_spy":-0.03341057,"hit_rate_vs_spy":0.40329141,"mean_ret":0.00296778}},"top_minus_bottom":{"ci90_block12":[-0.01330377,0.00625889],"mean":-0.00446469,"weeks":488}},"source":{"commit":"32958e624110c3f51f0fa4b99b65185b8cdd9833","data_sha256":"9523321264a4949936eb0e457e583b3fc5ac3ac0b6e09b39cb28e878fc898b66","finished_at":"2026-10-04T14:22:20+00:00","results_sha256":"8934d19d546d2b648daa3d5cee669261f0e64acafe5638306eaa8e95c39ed7f8","scoring_version":"scoring-2.1.0+backtest-verifiable","workflow_run":"37179604176"},"strategy":{"assumption":"비용 1× · 상장폐지 손실 30%","avg_holding_sessions":10.7752809,"cagr":0.01907338,"end":"2026-09-25","excess_cagr":-0.13305078,"max_drawdown":-0.03137977,"sharpe":-0.20262571,"spy_cagr":0.15212417,"start":"2016-01-04","trades":178,"turnover_per_year":0.7751723,"volatility":0.01814117,"weekly_excess_ci90":[-0.003965,-0.00139038]},"weeks":508,"weeks_used_h60":488,"window":["2017-01-03","2026-09-25"]}
+{
+ "application": {
+  "changed": false,
+  "final_weights": {
+   "catalyst": 10.0,
+   "earnings_revision": 15.0,
+   "entry_rr": 10.0,
+   "fundamental": 30.0,
+   "macro": 5.0,
+   "return_signals": 0.0,
+   "risk": 10.0,
+   "technical": 10.0,
+   "valuation": 10.0
+  },
+  "operating_weights": {
+   "catalyst": 10.0,
+   "earnings_revision": 15.0,
+   "entry_rr": 10.0,
+   "fundamental": 30.0,
+   "macro": 5.0,
+   "return_signals": 0.0,
+   "risk": 10.0,
+   "technical": 10.0,
+   "valuation": 10.0
+  },
+  "s12": {
+   "adopted": false,
+   "drawdown": true,
+   "ic": false,
+   "log": [
+    "valuation: 효과 없음 (IC +0.0115) → −5점",
+    "macro: 효과 없음 (IC -0.0123) → −5점",
+    "entry_rr: 효과 없음 (IC +0.0002) → −5점",
+    "fundamental: 유효 (IC +0.0377) → +5.00점",
+    "남은 10.00점은 나눠 줄 유효 요소가 없어 합계 정규화(점수는 가중 평균이라 0–100 유지)"
+   ],
+   "new": {
+    "max_drawdown": -0.16314242,
+    "mean_ic": 0.0114457,
+    "top_minus_bottom": 0.00303772,
+    "weeks": 128
+   },
+   "old": {
+    "max_drawdown": -0.20042725,
+    "mean_ic": 0.01255304,
+    "top_minus_bottom": 0.00083373,
+    "weeks": 128
+   },
+   "proposed": {
+    "catalyst": 10.0,
+    "earnings_revision": 15.0,
+    "entry_rr": 5.0,
+    "fundamental": 35.0,
+    "macro": 0.0,
+    "return_signals": 0.0,
+    "risk": 10.0,
+    "technical": 10.0,
+    "valuation": 5.0
+   },
+   "quintile": true,
+   "why": "검증 기간 조건 불만족 → 가중치 그대로"
+  },
+  "s13": {
+   "adopted": false,
+   "candidate": null,
+   "train": {
+    "criteria": {
+     "a": false,
+     "b": true,
+     "c": false,
+     "d": true
+    },
+    "holm_p": 1.0,
+    "mean_ic": 0.02372027,
+    "verdict": "약함"
+   },
+   "why": "학습 기간 판정 약함 → 0점 유지, 채택 시험 안 함"
+  }
+ },
+ "available": true,
+ "data": {
+  "adjust_allowed": true,
+  "prefix": "",
+  "verdict": "충분",
+  "weeks": 560
+ },
+ "disclaimer": "과거 시뮬레이션이며 미래 수익을 보장하지 않습니다.",
+ "elements": {
+  "component.catalyst": {
+   "coverage_mean": null,
+   "criteria": null,
+   "holm_p": null,
+   "mean_ic": null,
+   "mean_ic_h20": null,
+   "verdict": "검증 불가",
+   "weeks": null
+  },
+  "component.earnings_revision": {
+   "coverage_mean": null,
+   "criteria": null,
+   "holm_p": null,
+   "mean_ic": null,
+   "mean_ic_h20": null,
+   "verdict": "검증 불가",
+   "weeks": null
+  },
+  "component.entry_rr": {
+   "coverage_mean": 0.99999832,
+   "criteria": {
+    "a": false,
+    "b": false,
+    "c": false,
+    "d": true
+   },
+   "holm_p": 0.69840716,
+   "mean_ic": -0.00212536,
+   "mean_ic_h20": -0.00162005,
+   "verdict": "약함",
+   "weeks": 488
+  },
+  "component.fundamental": {
+   "coverage_mean": 0.41317638,
+   "criteria": {
+    "a": true,
+    "b": true,
+    "c": true,
+    "d": true
+   },
+   "holm_p": 0.00054841,
+   "mean_ic": 0.03056694,
+   "mean_ic_h20": 0.01801944,
+   "verdict": "유효",
+   "weeks": 488
+  },
+  "component.macro": {
+   "coverage_mean": 0.93442623,
+   "criteria": {
+    "a": false,
+    "b": false,
+    "c": false,
+    "d": true
+   },
+   "holm_p": 0.48391479,
+   "mean_ic": -0.01482054,
+   "mean_ic_h20": -0.01206503,
+   "verdict": "약함",
+   "weeks": 456
+  },
+  "component.return_signals": {
+   "coverage_mean": 0.97787486,
+   "criteria": {
+    "a": false,
+    "b": true,
+    "c": false,
+    "d": true
+   },
+   "holm_p": 0.69840716,
+   "mean_ic": 0.02391873,
+   "mean_ic_h20": 0.01164785,
+   "verdict": "약함",
+   "weeks": 488
+  },
+  "component.risk": {
+   "coverage_mean": 1.0,
+   "criteria": {
+    "a": false,
+    "b": true,
+    "c": true,
+    "d": true
+   },
+   "holm_p": 0.36492347,
+   "mean_ic": 0.03480902,
+   "mean_ic_h20": 0.0195498,
+   "verdict": "약함",
+   "weeks": 488
+  },
+  "component.technical": {
+   "coverage_mean": 0.99445869,
+   "criteria": {
+    "a": false,
+    "b": false,
+    "c": false,
+    "d": true
+   },
+   "holm_p": 0.69840716,
+   "mean_ic": 0.01937543,
+   "mean_ic_h20": 0.00558173,
+   "verdict": "약함",
+   "weeks": 488
+  },
+  "component.valuation": {
+   "coverage_mean": 0.16898956,
+   "criteria": {
+    "a": false,
+    "b": false,
+    "c": false,
+    "d": false
+   },
+   "holm_p": 0.53286779,
+   "mean_ic": 0.01423082,
+   "mean_ic_h20": 0.00513609,
+   "verdict": "효과 없음",
+   "weeks": 488
+  },
+  "score": {
+   "coverage_mean": 1.0,
+   "criteria": {
+    "a": true,
+    "b": true,
+    "c": true,
+    "d": true
+   },
+   "holm_p": 0.004219,
+   "mean_ic": 0.04039624,
+   "mean_ic_h20": 0.01929768,
+   "verdict": "유효",
+   "weeks": 488
+  },
+  "sell_score": {
+   "coverage_mean": 1.0,
+   "criteria": {
+    "a": true,
+    "b": true,
+    "c": true,
+    "d": true
+   },
+   "holm_p": 0.00895607,
+   "mean_ic": 0.03842687,
+   "mean_ic_h20": 0.01814773,
+   "verdict": "유효",
+   "weeks": 488
+  },
+  "signal.ear": {
+   "coverage_mean": 0.0,
+   "criteria": null,
+   "holm_p": null,
+   "mean_ic": null,
+   "mean_ic_h20": null,
+   "verdict": "측정 불가(값 없음)",
+   "weeks": 0
+  },
+  "signal.fscore": {
+   "coverage_mean": 0.2471541,
+   "criteria": null,
+   "holm_p": null,
+   "mean_ic": 0.02119722,
+   "mean_ic_h20": 0.01215071,
+   "verdict": "참고용(판정 안 함)",
+   "weeks": 112
+  },
+  "signal.high52": {
+   "coverage_mean": 0.9780841,
+   "criteria": null,
+   "holm_p": null,
+   "mean_ic": 0.02428822,
+   "mean_ic_h20": 0.01181146,
+   "verdict": "참고용(판정 안 함)",
+   "weeks": 481
+  },
+  "signal.rs_rank": {
+   "coverage_mean": 0.97787333,
+   "criteria": null,
+   "holm_p": null,
+   "mean_ic": 0.00813056,
+   "mean_ic_h20": 0.00369264,
+   "verdict": "참고용(판정 안 함)",
+   "weeks": 481
+  }
+ },
+ "leak_checks": {
+  "canary": {
+   "key": "MEDP@1900-01-01",
+   "next": "2023-12-22T20:00:00-05:00",
+   "t": "2023-12-15T20:00:00-05:00",
+   "unchanged_at_t": true,
+   "visible_after": true
+  },
+  "shuffle_mean_ic": 0.0062393,
+  "truncated_all_equal": true
+ },
+ "periods": {
+  "gap": {
+   "first": "2023-10-27T20:00:00-04:00",
+   "last": "2024-01-12T20:00:00-05:00",
+   "weeks": 12
+  },
+  "holdout": {
+   "first": "2024-01-19T20:00:00-05:00",
+   "last": "2026-09-25T20:00:00-04:00",
+   "weeks": 141
+  },
+  "train": {
+   "first": "2017-01-06T20:00:00-05:00",
+   "last": "2023-10-20T20:00:00-04:00",
+   "weeks": 355
+  }
+ },
+ "quintiles": {
+  "assumption": "비용 1× · 상장폐지 손실 30% · 60거래일",
+  "rows": {
+   "1": {
+    "excess_spy": -0.03200009,
+    "hit_rate_vs_spy": 0.40155323,
+    "mean_ret": 0.00437826
+   },
+   "2": {
+    "excess_spy": -0.02182189,
+    "hit_rate_vs_spy": 0.4193059,
+    "mean_ret": 0.01455646
+   },
+   "3": {
+    "excess_spy": -0.0246315,
+    "hit_rate_vs_spy": 0.41555473,
+    "mean_ret": 0.01174685
+   },
+   "4": {
+    "excess_spy": -0.02807598,
+    "hit_rate_vs_spy": 0.40861449,
+    "mean_ret": 0.00830237
+   },
+   "5": {
+    "excess_spy": -0.03218096,
+    "hit_rate_vs_spy": 0.40445955,
+    "mean_ret": 0.00419739
+   }
+  },
+  "top_minus_bottom": {
+   "ci90_block12": [
+    -0.00936762,
+    0.01149377
+   ],
+   "mean": -0.00018087,
+   "weeks": 488
+  }
+ },
+ "source": {
+  "commit": "a9cabeeeb0dce1d0d46ec5365723743296c32313",
+  "data_sha256": "9523321264a4949936eb0e457e583b3fc5ac3ac0b6e09b39cb28e878fc898b66",
+  "finished_at": "2026-10-05T18:08:11+00:00",
+  "results_sha256": "d6e1bda5715d3528072411a2b45de35d7fbc341f1f0d6437c2c9fb4f185596f7",
+  "scoring_version": "scoring-2.2.0+backtest-verifiable",
+  "workflow_run": "37270461514"
+ },
+ "strategy": {
+  "assumption": "비용 1× · 상장폐지 손실 30%",
+  "avg_holding_sessions": 7.54035736,
+  "cagr": -0.00018618,
+  "end": "2026-09-25",
+  "excess_cagr": -0.15231035,
+  "max_drawdown": -0.14021493,
+  "sharpe": -0.36489417,
+  "spy_cagr": 0.15212417,
+  "start": "2016-01-04",
+  "trades": 1623,
+  "turnover_per_year": 7.60266837,
+  "volatility": 0.05826661,
+  "weekly_excess_ci90": [
+   -0.00418779,
+   -0.00182816
+  ]
+ },
+ "swing": {
+  "assumption": "다음 날 시가 체결 · 비용 0.1%/회 · 최대 10종목 · 상장폐지 −30%",
+  "periods": {
+   "holdout": [
+    "2024-01-19",
+    "2026-09-25"
+   ],
+   "train": [
+    "2017-01-06",
+    "2023-10-20"
+   ]
+  },
+  "prereg": "§17",
+  "source": {
+   "commit": "9bc6d36",
+   "workflow_run": "37359016961"
+  },
+  "spy": {
+   "holdout_cagr": 0.191142,
+   "holdout_sharpe": 1.200824,
+   "train_cagr": 0.095213
+  },
+  "strategies": {
+   "A": {
+    "adopt": false,
+    "holdout_cagr": -0.229309,
+    "holdout_max_drawdown": -0.535592,
+    "holdout_sharpe": -1.315013,
+    "holdout_trades": 1533,
+    "holdout_win_rate": 0.578604,
+    "name": "상승 추세 눌림목",
+    "train_cagr": 0.011924
+   },
+   "B1": {
+    "adopt": false,
+    "holdout_cagr": 0.092819,
+    "holdout_max_drawdown": -0.284998,
+    "holdout_sharpe": 0.45019,
+    "holdout_trades": 1296,
+    "holdout_win_rate": 0.611883,
+    "name": "급락 반등(추세 위)",
+    "train_cagr": -0.008871
+   },
+   "B2": {
+    "adopt": false,
+    "holdout_cagr": -0.050898,
+    "holdout_max_drawdown": -0.377025,
+    "holdout_sharpe": -0.011926,
+    "holdout_trades": 1473,
+    "holdout_win_rate": 0.596062,
+    "name": "급락 반등(추세 무관)",
+    "train_cagr": 0.057126
+   },
+   "C": {
+    "adopt": false,
+    "holdout_cagr": -0.40304,
+    "holdout_max_drawdown": -0.804459,
+    "holdout_sharpe": -1.231848,
+    "holdout_trades": 421,
+    "holdout_win_rate": 0.346793,
+    "name": "돌파 추세 추종",
+    "train_cagr": -0.213722
+   }
+  }
+ },
+ "thresholds": {
+  "buy": 68,
+  "buy_small": 62,
+  "decision_model_version": "decision-3.4.0",
+  "prereg": "§16"
+ },
+ "weeks": 508,
+ "weeks_used_h60": 488,
+ "window": [
+  "2017-01-03",
+  "2026-09-25"
+ ]
+}
