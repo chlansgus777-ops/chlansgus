@@ -24,6 +24,7 @@ import { ago, day, krwAux, num, pct, price, stamp, stampEt, usdWithKo } from "..
 import { GLOSSARY } from "../glossary";
 import { COMPONENT_KO, DATA_TYPE_KO, REGIME_KO, RISK_KO, SESSION_KO, SIZE_KO, STATUS_INFO, VERDICT_KO, VETO_KO, actionTone, ko } from "../i18n";
 import type { Analysis, Brief, BriefItem, CommitteeResult, Evidence, PositionPlan, StockDetail as SD } from "../types";
+import { BUY_SCORE, SMALL_SCORE } from "../thresholds";
 
 const RESULT_KO: Record<string, string> = {
   BEAT_AND_RAISE: "예상 상회 + 가이던스 상향", BEAT: "예상 상회", BEAT_WEAK_GUIDE: "예상 상회했으나 가이던스 부진", GUIDE_UP: "예상 부합 + 가이던스 상향",
@@ -304,10 +305,10 @@ function StockDetail({ ticker }: { ticker: string }) {
           <Metric title="가장 큰 위험" text value={cautions[0] ?? "분석이 표시한 부정 요인 없음"} tone={cautions.length ? "warn" : undefined} testId="tile-risk" />
         </div>
         <div className="foot">
-          <span style={{ display: "inline-grid", gridTemplateColumns: "auto 150px auto", gap: 10, alignItems: "center" }} title="막대의 눈금: 소량 매수 기준 72 · 매수 기준 80">
+          <span style={{ display: "inline-grid", gridTemplateColumns: "auto 150px auto", gap: 10, alignItems: "center" }} title={`막대의 눈금: 소량 매수 기준 ${SMALL_SCORE} · 매수 기준 ${BUY_SCORE}`}>
             <span><Term k="score">점수</Term> <b style={{ color: "var(--text)" }}>{num(rec.score, 1)}</b>/100</span>
             <ScoreMeter score={rec.score} labels={false} />
-            <span className="caption">매수 기준 80</span>
+            <span className="caption">매수 기준 {BUY_SCORE} · 소량 {SMALL_SCORE}</span>
           </span>
           <span><Term k="confidence">분석 신뢰도</Term> <b style={{ color: "var(--text)" }}>{num(rec.confidence, 0)}</b>/100 · {confidenceLevel(rec.confidence)}</span>
           <span className="conf-note" data-testid="confidence-note">점수·신뢰도는 주가 상승 확률이 아니라 규칙 점수와 데이터 완성도·일치도입니다.</span>

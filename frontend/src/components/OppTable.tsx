@@ -7,6 +7,7 @@ import { useQuote } from "../quotes";
 import { LivePrice } from "./LivePrice";
 import { LiveZone } from "./LiveZone";
 import { Action, Quality, StatusBadge, Vetoes } from "./ui";
+import { BUY_SCORE, SMALL_SCORE } from "../thresholds";
 
 type Key = "rank" | "ticker" | "action" | "score" | "price" | "max_buy" | "rr" | "current_status" | "risk";
 
@@ -14,7 +15,7 @@ type Key = "rank" | "ticker" | "action" | "score" | "price" | "max_buy" | "rr" |
  * moved to the header / appear only where a row differs. */
 const COLS: [Key, string, string, boolean][] = [
   ["rank", "순위", "", false], ["ticker", "종목", "", false], ["action", "판단", "추천 행동. 만료된 매수 신호는 취소선으로 표시", false],
-  ["score", "점수", "0~100 규칙 점수(AI가 올릴 수 없음). 80 이상 매수·72 이상 소량 매수 후보 — 상승 확률이 아님", true],
+  ["score", "점수", `0~100 규칙 점수(AI가 올릴 수 없음). ${BUY_SCORE} 이상 매수·${SMALL_SCORE} 이상 소량 매수 후보 — 상승 확률이 아님`, true],
   ["price", "현재가", "위: 최신 시세(앱 공용 스트림) · 아래: 분석 시점 가격(USD)", true], ["max_buy", "최대 매수가", "이 가격을 넘으면 손익비 2 미만 → 대기", true],
   ["rr", "손익비", "(목표가−현재가)÷(현재가−손절가) — 도달 확률이 아님", true], ["current_status", "현재 유효성", "추천 이후 거래일 경과·현재가로 다시 판정", false],
   ["risk", "이벤트 위험", "가까운 실적·일정의 위험 수준", false],

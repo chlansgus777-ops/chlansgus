@@ -4,6 +4,7 @@ import { DIR_KO, GLOSSARY, tip } from "../glossary";
 import { ACTION_INFO, BULLISH, DATA_TYPE_KO, QUALITY_INFO, STANCE_KO, STATUS_INFO, VETO_KO, actionLabel } from "../i18n";
 import type { Evidence, FreshnessCheck } from "../types";
 import { IAlert, IInfo } from "./icons";
+import { BUY_SCORE, SMALL_SCORE } from "../thresholds";
 
 export type Tone = "ok" | "warn" | "danger" | "info" | "neutral";
 
@@ -277,7 +278,7 @@ export function Bar({ value, max = 1, color }: { value: number; max?: number; co
 }
 
 /** The score on its 0–100 track with the two decision thresholds marked (the score is not a probability). */
-export function ScoreMeter({ score, buy = 80, small = 72, labels = true }: { score: number | null | undefined; buy?: number; small?: number; labels?: boolean }) {
+export function ScoreMeter({ score, buy = BUY_SCORE, small = SMALL_SCORE, labels = true }: { score: number | null | undefined; buy?: number; small?: number; labels?: boolean }) {
   const v = typeof score === "number" ? Math.max(0, Math.min(100, score)) : null;
   return (
     <div className="meter" aria-label={v === null ? "점수 없음" : `점수 ${v.toFixed(1)} / 100 (매수 기준 ${buy}, 소량 매수 기준 ${small})`}>
