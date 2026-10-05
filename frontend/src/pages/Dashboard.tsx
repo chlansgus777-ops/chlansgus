@@ -11,6 +11,7 @@ import { useJudgedRows, useQuote, useViewQuotes, type QuoteRow } from "../quotes
 import { LiveZone } from "../components/LiveZone";
 import { useLiveRows } from "../components/liveBoard";
 import { MorningBriefing } from "../components/Briefing";
+import { StrategyToday } from "../components/StrategyViews";
 import { HoldingPlans } from "../components/HoldingPlans";
 import { ago, day, num, pct, price, stampEt, errKo } from "../format";
 import { ACTION_PLAIN, BULLISH, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
@@ -227,6 +228,7 @@ export default function Dashboard() {
 
       <MorningBriefing />
       <HoldingPlans actionsOnly />
+      <StrategyToday />
       <div className="home-grid">
         <div className="home-main">
           {/* the first five seconds: how many names pass right now, the market's mood, the biggest risk, the next event */}
@@ -252,7 +254,7 @@ export default function Dashboard() {
 
           {sysMode === "LIVE" && notReady && !shown.length && <span id="data-prep" />}
           <Card title="지금 검토할 후보" right={<Link to="/stocks?tab=candidates" className="row tight">전체 후보 보기 <IArrow width={15} height={15} /></Link>}
-                explain="매수 조건을 통과하고 지금 다시 확인해도 유효한 종목만, 최대 5개까지 보여줍니다.">
+                explain="종합 점수 분석의 매수 판정 중 지금도 유효한 종목(최대 5개)입니다. 매매 전략 신호가 아니며, 점수는 상승 확률이 아닙니다.">
             {shown.length ? <div className="cands">{shown.map((r, i) => <CandidateCard key={r.id} r={r} lead={i === 0 && shown.length !== 2 && shown.length !== 4} />)}</div>
               : notReady && x.readiness ? <NotReady r={x.readiness} onChange={d.reload} />
               : !x.scan ? <StatePanel kind={choosing ? "analyzing" : "not_scanned"} actions={choosing ? undefined : <Link to="/settings?tab=status">데이터·자동 분석 상태 확인 →</Link>} />

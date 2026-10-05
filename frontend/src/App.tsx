@@ -4,12 +4,13 @@ import { Loading, ModeBanner, StatePanel } from "./components/ui";
 import { QuickSearch } from "./components/QuickSearch";
 import { PhoneGate } from "./components/Phone";
 import { StatusBar, StatusProvider, useStatus } from "./components/status";
-import { BrandMark, IHelp, IHome, IMarket, IPerf, IPortfolio, ISettings, IStocks } from "./components/icons";
+import { BrandMark, IFlag, IHelp, IHome, IMarket, IPerf, IPortfolio, ISettings, IStocks } from "./components/icons";
 import type { SystemInfo } from "./types";
 import Dashboard from "./pages/Dashboard";
 import Glance from "./glance/Glance";
 import { openGlance } from "./glance/desktop";
 const Stocks = lazy(() => import("./pages/Stocks"));
+const Strategies = lazy(() => import("./pages/Strategies"));
 const StockDetail = lazy(() => import("./pages/StockDetail"));
 const Portfolio = lazy(() => import("./pages/Portfolio"));
 const Market = lazy(() => import("./pages/Market"));
@@ -32,7 +33,7 @@ export class PageBoundary extends Component<{ children: ReactNode }, { failed: b
 /** Five destinations named after what the user wants to do (product overhaul 2026-09-28): today's view, finding and
  * judging a stock, my account, the market, and whether the recommendations worked. Settings and help sit apart. */
 const NAV: [string, (p: { className?: string }) => ReactElement, string][] = [
-  ["/", IHome, "홈"], ["/stocks", IStocks, "종목"], ["/portfolio", IPortfolio, "포트폴리오"], ["/market", IMarket, "시장"], ["/performance", IPerf, "성과"],
+  ["/", IHome, "홈"], ["/strategies", IFlag, "전략"], ["/stocks", IStocks, "종목"], ["/portfolio", IPortfolio, "포트폴리오"], ["/market", IMarket, "시장"], ["/performance", IPerf, "성과"],
 ];
 
 /** Which build is running (the commit it was built from): after installing a new version the owner can check it. */
@@ -91,6 +92,7 @@ function Shell() {
         <main className="main" key={loc.pathname.split("/").slice(0, 2).join("/")}>
           <PageBoundary key={loc.pathname}><Suspense fallback={<Loading what="화면" rows={2} />}><Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/strategies" element={<Strategies />} />
             <Route path="/stocks" element={<Stocks />} />
             <Route path="/stocks/:ticker" element={<StockDetail />} />
             <Route path="/portfolio" element={<Portfolio />} />

@@ -652,6 +652,24 @@ def backtest_results() -> dict[str, Any]:
     return _json.loads(p.read_text(encoding="utf-8"))
 
 
+@router.get("/strategies")
+def strategies(req: Request) -> dict[str, Any]:
+    """The strategies (rules, version, verification status) and their signals now: confirmed at the last close,
+    preliminary at the live price, and the names held for missing data (docs/strategies/STRATEGIES.md)."""
+    return svc(req).strategy_signals()
+
+
+@router.get("/strategies/forward")
+def strategies_forward(req: Request) -> dict[str, Any]:
+    """The forward paper log: the confirmed signals since the rules were fixed, filled from the stored bars."""
+    return svc(req).strategy_forward()
+
+
+@router.get("/stocks/{ticker}/strategies")
+def stock_strategies(req: Request, ticker: str) -> dict[str, Any]:
+    return svc(req).strategy_ticker(_ticker(ticker))
+
+
 @router.get("/briefing")
 def morning_briefing(req: Request, refresh: bool = False) -> dict[str, Any]:
     """오늘 아침 브리핑 (한국시간 07:00부터) — the overnight US session for the owner's account, in the app only."""

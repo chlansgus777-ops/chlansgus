@@ -23,7 +23,7 @@ from marketlens.application.graph_seed import GraphSeed
 from marketlens.application.issue_engine import news_for_ticker
 from marketlens.application.market_store import MarketStore
 from marketlens.application.pipeline import AnalysisInputs, AnalysisResult, run_analysis
-from marketlens.domain.market import Quote
+from marketlens.domain.market import Bar, Quote
 from marketlens.application.broker import BrokerSync
 from marketlens.application.toss_bars import TossBars
 from marketlens.application.toss_quotes import TossQuoteFeed, live_quote
@@ -262,6 +262,10 @@ class MarketLensService:
         self.scan_wanted: str | None = None
         # the price-dependent verdict on every quote (buy zone, stop, target, live reward/risk) + alerts
         self.judge = LiveJudge(now=self.now)
+        # the strategies' signals (docs/strategies/STRATEGIES.md): the backtest's own rules on the stored daily bars
+        from marketlens.application.strategy_signals import StrategySignals, results_path
+        self.strategy = StrategySignals(self._strategy_bars, self.now, settings.data_dir,
+                                        kinds=(self.store.instrument_kinds if self.store is not None else None), results_path=results_path())
         self.quotes.annotate = self.judge.annotate
         self.judge.on_reanalyze = self.request_reanalysis
         # the owner's own trade rules on the held names (내 규칙 알림): same prices, same alert center
@@ -1182,6 +1186,31 @@ class MarketLensService:
                 # a new version → the portfolio screens reload (the account's holdings or cash changed, or it was (dis)connected)
                 "broker": {"version": self.broker.version, "active": self.broker.active(),
                            "error": (self.broker.last_error or {}).get("kind")} if self.broker.enabled else None}
+
+    # ------------------------------------------------------------------ strategies (A-1.0 · C-1.0)
+    STRATEGY_EVERY = 600.0  # seconds a market-wide strategy scan is reused (bars change once a day; preliminary every 10 min)
+
+    def _strategy_bars(self, start: date, end: date) -> dict[str, list[Bar]]:
+        if self.store is not None:
+            return self.store.last_bars_all(start, end)
+        tickers = [x.ticker for x in (self.data.securities(end).value or [])] + ["SPY"]
+        return self.data.bars_bulk(tickers, start, end)
+
+    def _live_price(self, ticker: str) -> tuple[float, datetime] | None:
+        q = self.quotes.latest(ticker)
+        return (q.price, q.trade_ts) if q is not None and q.price else None
+
+    def strategy_signals(self) -> dict[str, Any]:
+        snap = self.refresher.get("strategies:scan", lambda: self.strategy.scan(self._live_price), max_age=self.STRATEGY_EVERY, wait=8.0)
+        return {"ready": snap.ready, "refreshing": snap.refreshing, "error": snap.error,
+                "computed_at": snap.computed_at.isoformat() if snap.computed_at else None, "scan": snap.value,
+                "strategies": None if snap.value else [{"id": k} | v for k, v in self.strategy.status().items()]}
+
+    def strategy_ticker(self, ticker: str) -> dict[str, Any]:
+        return self.strategy.ticker(ticker, self._live_price(ticker.upper()))
+
+    def strategy_forward(self) -> dict[str, Any]:
+        return self.strategy.forward()
 
     def request_reanalysis(self, ticker: str, reason: str) -> bool:
         """A name hit its stop or target, or moved far since its analysis: analyse it again in the background — only

@@ -12,6 +12,7 @@ import { LivePlanLine, LiveZone, UnlessLive, zoneView } from "../components/Live
 import { refreshQuoteSubscriptions, useQuote, useViewQuotes } from "../quotes";
 import { MaTouch } from "../components/MaTouch";
 import { SupportResistance } from "../components/SupportResistance";
+import { StockStrategies } from "../components/StrategyViews";
 import { useAnalysisJob } from "../components/useAnalysisJob";
 import { rememberStock } from "../components/QuickSearch";
 import { PlanChart } from "../components/PlanChart";
@@ -359,6 +360,7 @@ function StockDetail({ ticker }: { ticker: string }) {
       )}
 
       {/* ② 판단 이유: what changed and why it matters, then what supports / argues against the call */}
+      <StockStrategies ticker={a.ticker} />
       <Section no={2} title="판단 이유" sub={lj
         ? `분석 시점(${stamp(a.as_of)})의 이유입니다 — 위 결론과 가격 계획은 지금 가격으로 다시 계산한 것`  // review F06
         : "무엇이 달라졌고, 무엇이 판단을 지지하거나 반대하나 — 문장마다 사실·계산·해석을 표시"} />
