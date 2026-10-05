@@ -289,6 +289,9 @@ def holding_plan(h: HoldingState, r: TradeRules) -> dict[str, Any]:
         "price_source": h.price_source, "pnl_pct": ((h.price / avg - 1) * 100) if h.price and avg else None,
         "stop": round(stop, 4), "stop_source": stop_src, "take1": round(take1, 4), "take1_fraction": r.take1_fraction,
         "take1_done": h.sold_since_open, "trail": round(trail, 4) if trail is not None else None, "high_since_open": h.high_since_open,
+        # the rest after the first take-profit: sold when the price falls ``trail_pct`` from its high since the purchase —
+        # the line starts here (at the first take-profit price) and rises with every new high; never below the cost
+        "trail_pct": r.trail_pct, "rest_fraction": round(1 - r.take1_fraction, 6), "rest_start": round(max(take1 * (1 + r.trail_pct / 100), avg), 4),
         "add_mode": r.add_mode, "add_level": round(add_level, 4) if add_level is not None else None, "add_qty": add_qty,
         "adds_done": h.adds_done, "max_adds": r.max_adds, "opened": h.opened, "app_action": h.app_action, "app_stop": h.app_stop,
         "app_target": h.app_target, "rules_saved": r.saved_at is not None, "notes": [],

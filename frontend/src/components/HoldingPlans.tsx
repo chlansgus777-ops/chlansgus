@@ -8,7 +8,7 @@ import { day, shares } from "../format";
 export interface Plan {
   symbol: string; name: string; market: string | null; currency: string; quantity: number; avg_price: number; price: number | null; price_at: string | null;
   price_source: string | null; pnl_pct: number | null; stop: number; stop_source: string; take1: number; take1_fraction: number; take1_done: boolean;
-  trail: number | null; high_since_open: number | null; add_mode: string; add_level: number | null; add_qty: number; adds_done: number; max_adds: number;
+  trail: number | null; high_since_open: number | null; trail_pct?: number; rest_fraction?: number; rest_start?: number; add_mode: string; add_level: number | null; add_qty: number; adds_done: number; max_adds: number;
   opened: string | null; app_action: string | null; app_stop: number | null; app_target: number | null; rules_saved: boolean; notes: string[]; rule_conflicts?: string[];
   action: "STOP" | "TRAIL" | "TAKE1" | "ADD" | "HOLD" | "NO_PRICE"; action_ko: string; detail: string;
 }
@@ -79,7 +79,8 @@ export function PriceLadder({ levels, currency, testId }: { levels: Level[]; cur
 export function planLevels(p: Plan): Level[] {
   const lv: Level[] = [{ key: "stop", label: "손절", value: p.stop, tone: "neg" }, { key: "avg", label: "평단", value: p.avg_price, tone: "neutral" }];
   if (!p.take1_done) lv.push({ key: "take1", label: `익절 ${Math.round(p.take1_fraction * 100)}%`, value: p.take1, tone: "pos" });
-  if (p.trail !== null) lv.push({ key: "trail", label: "추적 손절", value: p.trail, tone: "sell" });
+  if (p.trail !== null) lv.push({ key: "trail", label: "나머지 매도선", value: p.trail, tone: "sell" });
+  else if (!p.take1_done && p.rest_start !== undefined && (p.rest_fraction ?? 0) > 0) lv.push({ key: "rest", label: "나머지 매도선(시작)", value: p.rest_start, tone: "sell" });
   const clash = (p.rule_conflicts?.length ?? 0) > 0 && !p.take1_done;  // the add would sit on the take-profit: not a level
   if (!clash && p.add_level !== null && p.add_mode !== "none" && p.adds_done < p.max_adds) lv.push({ key: "add", label: "추가매수", value: p.add_level, tone: "buy" });
   if (p.price !== null) lv.push({ key: "now", label: "지금", value: p.price, tone: "now" });
@@ -91,6 +92,21 @@ function addRule(p: Plan): ReactNode {
   if ((p.rule_conflicts?.length ?? 0) > 0 && !p.take1_done) return <span className="warn">규칙 충돌<small>익절과 같은 가격 — 고치세요</small></span>;
   if (p.adds_done >= p.max_adds) return <>완료<small>{p.adds_done}/{p.max_adds}회</small></>;
   return <>{p.add_level !== null ? `${money(p.add_level, p.currency)} 이상` : "가격 조건 없음"}<small>{shares(p.add_qty)}주 · {p.max_adds - p.adds_done}회 남음</small></>;
+}
+
+/** The rest after the first take-profit (owner 2026-10-05: "1차 익절 50% 이후 나머지 50%는 언제 팔아야 되는지가 없어"):
+ * a trailing stop below the high since the purchase, never below the cost. */
+function RestFact({ p }: { p: Plan }) {
+  if (p.rest_fraction === undefined || p.rest_fraction <= 0 || p.trail_pct === undefined) return null;
+  const pctRest = Math.round(p.rest_fraction * 100);
+  const line = p.trail ?? p.rest_start ?? null;
+  return (
+    <div data-testid={`rest-${p.symbol}`}><dt>나머지 {pctRest}%</dt>
+      <dd className="sell">{line !== null ? money(line, p.currency) : "—"}
+        <small>{p.trail !== null
+          ? `지금 매도선 · 매수 후 고점 ${money(p.high_since_open ?? 0, p.currency)}에서 ${p.trail_pct}% — 이 가격 아래로 내려오면 나머지 전부 매도, 고점이 오르면 같이 오름`
+          : `1차 익절가에 닿으면 시작 · 그 뒤 고점에서 ${p.trail_pct}% 내려오면 나머지 전부 매도 (고점이 오를수록 매도선도 오름, 평단 아래로는 안 내려감)`}</small></dd></div>
+  );
 }
 
 export function PlanCard({ p }: { p: Plan }) {
@@ -110,6 +126,7 @@ export function PlanCard({ p }: { p: Plan }) {
         <div><dt>손익</dt><dd className={(p.pnl_pct ?? 0) > 0 ? "pos" : (p.pnl_pct ?? 0) < 0 ? "neg" : ""}>{pp(p.pnl_pct)}<small>평단 {money(p.avg_price, p.currency)}</small></dd></div>
         <div><dt>손절가</dt><dd>{money(p.stop, p.currency)}<small>{p.stop_source}</small></dd></div>
         <div><dt>1차 익절</dt><dd>{p.take1_done ? "실행함" : money(p.take1, p.currency)}<small>{p.take1_done ? (p.trail !== null ? `추적 손절 ${money(p.trail, p.currency)}` : "") : `${Math.round(p.take1_fraction * 100)}% 매도`}</small></dd></div>
+        <RestFact p={p} />
         <div><dt>추가매수</dt><dd>{addRule(p)}</dd></div>
       </dl>
       <footer className="caption">
@@ -141,6 +158,7 @@ export function RulePreview({ ticker, rules, saved, pv }: { ticker: string; rule
   const levels: Level[] = [
     { key: "stop", label: "손절", value: stop, tone: "neg" }, { key: "avg", label: "매수가", value: px, tone: "neutral" },
     { key: "take1", label: `익절 ${Math.round(frac * 100)}%`, value: take, tone: "pos" },
+    ...(frac < 1 ? [{ key: "rest", label: `나머지 매도선(시작)`, value: Math.max(take * (1 + trailPct / 100), px), tone: "sell" as const }] : []),
     ...(add !== null && maxAdds > 0 ? [{ key: "add", label: "추가매수", value: add, tone: "buy" as const }] : []),
     ...(app !== null && !useApp && Math.abs(app - stop) / px > 0.004 ? [{ key: "app", label: "앱 손절", value: app, tone: "sell" as const }] : []),
   ];
@@ -153,7 +171,9 @@ export function RulePreview({ ticker, rules, saved, pv }: { ticker: string; rule
       <PriceLadder levels={levels} currency="USD" testId={`preview-ladder-${ticker}`} />
       <dl className="plan-facts">
         <div><dt>손절가</dt><dd className="neg">{money(stop, "USD")}<small>1주당 {money(stop - px, "USD")} · {useApp ? "앱 손절가" : `${stopPct}%`}</small></dd></div>
-        <div><dt>1차 익절</dt><dd className="pos">{money(take, "USD")}<small>{Math.round(frac * 100)}% 매도 · 나머지 고점 {trailPct}% 추적</small></dd></div>
+        <div><dt>1차 익절</dt><dd className="pos">{money(take, "USD")}<small>{Math.round(frac * 100)}% 매도</small></dd></div>
+        {frac < 1 && <div data-testid={`preview-rest-${ticker}`}><dt>나머지 {Math.round((1 - frac) * 100)}%</dt><dd className="sell">{money(Math.max(take * (1 + trailPct / 100), px), "USD")}부터
+          <small>1차 익절 뒤 고점에서 {trailPct}% 내려오면 전부 매도 — 더 오르면 매도선도 따라 오름</small></dd></div>}
         <div><dt>추가매수</dt><dd>{addMode === "none" || maxAdds <= 0 ? "안 함" : add !== null ? `${money(add, "USD")} 이상` : "가격 조건 없음"}<small>{addMode === "none" || maxAdds <= 0 ? "규칙상 추가매수 없음" : `첫 매수의 ${Math.round(addFrac * 100)}% · ${maxAdds}회까지`}</small></dd></div>
         <div><dt>손익비</dt><dd>{Number.isFinite(rr) ? rr.toFixed(2) : "—"}<small>1차 익절까지 이익 ÷ 손절까지 손실</small></dd></div>
       </dl>

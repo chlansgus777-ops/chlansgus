@@ -5,7 +5,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { HoldingPlans, type Plan } from "../components/HoldingPlans";
+import { HoldingPlans, PlanCard, type Plan } from "../components/HoldingPlans";
 import { resetApiCache } from "../components/useApi";
 import MyTrading, { type Report } from "./MyTrading";
 
@@ -139,6 +139,22 @@ it("a name not held: the plan for buying it now under my rules, compared with th
   expect(card.textContent).toContain("$420.00");  // add at + 5 %
   expect(card.textContent).toContain("1.43");     // (440 − 400) ÷ (400 − 372)
   expect(card.textContent).toContain("앱 분석 손절가 $380.00가 내 규칙 손절보다 위");
+  // the other half after the first take-profit has its own exit (owner 2026-10-05: "나머지 50%는 언제 팔아야")
+  expect(screen.getByTestId("preview-rest-MSFT").textContent).toContain("나머지 50%");
+  expect(screen.getByTestId("preview-rest-MSFT").textContent).toContain("$404.80부터");  // 440 − 8 %
+});
+
+it("a holding says when the rest after the first take-profit is sold: the starting line, then the live trailing line", () => {
+  const base = { ...PLAN, action: "HOLD" as const, trail_pct: -8, rest_fraction: 0.5, rest_start: 106.26 };
+  render(<MemoryRouter><PlanCard p={base} /></MemoryRouter>);
+  const rest = screen.getByTestId("rest-NVDA");
+  expect(rest.textContent).toContain("나머지 50%");
+  expect(rest.textContent).toContain("$106.26");
+  expect(rest.textContent).toContain("1차 익절가에 닿으면 시작");
+  cleanup();
+  render(<MemoryRouter><PlanCard p={{ ...base, take1_done: true, high_since_open: 130, trail: 119.6 }} /></MemoryRouter>);
+  expect(screen.getByTestId("rest-NVDA").textContent).toContain("$119.60");
+  expect(screen.getByTestId("rest-NVDA").textContent).toContain("이 가격 아래로 내려오면 나머지 전부 매도");
 });
 
 it("an add level at the first take-profit is a contradiction: said, and the rules cannot be saved", async () => {
