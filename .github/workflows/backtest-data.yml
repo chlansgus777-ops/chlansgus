@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions | whymacro"
+        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions | whymacro | swing"
         required: true
         default: "probe"
       resume_run_id:
@@ -16,7 +16,7 @@ on:
         required: false
         default: ""
       data_run_id:
-        description: "run: the collect run whose backtest-db artifact to measure"
+        description: "run / swing: the collect run whose backtest-db artifact to measure"
         required: false
         default: ""
       run_args:
@@ -37,6 +37,27 @@ jobs:
           python-version: "3.11"
       - name: Install backend (lock file)
         run: pip install -r backend/requirements.lock && pip install --no-deps -e ./backend
+      # §17 short-term strategies (marketlens/backtest/swing.py): offline on the backtest database, nothing else
+      - name: Backtest database (swing)
+        if: inputs.task == 'swing'
+        uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          run-id: ${{ inputs.data_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Short-term strategies of PREREGISTRATION §17 (swing)
+        if: inputs.task == 'swing'
+        run: |
+          gunzip -f backtest.db.gz
+          sha256sum -c backtest.db.sha256
+          echo "cpus: $(nproc) · memory: $(free -m | awk '/Mem:/ {print $2}') MB"
+          cd backend && python -m marketlens.backtest.swing --db ../backtest.db --out ../swing.json
+          cd .. && python3 -c "import json;d=json.load(open('swing.json'));print(json.dumps({'spy':d['spy'],'strategies':{k:{p:{m:v for m,v in r[p].items()} for p in ('train','holdout','full','holdout_cost2x')}|{'verdict':r['verdict']} for k,r in d['strategies'].items()}},ensure_ascii=False,separators=(',',':')))"
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.task == 'swing'
+        with:
+          name: backtest-swing
+          path: swing.json
       - name: Probe source coverage
         if: inputs.task == 'probe'
         env:
