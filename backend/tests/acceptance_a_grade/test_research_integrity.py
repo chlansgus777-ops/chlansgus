@@ -77,10 +77,16 @@ def _store(tmp_path):
     return MarketStore(make_session_factory(eng), "LIVE")
 
 
-def test_announced_future_split_does_not_rescale_todays_prices(tmp_path):
+def test_announced_future_split_does_not_rescale_todays_prices(tmp_path, monkeypatch):
     """Evaluation 2 P0 counterexample: a 10:1 split dated 10 days ahead turned a stored 100 into 10 at once."""
+    from datetime import datetime, timezone
+
+    import marketlens.application.market_store as ms
     from marketlens.domain.market import Bar
 
+    # the bar is retrieved on 2026-09-25 (before the split), whatever the wall clock says when the test runs: a bar
+    # retrieved after the split took effect is vendor-adjusted already and is rightly never rescaled
+    monkeypatch.setattr(ms, "_now", lambda: datetime(2026, 9, 25, 21, 0, tzinfo=timezone.utc))
     st = _store(tmp_path)
     st.save_bars("ABC", [Bar(date(2026, 9, 24), 100, 101, 99, 100, 1e6)], "polygon")
     st.save_splits([SplitEvent("ABC", date(2026, 10, 5), 1, 10, "polygon")])
