@@ -1,7 +1,8 @@
+import { sectorKo } from "../i18n";
 import { Fragment } from "react";
 import { Link } from "react-router-dom";
-import { IArrow, IDownload, IEvent, IPerf, IPortfolio, IShield, IStar } from "../components/icons";
-import { Action, Card, Change, Empty, Err, LineChart, Loading, Notice, ScoreMeter, StaleData, StatePanel, Term } from "../components/ui";
+import { IArrow, IDownload, IEvent, IPortfolio, IStar } from "../components/icons";
+import { Action, Card, Empty, Err, Loading, Notice, ScoreMeter, StaleData, StatePanel } from "../components/ui";
 import { NotReady, ReadinessBanner, SyncControl, type ReadinessInfo } from "../components/Readiness";
 import { type ScanStatus, usePageTime, useStatus } from "../components/status";
 import { useApi, usePoll } from "../components/useApi";
@@ -12,7 +13,7 @@ import { useLiveRows } from "../components/liveBoard";
 import { MorningBriefing } from "../components/Briefing";
 import { HoldingPlans } from "../components/HoldingPlans";
 import { ago, day, num, pct, price, stampEt, errKo } from "../format";
-import { ACTION_PLAIN, BULLISH, HEALTH_KO, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
+import { ACTION_PLAIN, BULLISH, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
 import type { OppRow, ScanInfo } from "../types";
 
 export type { ScanStatus } from "../components/status";
@@ -55,7 +56,7 @@ const BAD_QUALITY = new Set(["STALE", "MISSING", "CONFLICTING"]);
  * Everything else is listed separately — an old or out-of-range BUY never looks like a fresh one. */
 export function splitCandidates(rows: OppRow[]): { valid: OppRow[]; notValid: OppRow[] } {
   const bullish = rows.filter((r) => BULLISH.has(r.action));
-  const ok = (r: OppRow) => r.actionable_now === true && r.current_status === "CURRENT" && !BAD_QUALITY.has(r.data_quality) && !BAD_QUALITY.has(r.price_quality);
+  const ok = (r: OppRow) => r.actionable_now === true && r.current_status === "CURRENT" && !BAD_QUALITY.has(r.execution_quality ?? r.data_quality) && !BAD_QUALITY.has(r.price_quality);
   return { valid: bullish.filter(ok), notValid: bullish.filter((r) => !ok(r)) };
 }
 
@@ -74,19 +75,6 @@ function CardPrice({ r }: { r: OppRow }) {
   return row?.price != null ? <LivePrice ticker={r.ticker} size="sm" showState={false} /> : <span style={{ whiteSpace: "nowrap" }}>{price(r.price)}</span>;
 }
 
-/** Before the first result: how many paper positions exist and why there is no curve yet — never a bare "0". */
-function PaperCounts({ c }: { c?: Record<string, number> }) {
-  const n = (k: string) => c?.[k] ?? 0;
-  const total = n("PENDING") + n("OPEN") + n("CLOSED") + n("SKIPPED");
-  if (!total) return <div className="caption" data-testid="paper-none">아직 모의 포지션이 없습니다. 스캔에서 매수 계열 추천이 나오면 다음 거래일 시가에 모의로 들어가고, 장 마감 뒤 자동으로 결과를 계산합니다.</div>;
-  return (
-    <div className="caption" data-testid="paper-counts">
-      모의 포지션 {total}개 — 진입 대기 {n("PENDING")} · 보유 {n("OPEN")} · 종료 {n("CLOSED")}{n("SKIPPED") ? ` · 건너뜀 ${n("SKIPPED")}` : ""}.
-      {" "}결과 곡선은 장 마감 뒤(앱을 켜면 밀린 날까지) 자동으로 계산됩니다.
-    </div>
-  );
-}
-
 function groupBy<T>(xs: T[], key: (x: T) => string): [string, T[]][] {
   const m = new Map<string, T[]>();
   for (const x of xs) m.set(key(x), [...(m.get(key(x)) ?? []), x]);
@@ -100,8 +88,8 @@ function CandidateCard({ r, lead }: { r: OppRow; lead?: boolean }) {
   return (
     <Link to={`/stocks/${r.ticker}`} title={plain} className={`cand compact-candidate${lead ? " lead" : ""}`} style={{ ["--rail" as string]: `var(--${actionTone(r.action)})` }} data-testid="candidate-card" aria-label={`${r.ticker} 상세 보기`}>
       <div className="top">
-        <div style={{ minWidth: 0 }}><div className="tk">{r.ticker}</div><div className="co">{r.company} · {r.sector_known === false ? "업종 불명확" : r.sector}</div></div>
-        <span className="stack-tight" style={{ alignItems: "flex-end" }}><Action a={r.action} status={r.current_status} quality={r.data_quality} /><LiveZone ticker={r.ticker} recId={r.id} compact /></span>
+        <div style={{ minWidth: 0 }}><div className="tk">{r.ticker}</div><div className="co">{r.company} · {r.sector_known === false ? "업종 불명확" : sectorKo(r.sector)}</div></div>
+        <span className="stack-tight" style={{ alignItems: "flex-end" }}><Action a={r.action} status={r.current_status} quality={r.execution_quality ?? r.data_quality} /><LiveZone ticker={r.ticker} recId={r.id} compact /></span>
       </div>
       {r.key_reason ? <div className="why"><b>핵심 이유 · </b>{r.key_reason}</div> : null}
       <div className="facts">
@@ -159,7 +147,7 @@ export function CoverageCard({ s }: { s: ScanStatus | null }) {
   const rate = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
   return (
     <Card title="분석 범위" sub explain="후보를 고를 때 종목 목록 중 얼마를 실제로 판단했는지와 빠진 이유" tone={st.status === "INTERRUPTED" ? "warn" : undefined}>
-      {st.status === "INTERRUPTED" && <Notice tone="warn">지난 스캔이 중간에 멈췄습니다({st.saved}/{st.total}개 저장). 저장된 결과는 유지되며, 다시 스캔하면 이미 받은 AI 검토 결과를 재사용합니다.</Notice>}
+      {st.status === "INTERRUPTED" && <Notice tone="warn">지난 스캔이 중간에 멈췄습니다({st.saved}/{st.total}개 저장). 저장된 결과는 유지되며, 다음 스캔이 이어서 채웁니다.</Notice>}
       {st.status === "RUNNING" && <div className="caption">스캔 진행 중: {st.saved}/{st.total}개 저장</div>}
       {c && (
         <div className="kv" style={{ marginTop: st.status === "INTERRUPTED" ? 10 : 0 }}>
@@ -168,7 +156,6 @@ export function CoverageCard({ s }: { s: ScanStatus | null }) {
           <span className="k">정밀 분석</span><span>{c.deep_analysed.toLocaleString("ko-KR")}개 → 최종 순위 {c.analysed}개</span>
           <span className="k">데이터 부족으로 판단 안 함</span><span className={c.data_insufficient ? "warn" : undefined}>{c.data_insufficient}개 ({rate(c.data_insufficient_rate)})</span>
           {Object.entries(c.missing_by_field).slice(0, 4).map(([k, v]) => <Fragment key={k}><span className="k">{FIELD_KO[k] ?? k} 없음</span><span>{v.count}개 ({rate(v.rate)})</span></Fragment>)}
-          <span className="k">AI 검토 비용</span><span>{c.llm.calls}회 · 약 ${c.llm.estimated_cost_usd.toFixed(2)}{c.llm.cost_complete ? "" : " (일부 비용 미상)"}</span>
         </div>
       )}
       {c && Object.keys(c.excluded_by_reason).length > 0 && (
@@ -282,7 +269,7 @@ export default function Dashboard() {
                 {/* one line per reason: five names invalidated by the same account change say it once */}
                 <div className="invalid-list">{groupBy(notValid.slice(0, 12), (r) => r.current_status_reason ?? "").map(([why, rs]) => (
                   <div className="it" key={why || "-"}>
-                    <div className="names">{rs.map((r) => <span className="inv" key={r.id}><Link to={`/stocks/${r.ticker}`}>{r.ticker}</Link><Action a={r.action} status={r.current_status} quality={r.data_quality} /></span>)}</div>
+                    <div className="names">{rs.map((r) => <span className="inv" key={r.id}><Link to={`/stocks/${r.ticker}`}>{r.ticker}</Link><Action a={r.action} status={r.current_status} quality={r.execution_quality ?? r.data_quality} /></span>)}</div>
                     {why && <div className="caption">{why}</div>}
                   </div>
                 ))}</div>
@@ -297,22 +284,6 @@ export default function Dashboard() {
               <SyncControl compact onChange={() => { d.reload(); st?.refresh(); }} />
             </Card></div>
           )}
-
-          {/* the paper account and the scan's reach side by side under the main column, so the two columns end together */}
-          <div className="home-pair">
-            <div className="rail-card">
-              <div className="head"><h2><IPerf />모의투자</h2><Link to="/performance">성과 →</Link></div>
-              <div className="caption" style={{ marginBottom: 8 }}>{sysMode === "MOCK" ? "모의 데이터로 만든 시뮬레이션 — 실전 성과가 아닙니다" : "실데이터 가격으로 계산한 시뮬레이션 — 실제 주문이 아닙니다"}</div>
-              {x.performance ? (
-                <>
-                  <div className="row spread"><span className="t-key-sm"><Change v={x.performance.return} /></span><span className="caption"><Term k="max_drawdown">최대 낙폭</Term> {pct(x.performance.max_drawdown)}</span></div>
-                  <LineChart values={x.performance.curve} height={56} />
-                  <div className="caption">기준일 {day(x.performance.as_of)} · 시작 자본 {price(x.performance.starting_capital)}</div>
-                </>
-              ) : <PaperCounts c={x.paper_counts} />}
-            </div>
-            <CoverageCard s={ss ?? null} />
-          </div>
 
           {x.recommendation_changes.length > 0 && (
             <Card title="추천이 바뀐 종목" sub explain="직전 분석과 비교해 판정이 달라진 종목">
@@ -341,12 +312,6 @@ export default function Dashboard() {
             {x.portfolio.holdings ? (
               <div className="kv"><span className="k">보유 종목</span><span>{x.portfolio.holdings}개</span><span className="k">현금</span><span>{x.portfolio.cash_entered === false ? <span className="muted" title={`매수 수량은 가정 금액 ${price(x.portfolio.cash)} 기준으로 계산합니다`}>미입력</span> : price(x.portfolio.cash)}</span></div>
             ) : <div className="caption">아직 입력한 보유 종목이 없습니다. 입력하면 새 종목을 넣을 때 쏠림·한도를 자동으로 확인합니다.</div>}
-          </div>
-          <div className="rail-card">
-            <div className="head"><h2><IShield />데이터 연결</h2><Link to="/settings?tab=status">자세히 →</Link></div>
-            {down.length ? <Notice tone="warn">일부 공급자가 중단되었습니다({down.map((h) => h.kind).join(", ")}). 해당 데이터는 ‘없음’으로 표시되고 판단에서 보수적으로 처리됩니다.</Notice>
-              : x.provider_health.length ? <div className="caption">공급자 {x.provider_health.length}곳 · {x.provider_health.every((h) => h.status === "HEALTHY") ? "모두 정상" : x.provider_health.map((h) => `${h.kind} ${HEALTH_KO[h.status] ?? h.status}`).filter((t) => !t.endsWith("정상")).join(", ")}</div>
-              : <div className="caption">아직 데이터 호출 기록이 없습니다(첫 스캔 후 표시).</div>}
           </div>
         </aside>
       </div>

@@ -9,7 +9,7 @@ describe("portfolio interpretation", () => {
     const out = interpret({ ...base, holdings: [h("NVDA", 0.4), h("AMD", 0.4)], sector_weights: { Technology: 0.8 }, theme_weights: { AI: 0.8 }, correlations: [["NVDA", "AMD", 0.86]] });
     const text = out.map((o) => o.text).join(" ");
     expect(text).toContain("AI/반도체 비중");
-    expect(text).toContain("Technology 업종");
+    expect(text).toContain("기술 업종");  // sector names in Korean since the 2026-10-05 release pass (was "Technology 업종")
     expect(text).toContain("거의 같이 움직입니다");
     expect(out.some((o) => o.tone === "warn")).toBe(true);
   });

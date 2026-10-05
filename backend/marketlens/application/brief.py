@@ -17,7 +17,8 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 COMPONENT_KO = {"fundamental": "재무", "valuation": "밸류에이션", "earnings_revision": "실적·추정치", "catalyst": "촉매",
-                "macro": "거시", "technical": "가격 추세", "risk": "위험", "entry_rr": "가격 계획", "issue": "이슈"}
+                "macro": "거시", "technical": "가격 추세", "risk": "위험", "entry_rr": "가격 계획", "issue": "이슈",
+                "return_signals": "수익 신호(참고·점수 미반영)"}
 MULTIPLE_KO = {"forward_pe": "선행 PER", "trailing_pe": "PER", "ev_ebitda": "EV/EBITDA", "ev_sales": "EV/매출", "price_sales": "PSR",
                "p_tbv": "P/TBV", "p_b": "PBR", "p_ffo": "P/FFO", "price_fcf": "P/FCF"}
 RESULT_KO = {"BEAT_AND_RAISE": "예상 상회 + 가이던스 상향", "BEAT": "예상 상회", "BEAT_WEAK_GUIDE": "예상 상회했으나 가이던스 부진",
@@ -364,7 +365,7 @@ def _triggers(r: Mapping[str, Any], lv: Mapping[str, Any], action: str, score: f
             out.append(_item("VIEW", f"가격이 {_usd(mb)} 이하로 내려오면", why="가격 조건이 다시 맞아 매수 여부를 다시 판단합니다", tone="pos", label="가격"))
     if isinstance(score, (int, float)) and th is not None:
         if action == "BUY":
-            out.append(_item("VIEW", f"점수가 {th.buy_exit:g} 아래로 내려가면(현재 {score:.1f})", why="매수 판단을 해제합니다 — 한 번 내린 판단을 작은 변화로 뒤집지 않도록 진입({th.buy_enter:g})과 해제 기준을 다르게 둡니다", tone="warn", label="점수"))
+            out.append(_item("VIEW", f"점수가 {th.buy_exit:g} 아래로 내려가면(현재 {score:.1f})", why=f"매수 판단을 해제합니다 — 한 번 내린 판단을 작은 변화로 뒤집지 않도록 진입({th.buy_enter:g})과 해제 기준을 다르게 둡니다", tone="warn", label="점수"))
         elif action == "BUY SMALL":
             out.append(_item("VIEW", f"점수가 {th.buy_small_exit:g} 아래로 내려가면(현재 {score:.1f})", why="소량 매수 판단을 해제합니다", tone="warn", label="점수"))
             out.append(_item("VIEW", f"점수가 {th.buy_enter:g} 이상으로 오르면", why="가격 조건을 충족할 때 매수로 올립니다", tone="pos", label="점수"))

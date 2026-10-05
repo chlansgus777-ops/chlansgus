@@ -69,12 +69,16 @@ def page(server):
 
 def test_dashboard_answers_the_first_questions(page, server):
     # product overhaul 2026-09-28: the home screen answers "what now" first (today hero, candidates) with the
-    # account, the calendar, the watchlist and the data connection in a side rail
+    # account, the calendar and the watchlist in a side rail. Trimmed 2026-10-05 (owner: "쓸데없는 기능 없애거나 숨겨"):
+    # the paper account lives on 성과, the scan's reach under 설정 → 연결 상태, and a healthy data connection says
+    # nothing (a broken one still shows its banner on top)
     page.goto(f"{server}/#/")
     page.get_by_role("heading", name="지금 검토할 후보", exact=True).wait_for()
     assert "모의 데이터(MOCK)" in page.get_by_test_id("banner-mock").inner_text()
-    for title in ("오늘", "지금 검토할 후보", "다가오는 일정", "관심 종목", "내 포트폴리오", "모의투자", "데이터 연결"):
+    for title in ("오늘", "지금 검토할 후보", "다가오는 일정", "관심 종목", "내 포트폴리오"):
         assert page.get_by_role("heading", name=title, exact=True).is_visible(), title
+    for gone in ("모의투자", "데이터 연결", "분석 범위"):
+        assert page.get_by_role("heading", name=gone, exact=True).count() == 0, gone
     assert page.get_by_role("navigation", name="주 메뉴").get_by_role("link", name="종목", exact=True).is_visible()
     assert page.errors == []  # type: ignore[attr-defined]
 
@@ -155,36 +159,16 @@ def test_ticker_switch_never_shows_the_previous_stock(page, server):
     assert a not in page.locator("h1").first.inner_text()
 
 
-def test_committee_run_creates_a_reviewed_version(page, server):
-    target = next(r for r in _rows(page, server) if (r["rank"] or 0) > 20 and r["committee_status"] == "NOT_RUN" and r["action"] != "DATA INSUFFICIENT")
-    _open_stock(page, server, target["ticker"])
-    page.get_by_role("button", name="AI 검토 실행").click()
-    page.get_by_text("AI 검토본 v2").wait_for(timeout=30000)
+def test_the_ai_review_is_gone_from_the_stock_page(page, server):
+    """The AI review was removed (owner 2026-10-05). Replaces the two tests of its button (a run creating a reviewed
+    version, and a late run not leaking into another stock): there is no button, and opening a stock makes no AI call."""
+    calls: list[str] = []
+    page.on("request", lambda r: calls.append(r.url))
+    _open_stock(page, server, _rows(page, server)[0]["ticker"])
+    assert page.get_by_role("button", name="AI 검토 실행").count() == 0
+    assert page.get_by_text("AI 검토").count() == 0
+    assert not [u for u in calls if "/committee" in u]
     assert page.errors == []  # type: ignore[attr-defined]
-
-
-def test_late_committee_response_cannot_leak_into_another_stock(page, server):
-    import time as _t
-
-    later = [r for r in _rows(page, server) if (r["rank"] or 0) > 20 and r["committee_status"] == "NOT_RUN" and r["action"] != "DATA INSUFFICIENT"]
-    c, d = later[1]["ticker"], later[2]["ticker"]
-
-    def slow(route):  # noqa: ANN001
-        _t.sleep(1.5)
-        route.continue_()
-
-    page.route("**/api/recommendations/*/committee", slow)
-    try:
-        _open_stock(page, server, c)
-        page.get_by_role("button", name="AI 검토 실행").click()
-        page.evaluate(f"window.location.hash = '#/stocks/{d}'")  # leave before the response arrives
-        page.wait_for_function(f"document.querySelector('h1') && document.querySelector('h1').innerText.startsWith('{d}')")
-        page.wait_for_timeout(2500)
-        assert d in page.locator("h1").first.inner_text()
-        assert page.get_by_text("AI 검토본").count() == 0  # D has no committee; C's result never appears here
-        assert page.get_by_text("아직 실행하지 않았습니다").is_visible()
-    finally:
-        page.unroute("**/api/recommendations/*/committee")
 
 
 def test_beginner_explanations_are_on_screen_not_only_in_tooltips(page, server):

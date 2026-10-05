@@ -326,7 +326,9 @@ def load_settings() -> Settings:
         fast_model=os.environ.get("FAST_MODEL", "claude-haiku-4-5"),
         deep_model=os.environ.get("DEEP_MODEL", "claude-opus-5"),
         enable_paper_trading=_bool(os.environ.get("ENABLE_PAPER_TRADING"), True),
-        enable_ai_committee=_bool(os.environ.get("ENABLE_AI_COMMITTEE"), True),
+        # the AI committee is retired from the app (owner 2026-10-05: "쓰지도 않는데 없애버려"): decisions are the rules'
+        # alone. The engine module stays (its safety rules are still tested) and can be turned back on for research only.
+        enable_ai_committee=_bool(os.environ.get("ENABLE_AI_COMMITTEE"), False),
         mock_universe_size=int(os.environ.get("MOCK_UNIVERSE_SIZE", "600")),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         scheduler=_bool(os.environ.get("MARKETLENS_SCHEDULER"), True),  # on unless turned off: the owner never has to press scan

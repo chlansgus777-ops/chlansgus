@@ -42,3 +42,20 @@ describe("a scan-wide stale price", () => {
     expect(screen.getByTestId("rescan-now").textContent).toContain("종가 기준");
   });
 });
+
+// owner 2026-10-05: a fresh BUY showed "매수·만료" because a side field (news) disagreed between sources
+describe("a fresh call with a side-field conflict", () => {
+  it("is not struck through: expiry follows the core fields (execution_quality), the badge still shows the conflict", () => {
+    const r = { ...row(1), price: 100, price_quality: "FRESH", session: "REGULAR", action: "BUY", deterministic_action: "BUY", action_ko: "매수",
+      score: 70, vetoes: [], current_status: "CURRENT", actionable_now: true, data_quality: "CONFLICTING", execution_quality: "FRESH" } as OppRow;
+    render(<MemoryRouter><OppTable rows={[r]} /></MemoryRouter>);
+    expect(screen.queryByTestId("action-expired")).toBeNull();
+    expect(screen.getAllByText(/충돌/).length).toBeGreaterThan(0);
+  });
+  it("is struck through when the core fields themselves are stale", () => {
+    const r = { ...row(2), price: 100, price_quality: "FRESH", session: "REGULAR", action: "BUY", deterministic_action: "BUY", action_ko: "매수",
+      score: 70, vetoes: [], current_status: "CURRENT", actionable_now: false, data_quality: "STALE", execution_quality: "STALE" } as OppRow;
+    render(<MemoryRouter><OppTable rows={[r]} /></MemoryRouter>);
+    expect(screen.getByTestId("action-expired")).toBeTruthy();
+  });
+});

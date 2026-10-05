@@ -1,3 +1,4 @@
+import { sectorKo } from "../i18n";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { num, pct, price, stamp } from "../format";
@@ -130,7 +131,7 @@ function cell(r: OppRow, k: Key, commonStale = false) {
       return (
         <div className="tk-cell">
           <Link to={`/stocks/${r.ticker}`}>{r.ticker}</Link>
-          <span className="co" title={r.company}>{r.company}{r.sector_known === false ? " · 업종 불명확" : r.sector ? ` · ${r.sector}` : ""}</span>
+          <span className="co" title={r.company}>{r.company}{r.sector_known === false ? " · 업종 불명확" : r.sector ? ` · ${sectorKo(r.sector)}` : ""}</span>
         </div>
       );
     case "action":
@@ -138,7 +139,7 @@ function cell(r: OppRow, k: Key, commonStale = false) {
       // the scan-wide "price not current" reason is explained above the table: only what differs stays on the row
       const vetoes = commonStale ? r.vetoes.filter((v) => v !== "STALE_PRICE") : r.vetoes;
       const priceOnly = commonStale && r.vetoes.includes("STALE_PRICE") && r.price_quality !== "FRESH" && r.price_quality !== "DELAYED";
-      return <div className="row tight"><Action a={r.action} status={r.current_status} quality={r.data_quality} /><Vetoes v={vetoes} />{r.data_quality !== "FRESH" && r.data_quality !== "DELAYED" && !priceOnly && !r.vetoes.some((v) => DATA_VETOES.has(v)) ? <Quality q={r.data_quality} /> : null}</div>;
+      return <div className="row tight"><Action a={r.action} status={r.current_status} quality={r.execution_quality ?? r.data_quality} /><Vetoes v={vetoes} />{r.data_quality !== "FRESH" && r.data_quality !== "DELAYED" && !priceOnly && !r.vetoes.some((v) => DATA_VETOES.has(v)) ? <Quality q={r.data_quality} /> : null}</div>;
     }
     case "score":
       return <span className="score-mini"><b>{num(r.score, 1)}</b><span className="bar"><span style={{ display: "block", height: "100%", width: `${Math.max(0, Math.min(100, r.score))}%`, borderRadius: 99, background: r.score >= 80 ? "var(--buy)" : r.score >= 72 ? "rgba(114,184,255,.6)" : "var(--faint)" }} /></span></span>;

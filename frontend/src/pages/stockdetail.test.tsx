@@ -3,25 +3,10 @@ import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-libr
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useApi } from "../components/useApi";
-import type { CommitteeResult, StockDetail as SD } from "../types";
-import { committeeFor } from "./StockDetail";
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-});
-
-const com = (ticker: string, action: string) => ({ ticker, status: "OK", final_action: action }) as unknown as CommitteeResult;
-const detail = (ticker: string, id: number, committee: CommitteeResult | null, comRec: number | null = id) =>
-  ({ recommendation: { id, ticker }, analysis: { ticker }, committee, committee_recommendation_id: comRec }) as unknown as SD;
-
-describe("AI committee binding (audit P0: another stock's committee on screen)", () => {
-  it("accepts only the committee of the recommendation version on screen", () => {
-    expect(committeeFor(detail("AAPL", 5, com("AAPL", "WAIT")), "AAPL")?.final_action).toBe("WAIT");
-    expect(committeeFor(detail("AAPL", 5, com("NVDA", "BUY")), "AAPL")).toBeNull(); // other ticker
-    expect(committeeFor(detail("AAPL", 5, com("AAPL", "BUY"), 4), "AAPL")).toBeNull(); // older version's committee
-    expect(committeeFor(detail("NVDA", 5, com("NVDA", "BUY")), "AAPL")).toBeNull(); // data of another page
-  });
 });
 
 describe("useApi never shows another resource's data", () => {
@@ -70,19 +55,5 @@ describe("recommendation status is re-judged while the page is open (evaluation 
     vi.useRealTimers();
     await waitFor(() => expect(result.current?.status).toBe("PLAN_INVALIDATED"));
     expect(urls.every((u) => !u.includes("refresh=true"))).toBe(true); // a read, never a re-analysis
-  });
-});
-
-describe("reused AI committee is labelled with its origin (evaluation 2, item 15)", () => {
-  it("says the opinion is carried over, from when, and which recommendation", async () => {
-    const { CommitteeView } = await import("../components/CommitteeView");
-    const c = { ticker: "NVDA", status: "REUSED", reason: "중요한 변화 없음 → 2026-09-22 위원회 결과 재사용(추가 AI 호출 없음)", deterministic_action: "WAIT", final_action: "WAIT",
-      deterministic_confidence: 60, final_confidence: 55, size_class: null, action_changed_by: null, reports: {}, invalid_outputs: {}, debate: [], synthesis: null, risk_review: null,
-      portfolio_advice: null, consensus_pct: 70, divergence: "LOW", guard: {}, injection_flags: [], prompt_version: "p", depth: "REUSED", reused_from: 41 } as unknown as CommitteeResult;
-    render(<CommitteeView c={c} evidence={new Map()} />);
-    const box = screen.getByTestId("committee-reused");
-    expect(box.textContent).toContain("2026-09-22");
-    expect(box.textContent).toContain("#41");
-    expect(screen.getByText("이전 결과 재사용")).toBeTruthy();
   });
 });

@@ -7,9 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import stockFixture from "../__fixtures__/stock_mock.json";
 import { StatusBar, StatusProvider, usePageTime } from "../components/status";
 import { StaleData, StatePanel, Term, type StateKind } from "../components/ui";
-import type { CommitteeResult, OppRow, StockDetail as SD } from "../types";
+import type { OppRow, StockDetail as SD } from "../types";
 import Dashboard, { riskLine, scopeLine, splitCandidates } from "./Dashboard";
-import { acceptRun } from "../components/CommitteeView";
 import Performance from "./Performance";
 import Portfolio from "./Portfolio";
 import StockDetailPage from "./StockDetail";
@@ -264,19 +263,15 @@ describe("stock page", () => {
     expect(container.querySelector("section.hero")?.textContent).toContain("사지 마세요");
   });
 
-  it("shows the AI summary only for this recommendation; another version's committee is dropped", async () => {
+  it("has no AI review any more (owner 2026-10-05: removed) — no card, no button, not even an old stored result", async () => {
     const d = clone();
+    expect(d.committee).toBeTruthy();  // the fixture still carries a committee result from before the removal
     serve([[/\/stocks\//, d]]);
-    const first = renderStock();
-    expect(await screen.findByTestId("committee-summary")).toBeTruthy();
-    first.unmount();
-    const other = clone();
-    other.committee_recommendation_id = (other.recommendation.id ?? 0) + 99;
-    serve([[/\/stocks\//, other]]);
     renderStock();
     await screen.findByText("가격 계획");
     expect(screen.queryByTestId("committee-summary")).toBeNull();
-    expect(screen.getByText("아직 실행하지 않았습니다.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /AI 검토/ })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/AI 검토|위원회/);
   });
 
   it("fast ticker switch: a late answer for the previous stock never appears", async () => {
@@ -306,15 +301,6 @@ describe("stock page", () => {
       await waitFor(() => expect(document.body.textContent).toMatch(p === "/" ? /지금 검토할 후보/ : /가격 계획/));
     }
     expect(calls.filter((c) => c.startsWith("POST") || c.includes("refresh=true") || c.includes("/committee"))).toEqual([]);
-  });
-});
-
-describe("committee page", () => {
-  it("drops a run that returns after another stock was chosen", () => {
-    const c = { ticker: "AAA" } as CommitteeResult;
-    expect(acceptRun(c, "AAA", "AAA")).toBe(true);
-    expect(acceptRun(c, "AAA", "BBB")).toBe(false);
-    expect(acceptRun({ ticker: "BBB" } as CommitteeResult, "AAA", "AAA")).toBe(false);
   });
 });
 

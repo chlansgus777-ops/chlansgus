@@ -6,6 +6,9 @@ export interface OppRow {
   score: number; confidence: number; action: string; deterministic_action: string; committee_status: string;
   ideal_entry: number | null; max_buy: number | null; target: number | null; stop: number | null; downside: number | null; rr: number | null;
   catalyst: string | null; catalyst_date: string | null; risk: string | null; data_quality: string; mode: string; vetoes: string[]; as_of: string;
+  /** the quality of the core fields only (price, history, fundamentals) — what decides whether the call can be acted on;
+   * ``data_quality`` also counts side fields (news, events) and is shown, but does not expire a fresh call */
+  execution_quality?: string;
   current_status: string | null; current_status_reason: string | null; sessions_since: number | null; actionable_now: boolean | null;
   action_ko: string; valuation_price_basis: string | null; sector_known: boolean;
   revalidated_price?: number | null; status_problems?: string[]; version?: number; supersedes_id?: number | null; issued_at?: string | null;

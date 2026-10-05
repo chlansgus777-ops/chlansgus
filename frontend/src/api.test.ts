@@ -65,6 +65,15 @@ describe("api client", () => {
     expect((err as ApiError).message).toContain("NVDA: 분석 결과 없음");
   });
 
+  it("a request refused with the server's own Korean reason says just that", async () => {
+    mockFetch([json({ detail: "미래 날짜의 거래는 적을 수 없음 (2026-10-05 > 2026-09-25)" }, 400)]);
+    const err = await api.post("/transactions", {}).catch((e: unknown) => e as ApiError);
+    expect((err as ApiError).message).toBe("미래 날짜의 거래는 적을 수 없음 (2026-10-05 > 2026-09-25)");
+    mockFetch([json({ detail: "bad payload" }, 400)]);
+    const en = await api.post("/transactions", {}).catch((e: unknown) => e as ApiError);
+    expect((en as ApiError).message).toBe("요청 형식이 올바르지 않습니다. — bad payload");  // no Korean reason: the general one first
+  });
+
   it("does not retry client errors", async () => {
     const calls = mockFetch([json({ detail: "x" }, 422)]);
     await expect(api.get("/stocks/bad", { backoffMs: 1 })).rejects.toBeInstanceOf(ApiError);

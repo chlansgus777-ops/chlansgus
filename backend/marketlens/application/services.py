@@ -952,7 +952,7 @@ class MarketLensService:
                 for row in s.scalars(select(RecommendationRow).where(RecommendationRow.id.in_(need))):
                     self._rejudge_inputs[row.id] = decode(AnalysisInputs, row.inputs)
                     from marketlens.domain.sizing import recommendation_size_cap
-                    committee = row.committee_status not in ("NOT_RUN", "SKIPPED", "UNAVAILABLE", None)
+                    committee = self.settings.enable_ai_committee and row.committee_status not in ("NOT_RUN", "SKIPPED", "UNAVAILABLE", None)
                     # an AI review's hold and size stay until the AI looks again; without one, every limit is the
                     # analysis's own and the live round recomputes it — the portfolio limits with today's account
                     self._rejudge_constraints[row.id] = {
@@ -1354,7 +1354,7 @@ class MarketLensService:
         from marketlens.domain.sizing import recommendation_size_cap, tightest
         previous_limit = None
         review_required = False
-        if committee is None:
+        if committee is None and self.settings.enable_ai_committee:  # with the committee retired no AI limit is carried on
             prior = self.latest_company_recommendation(s, r.ticker)
             if prior is not None and prior.committee_status in (*COMMITTEE_OK, "REVIEW_REQUIRED"):
                 previous_limit = recommendation_size_cap(prior)
@@ -1572,7 +1572,7 @@ class MarketLensService:
             # the newer market context replaces the shared one once the analysis succeeded (review 2026-09-28 F06: it was
             # kept only when none existed, so the issues screen and new-issue checks stayed on a days-old context)
             self._adopt_context(ctx)
-            committee = self.run_committee(r, ctx, s) if run_committee else None
+            committee = self.run_committee(r, ctx, s) if run_committee and self.settings.enable_ai_committee else None
             rec_id = None
             if persist:
                 row = self._persist(s, r, inp, cfg, None, None, committee)

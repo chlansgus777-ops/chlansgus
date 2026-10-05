@@ -1,3 +1,4 @@
+import { sectorKo } from "../i18n";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Card, Err, Loading } from "../components/ui";
@@ -38,7 +39,7 @@ export default function Issues() {
             <tbody>{r.data.issues.map(({ issue: i, affected_stocks, affected_sectors }) => (
               <tr key={i.issue_id} onClick={() => setSel(i.issue_id)} onKeyDown={(e) => { if (e.key === "Enter") setSel(i.issue_id); }} tabIndex={0} style={{ cursor: "pointer" }} aria-selected={sel === i.issue_id}>
                 <td style={{ whiteSpace: "normal", minWidth: 280 }}><b>{i.title}</b><div className="caption">{stamp(i.publish_time)} · {i.sources.join(", ")}</div></td><td style={{ whiteSpace: "nowrap" }} title={i.category}>{CAT_KO[i.category] ?? i.category}</td><td style={{ whiteSpace: "nowrap" }}>{STATUS_KO[i.confirmed_status] ?? i.confirmed_status}</td><td className="num" style={{ borderLeft: "1px solid var(--line)" }}>{num(i.importance)}</td><td className="num">{num(i.confidence)}</td><td className="num">{num(i.market_awareness)}</td>
-                <td style={{ whiteSpace: "normal", minWidth: 120 }} title={affected_sectors.join(", ")}>{affected_sectors.map((x) => (x === "Unknown" ? "업종 미확인" : x)).slice(0, 2).join(", ")}{affected_sectors.length > 2 ? <span className="caption"> 외 {affected_sectors.length - 2}</span> : null}</td>
+                <td style={{ whiteSpace: "normal", minWidth: 120 }} title={affected_sectors.join(", ")}>{affected_sectors.map((x) => sectorKo(x)).slice(0, 2).join(", ")}{affected_sectors.length > 2 ? <span className="caption"> 외 {affected_sectors.length - 2}</span> : null}</td>
                 <td style={{ whiteSpace: "normal" }}><div className="row tight">{affected_stocks.slice(0, 8).map((s) => <span key={s.ticker} className={`pill ${s.swing > 3 ? "tone-ok" : s.swing < -3 ? "tone-danger" : ""}`}>{s.ticker}{s.hops ? `(${s.hops}단계)` : ""} {s.swing > 0 ? "▲" : s.swing < 0 ? "▼" : "■"}{num(s.swing, 0)}</span>)}</div></td>
               </tr>))}</tbody></table></div>
         ) : null}

@@ -21,6 +21,7 @@ const PROGRESS_KO: Record<string, string> = {
 };
 const STATUS_KO: Record<string, string> = {
   READY: "준비됨", PARTIAL: "부분", ACCUMULATING: "누적 중", UNAVAILABLE: "제공 안 함", BLOCKED_BY_CREDENTIAL: "API 키 필요", NOT_LIVE_VERIFIED: "실제 검증 전",
+  DONE: "완료", RUNNING: "진행 중", FAILED: "실패", IDLE: "대기", NOT_APPLICABLE: "해당 없음(모의 데이터)", INTERRUPTED: "중단됨",
 };
 
 export function statusKo(s: string): string {

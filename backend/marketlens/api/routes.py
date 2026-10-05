@@ -15,6 +15,7 @@ from marketlens.application.evaluation_service import PAPER_DISCLAIMER, Evaluati
 from marketlens.application.services import CALENDAR_VIEW_DAYS, MarketLensService
 from marketlens.config import AGENT_PROMPT_VERSION, SCHEMA_VERSION, code_version
 from marketlens.application.brief import build_brief
+from marketlens.domain.facts import execution_quality
 from marketlens.domain.enums import ACTION_KO, BULLISH_ACTIONS, Action, Horizon
 from marketlens.domain.issues import compute_issue_impacts
 from marketlens.domain.macro import detect_regimes, factor_moves, primary_regime
@@ -94,11 +95,14 @@ def _row_summary(r: Any, s: MarketLensService | None = None, fetch_quote: bool =
     lv = s.levels_now(r) if s is not None else None  # after a split: the levels on today's share basis
     status = s.recommendation_status(r, fetch_quote=fetch_quote, levels=lv) if s is not None else None
     bullish = r.final_action in {a.value for a in BULLISH_ACTIONS}
+    # whether it can be acted on: its core data only (domain/facts.execution_quality) — a side field's staleness or a
+    # source disagreement is shown (data_quality) but does not expire a fresh call
+    exec_q = execution_quality(res.get("data_quality"), r.data_quality)
     return {
         "current_status": status.status if status else None,  # CURRENT | AGING | EXPIRED (re-judged now)
         "current_status_reason": status.reason_ko if status else None,
         "sessions_since": status.sessions_since if status else None,
-        "actionable_now": bool(status and status.actionable and r.data_quality in ("FRESH", "DELAYED")) if bullish else None,
+        "actionable_now": bool(status and status.actionable and exec_q in ("FRESH", "DELAYED")) if bullish else None,
         "revalidated_price": status.revalidated_price if status else None,
         "status_problems": list(status.problems) if status else [],
         "action_ko": ACTION_KO.get(Action(r.final_action), r.final_action),
@@ -115,7 +119,7 @@ def _row_summary(r: Any, s: MarketLensService | None = None, fetch_quote: bool =
         "buy_zone_high": lv["acceptable_high"] if lv else entry.get("acceptable_high"), "add_zone_low": lv["add_zone_low"] if lv else entry.get("add_zone_low"),
         "add_zone_high": lv["add_zone_high"] if lv else entry.get("add_zone_high"),
         "catalyst": nxt.get("title"), "catalyst_date": nxt.get("event_date"), "risk": er.get("level"),
-        "data_quality": r.data_quality, "mode": r.mode, "vetoes": res["decision"]["vetoes"], "as_of": r.as_of.isoformat(),
+        "data_quality": r.data_quality, "execution_quality": exec_q, "mode": r.mode, "vetoes": res["decision"]["vetoes"], "as_of": r.as_of.isoformat(),
         "version": getattr(r, "version", 1) or 1, "supersedes_id": getattr(r, "supersedes_id", None),
         "issued_at": r.created_at.isoformat() if getattr(r, "created_at", None) else None,
     }
@@ -302,6 +306,8 @@ def _position_plan(s: MarketLensService, ss: Any, row: Any, summary: dict[str, A
 
 @router.post("/recommendations/{rec_id}/committee")
 def committee(req: Request, rec_id: int) -> dict[str, Any]:
+    if not svc(req).settings.enable_ai_committee:
+        raise HTTPException(409, "AI 검토 기능은 제거되었습니다. 판단은 규칙 분석만으로 합니다.")
     return svc(req).committee_for_recommendation(rec_id)
 
 

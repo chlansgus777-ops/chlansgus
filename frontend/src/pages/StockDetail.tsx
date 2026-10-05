@@ -3,7 +3,6 @@ import { Link, useParams } from "react-router-dom";
 import { setFocusSymbol } from "../glance/desktop";
 import { advise, planNow, priceZone, quantityShown } from "../advice";
 import { api } from "../api";
-import { CommitteeSummary, CommitteeView } from "../components/CommitteeView";
 import { IRefresh, IStar } from "../components/icons";
 import { LivePrice } from "../components/LivePrice";
 import { OnPhone } from "../components/Phone";
@@ -24,7 +23,7 @@ import type { LiveJudgement } from "../components/liveBoard";
 import { ago, day, krwAux, num, pct, price, stamp, stampEt, usdWithKo } from "../format";
 import { GLOSSARY } from "../glossary";
 import { COMPONENT_KO, DATA_TYPE_KO, REGIME_KO, RISK_KO, SESSION_KO, SIZE_KO, STATUS_INFO, VERDICT_KO, VETO_KO, actionTone, ko } from "../i18n";
-import type { Analysis, Brief, BriefItem, CommitteeResult, Evidence, PositionPlan, StockDetail as SD } from "../types";
+import type { Analysis, Brief, BriefItem, Evidence, PositionPlan, StockDetail as SD } from "../types";
 import { BUY_SCORE, SMALL_SCORE } from "../thresholds";
 
 const RESULT_KO: Record<string, string> = {
@@ -96,15 +95,6 @@ function PositionPlanView({ p, shown, why, live }: { p?: PositionPlan; shown: bo
 export default function StockDetailPage() {
   const { ticker = "" } = useParams();
   return <StockDetail key={ticker.toUpperCase()} ticker={ticker.toUpperCase()} />;
-}
-
-/** The AI review shown must belong to the recommendation version on screen (same ticker and id). */
-export function committeeFor(data: SD | null, ticker: string): CommitteeResult | null {
-  if (!data || !data.committee) return null;
-  if (data.analysis.ticker !== ticker || data.recommendation.ticker !== ticker) return null;
-  if (data.committee_recommendation_id != null && data.committee_recommendation_id !== data.recommendation.id) return null;
-  if (data.committee.ticker && data.committee.ticker !== ticker) return null;
-  return data.committee;
 }
 
 export interface LiveStatus { id: number; status: string | null; reason: string | null; newer?: number }
@@ -206,8 +196,8 @@ function StockDetail({ ticker }: { ticker: string }) {
   const { recommendation: stored, analysis: a } = d.data;
   const brief: Brief | undefined = d.data.brief;
   const rec = live ? { ...stored, current_status: live.status, current_status_reason: live.reason } : stored;
-  const com = committeeFor(d.data, ticker);
   const comps = a.scorecard.components;
+  const retSig = comps.find((x) => x.name === "return_signals");
   const positives = comps.flatMap((c) => c.reasons.filter((r) => r.sign > 0)).slice(0, 5);
   const negatives = comps.flatMap((c) => c.reasons.filter((r) => r.sign < 0)).slice(0, 5);
   const usdkrw = a.evidence.find((e) => e.metric === "macro.USDKRW" && typeof e.value === "number")?.value as number | undefined;
@@ -224,7 +214,7 @@ function StockDetail({ ticker }: { ticker: string }) {
   const e0 = planNow(a.entry, stored, a.price);
   const e = lj && e0 ? { ...e0, max_buy: lj.max_buy ?? e0.max_buy, stop: lj.stop ?? e0.stop, target1: lj.target1 ?? e0.target1, target2: lj.target2 ?? e0.target2,
                          ideal_entry: lj.ideal_entry ?? e0.ideal_entry, rr_at_current: lj.rr ?? e0.rr_at_current } : e0;
-  const finalAction = lj ? lj.action : com && !["UNAVAILABLE", "SKIPPED"].includes(com.status) ? com.final_action : rec.action;
+  const finalAction = lj ? lj.action : rec.action;
   const recStatus = lvj.error ? "UNVERIFIED" : lj ? lj.current_status ?? "NEEDS_REVALIDATION" : rec.current_status;
   const adv = advise({ action: finalAction, price: priceNow, maxBuy: e?.max_buy, idealEntry: e?.ideal_entry, stop: e?.stop, rr: e?.rr_at_current, eventRisk: a.event_risk.level, vetoes: lj ? lj.vetoes : a.decision.vetoes, sizeLimit: a.decision.size_limit, status: recStatus, sectorKnown: a.sector_known });
   const zone0 = priceZone({ action: finalAction, price: priceNow, maxBuy: e?.max_buy, stop: e?.stop });
@@ -239,7 +229,7 @@ function StockDetail({ ticker }: { ticker: string }) {
     ...(a.portfolio_review?.warnings ?? []),
     ...(missing.length ? [`데이터 주의: ${missing.map((c) => DATA_TYPE_KO[c.data_type] ?? c.data_type).join(", ")}`] : []),
   ].filter((v, i, arr) => arr.indexOf(v) === i).slice(0, 6);
-  const expired = isExpired(finalAction, recStatus, lj ? lj.data_quality : rec.data_quality);
+  const expired = isExpired(finalAction, recStatus, lj ? lj.data_quality : rec.execution_quality ?? rec.data_quality);
   const tone = actionTone(finalAction, expired);
   const run = async (label: string, f: () => Promise<void>) => {
     if (busy) return;  // one action at a time: a second click never starts the same work twice
@@ -252,7 +242,6 @@ function StockDetail({ ticker }: { ticker: string }) {
   const zoneTone = zone.tone === "pos" ? "ok" : zone.tone === "neg" ? "danger" : zone.tone === "warn" ? "warn" : undefined;
   const distStop = e && priceNow ? e.stop / priceNow - 1 : null;
   const distMax = e && priceNow ? e.max_buy / priceNow - 1 : null;
-  const aiOff = !!(st?.system.data && !st.system.data.llm.available);
   const triggers = brief?.triggers ?? [];
   return (
     <div className="grid">
@@ -261,7 +250,7 @@ function StockDetail({ ticker }: { ticker: string }) {
         <div className="sticky-sum" aria-label={`${a.ticker} 요약`}>
           <b>{a.ticker}</b>
           <LivePrice ticker={a.ticker} size="sm" />
-          <Action a={finalAction} status={rec.current_status} quality={rec.data_quality} />
+          <Action a={finalAction} status={rec.current_status} quality={rec.execution_quality ?? rec.data_quality} />
           {e ? <span className="caption">최대 매수 <b className="num">{price(e.max_buy)}</b> · 손절 <b className="num">{price(e.stop)}</b></span> : null}
           <button className="sm ghost" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>맨 위로</button>
         </div>
@@ -281,7 +270,7 @@ function StockDetail({ ticker }: { ticker: string }) {
         </div>
         <div className="verdict-row">
           <span className="verdict" data-testid="verdict">{expired ? "지금은 유효하지 않은 매수 신호" : VERDICT_KO[finalAction] ?? finalAction}</span>
-          <Action a={finalAction} status={recStatus} quality={lj ? lj.data_quality : rec.data_quality} lg />
+          <Action a={finalAction} status={recStatus} quality={lj ? lj.data_quality : rec.execution_quality ?? rec.data_quality} lg />
         </div>
         {lj && <div className="live-line" data-testid="live-judgement"><span className="live-dot" aria-hidden />실시간 판정 {liveTime(lj.at)} · 점수 {lj.score.toFixed(1)} · 저장된 분석({stamp(lj.analysed_at)})에 현재가 {price(lj.price)}를 넣어 1초마다 다시 계산</div>}
         <p className="headline">{adv.headline}</p>
@@ -333,7 +322,6 @@ function StockDetail({ ticker }: { ticker: string }) {
       <StaleData error={d.error} at={d.fetchedAt} retry={d.reload} nowMs={nowMs} />
       {analysisJob.busy && <Notice tone="info">분석 진행 중… 기존 결과를 유지합니다. {analysisJob.phase}</Notice>}
       {analysisJob.error && <Notice tone="neg">{analysisJob.error}</Notice>}
-      {(lj?.review_reason || rec.committee_status === "REVIEW_REQUIRED") && <Notice tone="warn">{lj?.review_reason || "이전 AI 보류·비중 제한을 유지합니다. AI 검토를 다시 실행하기 전까지 제한을 확대하지 않습니다."}</Notice>}
       {rec.current_status && rec.current_status !== "CURRENT" && finalAction !== "DATA INSUFFICIENT" && <UnlessLive ticker={a.ticker} recId={rec.id}>{/* the live verdict replaces the stored re-check */}{( /* no plan to execute: the card below says why */
         <StatePanel kind={rec.current_status === "PLAN_INVALIDATED" ? "out_of_range" : "stale"} title={`${STATUS_INFO[rec.current_status]?.label ?? rec.current_status} — 지금은 이 계획대로 실행하지 마세요`}
                     what={<>{STATUS_INFO[rec.current_status]?.help ?? ""}{rec.current_status_reason ? <div className="caption" style={{ marginTop: 4 }}>{rec.current_status_reason}</div> : null}</>}
@@ -389,18 +377,8 @@ function StockDetail({ ticker }: { ticker: string }) {
         <ul className="list">{a.decision.reasons.map((r, i) => <li key={i}><span className="dot info">{i + 1}</span><span>{r}</span></li>)}</ul>
         {a.decision.notes.length > 0 && <ul className="list" style={{ marginTop: 10 }}>{a.decision.notes.map((n, i) => <li key={i}><span className="dot warn">!</span><span>{n}</span></li>)}</ul>}
       </Disclosure>
-      <ReturnSignalsCard c={comps.find((x) => x.name === "return_signals")} />
-      <Card title="AI 검토" sub explain="뉴스 원문을 읽은 AI의 추가 의견입니다. 규칙 판단을 올릴 수는 없고, 매수를 낮추거나 규모를 줄이는 것만 할 수 있습니다."
-            right={<button className="sm" disabled={!!busy} onClick={() => run("com", async () => { await api.post<CommitteeResult>(`/recommendations/${rec.id}/committee`); d.reload(); })}>{busy === "com" ? <><span className="spin" />AI 검토 중…</> : com ? "다시 검토" : "AI 검토 실행"}</button>}>
-        {busy === "com" && <Loading what="AI 검토" steps={["뉴스 원문 읽기", "위험 검토(하향만 가능)", "비중 조언", "근거 수치 대조"]} rows={0} />}
-        {com ? (
-          <>
-            <CommitteeSummary c={com} />
-            <div style={{ marginTop: 12 }}><Disclosure title="역할별 의견 전체" hint="근거 ID와 거절된 주장까지" inset><CommitteeView c={com} evidence={evIndex} /></Disclosure></div>
-          </>
-        ) : aiOff ? <StatePanel kind="ai_unavailable" />
-          : <Empty hint="스캔 상위 후보에는 자동으로 실행됩니다. 이 종목은 버튼을 눌러 실행할 수 있습니다.">아직 실행하지 않았습니다.</Empty>}
-      </Card>
+      {/* the return signals only stand here once they count in the score; until then they are reference, folded in ⑧ */}
+      {(retSig?.weight ?? 0) > 0 && <ReturnSignalsCard c={retSig} />}
 
       {/* ③ 가격 계획: the chart is the centre; below it the levels, how they were computed and the buy amount */}
       <Section no={3} title="가격 계획" sub={zone.text} />
@@ -409,8 +387,10 @@ function StockDetail({ ticker }: { ticker: string }) {
         {hist.length > 1 && e ? (
           <PlanChart data={hist} levels={{ stop: e.stop, maxBuy: e.max_buy, zoneLow: e.acceptable_low, ideal: e.ideal_entry, t1: e.target1, t2: e.target2 }} height={320} />
         ) : hist.length > 1 ? <PlanChart data={hist} levels={{}} height={260} /> : <Empty>가격 이력이 부족해 차트를 그리지 않습니다.</Empty>}
-        <MaTouch technicals={a.technicals} price={priceNow} split={split} alert={d.data?.ma_alert} />
-        <SupportResistance technicals={a.technicals as Record<string, unknown>} price={priceNow} split={split} />
+        <div className="pmap" data-testid="price-map">
+          <MaTouch technicals={a.technicals} price={priceNow} split={split} alert={d.data?.ma_alert} />
+          <SupportResistance technicals={a.technicals as Record<string, unknown>} price={priceNow} split={split} />
+        </div>
         <div className="divider" />
         <div className="two">
           <div>
@@ -535,6 +515,7 @@ function StockDetail({ ticker }: { ticker: string }) {
           {replay && <span className="caption" role="status">{replay}</span>}
         </div>
         <Disclosure title="데이터 종류별 신선도" hint="각 데이터가 언제 기준인지"><FreshnessTable checks={checks} /></Disclosure>
+        {retSig && retSig.weight === 0 && <Disclosure title="수익 신호" hint="참고용 · 과거 검증 전이라 점수에 넣지 않음" testId="return-signals-fold"><ReturnSignalsCard c={retSig} /></Disclosure>}
         <Disclosure title="점수 구성" hint={`${a.scorecard.model_version} · 업종 모델: ${a.sector_model_name}`}>
           <div className="explain" style={{ marginBottom: 8 }}>업종 모델 선택 이유: {a.sector_model_reason}</div>
           <div className="scroll"><table><thead><tr><th>구성요소</th><th className="num">점수</th><th style={{ width: "25%" }}></th><th>근거</th></tr></thead>

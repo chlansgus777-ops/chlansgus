@@ -136,7 +136,13 @@ export function LivePlanLine({ ticker, recId, level, fallback }: { ticker: strin
     return <span className={j.zone === "STOP_HIT" ? "neg" : undefined}>{j.to_stop_pct === null ? "—" : j.zone === "STOP_HIT" ? "현재가가 손절 기준 아래" : `현재가 대비 ${pct(j.to_stop_pct)}`} · 논리 철회 조건은 ⑤</span>;
   }
   const v = zoneView(j);
+  if (!v) {
+    // not a buy call (대기·관찰…): say where the price is against the max buy instead of "판단 없음"
+    if (j.to_max_pct === null) return <>{fallback}</>;
+    const above = j.to_max_pct < 0;
+    return <span className={above ? "warn" : undefined}>{above ? `현재가가 최대 매수가보다 ${pct(-j.to_max_pct, 1, false)} 위` : `현재가가 최대 매수가 아래 (여유 ${pct(j.to_max_pct, 1, false)})`} · 판정 {j.action_ko}</span>;
+  }
   return <span className={j.valid_now ? "pos" : j.zone === "STOP_HIT" ? "neg" : j.zone === "BUY_ZONE" ? undefined : "warn"}>
-    현재가 기준 {v ? v.label : "판단 없음"}{j.to_max_pct !== null && j.zone !== "STOP_HIT" ? ` · 최대 매수가까지 ${pct(j.to_max_pct)}` : ""}
+    현재가 기준 {v.label}{j.to_max_pct !== null && j.zone !== "STOP_HIT" ? ` · 최대 매수가까지 ${pct(j.to_max_pct)}` : ""}
   </span>;
 }

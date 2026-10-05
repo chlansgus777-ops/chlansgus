@@ -14,6 +14,8 @@ export function maState(price: number, line: number, atr: number | null | undefi
   return price > line ? "ABOVE" : "BELOW";
 }
 
+const MA_HELP = "분석 시점의 일봉 20·50·200일 이동평균입니다. 현재가가 선에서 ATR의 1/4(최소 0.5%) 안이면 ‘닿음’.";
+
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
 
 /** Whether the backend alerts on this name's line touches (application/ma_watch.py: the candidate list's live top ten). */
@@ -39,20 +41,20 @@ export function MaTouch({ technicals, price, split = 1, alert }: {
   return (
     <div className="ma-touch" data-testid="ma-touch">
       <div className="ma-head">
+        <span className="sr-title">이동평균선 <span className="sr-info" title={MA_HELP} aria-label={MA_HELP}>?</span></span>
         <span className={`ma-headline${touching.length ? " at" : ""}`}>{headline}</span>
-        {alert && <span className="caption">{alert.on ? `후보 상위 ${alert.top}종목 — 선에 닿으면 알림이 옵니다` : `알림은 후보 상위 ${alert.top}종목만`}</span>}
+        {alert && <span className={`ma-alert${alert.on ? " on" : ""}`}>{alert.on ? `후보 상위 ${alert.top}종목 — 선에 닿으면 알림이 옵니다` : `알림은 후보 상위 ${alert.top}종목만`}</span>}
       </div>
       <div className="ma-rows">
         {rows.map((r) => (
-          <div key={r.n} className={`ma-row ${r.st?.toLowerCase() ?? ""}`}>
+          <span key={r.n} className={`ma-pill ${r.st?.toLowerCase() ?? ""}`}>
             <span className="ma-l">{r.label}</span>
-            <span className="ma-v">{usd(r.line)}</span>
+            <b className="ma-v">{usd(r.line)}</b>
             <span className="ma-d">{r.d !== null ? `${r.d > 0 ? "+" : r.d < 0 ? "−" : ""}${Math.abs(r.d * 100).toFixed(1)}%` : ""}</span>
             <span className={`ma-chip ${r.st?.toLowerCase() ?? ""}`}>{r.st === "AT" ? "닿음" : r.st === "ABOVE" ? "위" : "아래"}</span>
-          </div>
+          </span>
         ))}
       </div>
-      <div className="caption">분석 시점의 일봉 이동평균 · 현재가가 선에서 ATR의 1/4(최소 0.5%) 안이면 ‘닿음’</div>
     </div>
   );
 }

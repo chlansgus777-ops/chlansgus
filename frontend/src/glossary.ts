@@ -7,7 +7,7 @@ export interface Entry { name: string; short: string; why?: string; dir?: Dir }
 
 export const GLOSSARY: Record<string, Entry> = {
   score: { name: "점수", short: "펀더멘털·밸류에이션·실적·이슈·거시·위험·진입가를 합친 0~100점 종합 평가. 주가가 오를 확률이 아닙니다", why: `${BUY_SCORE}점 이상이면 매수, ${SMALL_SCORE}점 이상이면 소액 매수 후보 (7년 자료에서 상위 약 0.5%·4%)`, dir: "high_good" },
-  confidence: { name: "분석 신뢰도(0~100)", short: "데이터 완성도·데이터 간 일치도·기준선과의 거리·AI 위원회 합의로 계산한 점수", why: "주가가 오를 확률이 아닙니다. ‘이 판단이 데이터로 얼마나 잘 뒷받침되는지’입니다", dir: "high_good" },
+  confidence: { name: "분석 신뢰도(0~100)", short: "데이터 완성도·데이터 간 일치도·기준선과의 거리로 계산한 점수", why: "주가가 오를 확률이 아닙니다. ‘이 판단이 데이터로 얼마나 잘 뒷받침되는지’입니다", dir: "high_good" },
   eps_revision: { name: "EPS 추정치 변화(리비전)", short: "애널리스트들의 향후 이익 예상치가 최근 올라가고 있는지 보여줍니다", why: "무료 데이터에서는 일부 기간만 공급자가 제공하고, 나머지는 MarketLens가 매일 저장해 직접 계산합니다(누적 중이면 ‘누적 중 42/90일’)", dir: "high_good" },
   fcf: { name: "FCF(잉여현금흐름)", short: "영업으로 번 현금에서 설비투자를 뺀 돈. 배당·자사주·부채 상환에 쓸 수 있는 현금", dir: "high_good" },
   close_exit: { name: "종가 기준 이탈", short: "하루 거래가 끝난 종가가 손절 기준가 아래면 매도(보유 중)·매수 중단으로 판단하는 규칙", why: "장중 일시적 하락에 흔들리지 않도록 추천 판단은 종가로 합니다. 장중에만 내려가면 신규 매수만 멈춥니다", dir: "neutral" },

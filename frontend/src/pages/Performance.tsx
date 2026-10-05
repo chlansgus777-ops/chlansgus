@@ -1,3 +1,4 @@
+import { sectorKo } from "../i18n";
 import { Fragment, useState } from "react";
 import { BacktestSection } from "../components/Backtest";
 import MyTrading from "./MyTrading";
@@ -7,7 +8,7 @@ import { Card, Disclosure, Empty, Err, LineChart, Loading, Ribbon, StaleData, Ta
 import { useStatus } from "../components/status";
 import { useApi } from "../components/useApi";
 import { day, num, pct, price } from "../format";
-import { REGIME_KO, ko } from "../i18n";
+import { COMPONENT_KO, REGIME_KO, ko } from "../i18n";
 
 interface IC { factor: string; horizon: number; ic: number | null; ir: number | null; samples: number; periods: number }
 interface Hit { n_independent: number; hit_rate: number | null; avg_return: number | null }
@@ -165,20 +166,20 @@ function RecommendationPerformance() {
           <Card title="신뢰도 구간별 성과 (20거래일)">
             {x.confidence_buckets.some((b) => b.n > 0) ? <table><thead><tr><th>신뢰도</th><th className="num">n</th><th className="num">평균 20일</th></tr></thead><tbody>{x.confidence_buckets.map((b) => <tr key={b.bucket}><td>{b.bucket}</td><td className="num">{b.n}</td><td className="num">{pct(b.avg_return_20d, 2)}</td></tr>)}</tbody></table> : <Empty>결과가 확정된 표본 없음</Empty>}
           </Card>
-          <Card title="업종별 성과 (모의투자)">{Object.keys(x.sector_performance).length ? <table><tbody>{Object.entries(x.sector_performance).map(([k, v]) => <tr key={k}><td>{k}</td><td className="num">n={v.n}</td><td className="num">{pct(v.avg_return, 2)}</td><td className="num">승률 {pct(v.win_rate, 0, false)}</td></tr>)}</tbody></table> : <Empty>청산된 거래 없음</Empty>}</Card>
+          <Card title="업종별 성과 (모의투자)">{Object.keys(x.sector_performance).length ? <table><tbody>{Object.entries(x.sector_performance).map(([k, v]) => <tr key={k}><td>{sectorKo(k)}</td><td className="num">n={v.n}</td><td className="num">{pct(v.avg_return, 2)}</td><td className="num">승률 {pct(v.win_rate, 0, false)}</td></tr>)}</tbody></table> : <Empty>청산된 거래 없음</Empty>}</Card>
           <Card title="시장 국면별 성과 (모의투자)">{Object.keys(x.regime_performance).length ? <table><tbody>{Object.entries(x.regime_performance).map(([k, v]) => <tr key={k}><td>{ko(REGIME_KO, k)}</td><td className="num">n={v.n}</td><td className="num">{pct(v.avg_return, 2)}</td><td className="num">승률 {pct(v.win_rate, 0, false)}</td></tr>)}</tbody></table> : <Empty>청산된 거래 없음</Empty>}</Card>
         </div>
       </Disclosure>
       <Disclosure title="연구용 · 요인 IC와 가중치 보정" hint="모델이 스스로 가중치를 바꾸는 조건과 기록">
         <Card title="요인 IC(스피어만) / IR — 성숙 표본이 충분해질 때까지 —">
           {factors.length ? <div className="scroll"><table><thead><tr><th>요인</th>{[5, 20, 60].map((h) => <th key={h} className="num">IC {h}일</th>)}{[5, 20, 60].map((h) => <th key={`ir${h}`} className="num">IR {h}일</th>)}<th className="num">표본(20일)</th></tr></thead>
-            <tbody>{factors.map((f) => { const g = (h: number) => x.factor_ic.find((i) => i.factor === f && i.horizon === h); return <tr key={f}><td>{f}</td>{[5, 20, 60].map((h) => <td key={h} className="num">{num(g(h)?.ic ?? null, 3)}</td>)}{[5, 20, 60].map((h) => <td key={`ir${h}`} className="num">{num(g(h)?.ir ?? null, 2)}</td>)}<td className="num">{g(20)?.samples}</td></tr>; })}</tbody></table></div> : <Empty>요인 표본이 아직 없습니다.</Empty>}
+            <tbody>{factors.map((f) => { const g = (h: number) => x.factor_ic.find((i) => i.factor === f && i.horizon === h); return <tr key={f}><td title={f}>{COMPONENT_KO[f] ?? f}</td>{[5, 20, 60].map((h) => <td key={h} className="num">{num(g(h)?.ic ?? null, 3)}</td>)}{[5, 20, 60].map((h) => <td key={`ir${h}`} className="num">{num(g(h)?.ir ?? null, 2)}</td>)}<td className="num">{g(20)?.samples}</td></tr>; })}</tbody></table></div> : <Empty>요인 표본이 아직 없습니다.</Empty>}
           {x.rolling_ic_total_20d.length > 0 && <div className="muted">종합 점수 롤링 IC(20일): {x.rolling_ic_total_20d.map(([d, ic, n]) => `${d} ${ic === null ? "N/A" : ic.toFixed(2)}(n=${n})`).join(" · ")}</div>}
         </Card>
         {c.data && (
           <Card title={`가중치 보정 — 운영 모델 ${c.data.production_version}`} right={<button className="sm" disabled={!!busy} onClick={() => act("/calibration/run")}>{busy === "/calibration/run" ? "보정 중…" : "보정 1회 실행"}</button>}>
             <div className="muted">가중치는 ① 겹치지 않는 독립 성숙 표본이 최소 기준 이상이고 ② 섀도(비운영) 기간의 표본 외 IC가 개선되며 ③ 적중률·하방 위험이 나빠지지 않을 때만, 회당 상대 5% 이내로 바뀝니다.</div>
-            <div className="row">{Object.entries(c.data.production_weights).map(([k, v]) => <span key={k} className="pill">{k}: {v}</span>)}</div>
+            <div className="row">{Object.entries(c.data.production_weights).map(([k, v]) => <span key={k} className="pill" title={k}>{COMPONENT_KO[k] ?? k}: {v}</span>)}</div>
             {c.data.runs[0]?.payload?.segments && <SegmentTable segments={c.data.runs[0].payload.segments} />}
             {c.data.runs.length ? <table><thead><tr><th>실행</th><th>결과</th><th>후보 모델</th><th>시각</th></tr></thead><tbody>{c.data.runs.map((r) => <tr key={r.id}><td>{r.id}</td><td>{CAL_KO[r.status] ?? r.status}</td><td>{r.candidate ?? "—"}</td><td>{day(r.created_at)}</td></tr>)}</tbody></table> : <Empty>보정 실행 기록 없음</Empty>}
           </Card>

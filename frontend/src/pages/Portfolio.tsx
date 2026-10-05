@@ -1,7 +1,8 @@
+import { sectorKo } from "../i18n";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import { Card, ConfirmButton, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } from "../components/ui";
+import { Card, ConfirmButton, Disclosure, Donut, Empty, Err, Loading, Notice, Ribbon, StaleData, Term } from "../components/ui";
 import { Ledger } from "../components/Ledger";
 import { DomesticHoldings, TossCard, TossFills, type TossView } from "../components/TossConnect";
 import { KrwReturn, type KrwView } from "../components/KrwReturn";
@@ -43,7 +44,7 @@ export function interpret(x: Pf): { tone: "info" | "warn"; text: string }[] {
   const topSector = Object.entries(x.sector_weights).sort((a, b) => b[1] - a[1])[0];
   const ai = x.theme_weights["AI"];
   if (ai !== undefined && ai >= 0.3) out.push({ tone: "warn", text: `현재 포트폴리오는 AI/반도체 비중이 ${pct(ai, 0, false)}로 높습니다. 같은 테마 종목을 더하면 함께 오르내릴 위험이 커집니다.` });
-  if (topSector && topSector[1] >= 0.3) out.push({ tone: "warn", text: `${topSector[0]} 업종에 ${pct(topSector[1], 0, false)}가 몰려 있습니다(한도 30%).` });
+  if (topSector && topSector[1] >= 0.3) out.push({ tone: "warn", text: `${sectorKo(topSector[0])} 업종에 ${pct(topSector[1], 0, false)}가 몰려 있습니다(한도 30%).` });
   if (top && (top.weight ?? 0) >= 0.1) out.push({ tone: "warn", text: `${top.ticker} 한 종목이 ${pct(top.weight, 0, false)}를 차지합니다(종목당 한도 10%). 추가매수보다 분산을 고려하세요.` });
   const hi = x.correlations.filter(([, , c]) => c >= 0.75);
   if (hi.length) out.push({ tone: "warn", text: `${hi.map(([a, b]) => `${a}·${b}`).join(", ")}는 거의 같이 움직입니다. 사실상 같은 종목을 여러 개 가진 효과입니다.` });
@@ -146,7 +147,7 @@ export default function Portfolio() {
       {!empty && (
         <Card title="보유 종목" explain="‘지금 손익’과 ‘오늘’은 1초마다 최신 가격으로 계산합니다(토스증권 계좌 종목은 토스증권 계산 기준). 종가 기준 평가액·비중은 모든 종목을 같은 거래일 종가로 계산한 값으로, 쏠림·베타 계산에 씁니다." testId="holdings">
 <div className="scroll"><table><thead><tr><th>종목</th><th className="num">수량</th><th className="num">매입 단가</th><th className="num">종가(기준일)</th><th>현재가</th><th className="num" title="지금 가격 기준 — 토스증권 계좌 종목은 토스증권이 계산한 손익에 그 뒤 가격 변화만 더한 값">지금 손익</th><th className="num" title="오늘 손익 — 오늘 산 주식은 산 가격부터 계산(토스 앱과 같은 기준)">오늘</th><th className="num" title="같은 거래일 종가로 계산한 평가액 · 평가손익 — 쏠림·베타 계산에 씁니다">평가액·손익(종가)</th><th className="num">비중</th><th className="row-actions"><span className="sr-only">정리</span></th></tr></thead>
-            <tbody>{x.holdings.map((h) => <tr key={h.ticker} className="nowrap-row"><td><Link to={`/stocks/${h.ticker}`}><b>{h.ticker}</b></Link>{h.sector ? <div className="caption">{h.sector}</div> : null}</td><td className="num">{shares(h.quantity)}{h.source === "toss" ? <div className="caption src-toss" title="토스증권 계좌의 수량·평균 매입가 (자동 동기화)">토스 계좌</div> : null}{h.outside_broker ? <div className="caption warn" title="토스증권 계좌에 없는 종목 — 다른 증권사 보유면 그대로, 판 종목이면 삭제">토스에 없음</div> : null}{h.source === "ledger" ? <div className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}>거래 기록 기준</div> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td className="num">{price(h.cost_basis)}</td><td className="num">{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)}<div className="caption">{day(h.price_day)}</div></>}</td>
+            <tbody>{x.holdings.map((h) => <tr key={h.ticker} className="nowrap-row"><td><Link to={`/stocks/${h.ticker}`}><b>{h.ticker}</b></Link>{h.sector ? <div className="caption">{sectorKo(h.sector)}</div> : null}</td><td className="num">{shares(h.quantity)}{h.source === "toss" ? <div className="caption src-toss" title="토스증권 계좌의 수량·평균 매입가 (자동 동기화)">토스 계좌</div> : null}{h.outside_broker ? <div className="caption warn" title="토스증권 계좌에 없는 종목 — 다른 증권사 보유면 그대로, 판 종목이면 삭제">토스에 없음</div> : null}{h.source === "ledger" ? <div className="caption" title={`거래 기록에서 계산 · 실현 손익 ${price(h.realized_pnl ?? 0)} · 배당 ${price(h.dividends ?? 0)}`}>거래 기록 기준</div> : null}{h.split_adjusted && h.split_adjusted !== 1 ? <span className="caption" title="입력한 뒤 주식분할이 있어 수량과 매입 단가를 오늘 기준으로 환산했습니다"> 분할 반영 ×{num(h.split_adjusted, 2)}</span> : null}</td><td className="num">{price(h.cost_basis)}</td><td className="num">{h.price === null ? <span className="warn">가격 없음 · 평가 제외</span> : <>{price(h.price)}<div className="caption">{day(h.price_day)}</div></>}</td>
               <td><LivePrice ticker={h.ticker} size="sm" /><div style={{ marginTop: 4 }}><LiveZone ticker={h.ticker} compact /></div></td>
               <LiveCells ticker={h.ticker} />
               <td className="num">{h.market_value === null ? "—" : price(h.market_value)}<div className={`caption ${h.unrealized_pnl === null ? "" : h.unrealized_pnl >= 0 ? "pos" : "neg"}`}>{h.unrealized_pnl === null ? "손익 계산 안 함" : <>{h.unrealized_pnl >= 0 ? "▲" : "▼"} {price(h.unrealized_pnl)} ({pct(h.unrealized_pct)})</>}</div></td><td className="num">{h.weight === null ? "—" : pct(h.weight, 1, false)}</td>
@@ -174,36 +175,70 @@ export default function Portfolio() {
             <div className="sector-mix" data-testid="sector-mix">
               <div className="t-kicker">업종 쏠림 <span className="caption">(30% 넘으면 주의)</span></div>
               {Object.entries(x.sector_weights).sort((a, b) => b[1] - a[1]).map(([s, w]) => (
-                <div key={s} className="mix-row"><span>{s}</span><div className="bar"><div style={{ width: `${Math.min(100, w * 100)}%`, background: w > 0.3 ? "var(--warn)" : undefined }} /></div><b className={w > 0.3 ? "warn" : ""}>{pct(w, 1, false)}</b></div>
+                <div key={s} className="mix-row"><span>{sectorKo(s)}</span><div className="bar"><div style={{ width: `${Math.min(100, w * 100)}%`, background: w > 0.3 ? "var(--warn)" : undefined }} /></div><b className={w > 0.3 ? "warn" : ""}>{pct(w, 1, false)}</b></div>
               ))}
             </div>
           )}
         </Card>
       </div>
-      <Card title="보유 종목 직접 입력" explain="증권사 기록 없이 보유만 빠르게 입력합니다. 고치려면 보유 표의 ‘수정’, 빼려면 ‘삭제’를 누르세요. 거래 기록이 있는 종목은 거래 기록이 우선입니다. MarketLens는 실제 주문을 넣지 않습니다.">
-        <form className="form-grid holding" onSubmit={(e) => {
-          e.preventDefault();
-          const q = parseAmount(row.quantity), c = parseAmount(row.cost);
-          if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(row.ticker.trim().toUpperCase())) { setErr("종목 코드를 확인하세요 (예: NVDA, BRK.B)."); return; }
-          if (row.quantity.trim() === "" || !Number.isFinite(q) || q <= 0) { setErr("수량은 0보다 커야 합니다. 종목을 빼려면 보유 표의 ‘삭제’를 누르세요."); return; }
-          if (row.cost.trim() === "" || !Number.isFinite(c) || c <= 0) { setErr("평균 매입 단가는 0보다 커야 합니다."); return; }
-          void save({ holdings: [{ ticker: row.ticker.trim().toUpperCase(), quantity: q, cost_basis: c }] }).then((ok) => { if (ok) setRow({ ticker: "", quantity: "", cost: "" }); });
-        }}>
-          <label><span>종목 코드</span><input aria-label="보유 종목 코드" placeholder="예: NVDA" value={row.ticker} onChange={(e) => setRow({ ...row, ticker: e.target.value })} /></label>
-          <label><span>수량(주)</span><input aria-label="보유 수량" inputMode="decimal" placeholder="0" value={row.quantity} onChange={(e) => setRow({ ...row, quantity: e.target.value })} /></label>
-          <label><span>평균 매입 단가(USD)</span><input aria-label="매입 단가(USD)" inputMode="decimal" placeholder="0.00" value={row.cost} onChange={(e) => setRow({ ...row, cost: e.target.value })} /></label>
-          <button className="primary">{existing?.source === "manual" ? "수정 저장" : "보유 저장"}</button>
-        </form>
-        {existing?.source === "manual" && <div className="caption" data-testid="holding-edit-hint">이미 입력한 {existing.ticker} {shares(existing.quantity)}주 · 평단 {price(existing.cost_basis)}을(를) 이 값으로 바꿉니다.</div>}
-        {existing?.source === "toss" && <Notice tone="warn">{existing.ticker}는 토스증권 계좌 값(수량·평단)으로 계산하는 종목이라 여기 입력한 줄은 쓰이지 않습니다. 토스증권에서 사고팔면 자동으로 바뀝니다.</Notice>}
-        {existing?.source === "ledger" && <Notice tone="warn">{existing.ticker}는 거래 기록으로 계산하는 종목이라 여기 입력한 줄은 쓰이지 않습니다. 아래 ‘거래 기록’에 매수·매도를 적으세요.</Notice>}
-        {tossCash ? <div className="caption" data-testid="cash-from-toss">현금은 토스증권 예수금을 씁니다. 직접 입력하려면 위 토스증권 연결의 ‘설정’에서 현금 기준을 ‘직접 입력한 현금’으로 바꾸세요.</div> : <form className="form-grid cash" onSubmit={(e) => { e.preventDefault(); const v = parseAmount(cash); if (cash.trim() !== "" && Number.isFinite(v) && v >= 0) void save({ cash: v }).then((ok) => { if (ok) setCash(""); }); else setErr("현금은 0 이상의 숫자여야 합니다."); }}>
-          <label><span>현금(USD) <em className="caption">{assumed ? `미입력 · 가정 ${price(x.cash)}` : `지금 ${price(x.cash)}`}</em></span><input aria-label="현금(USD)" inputMode="decimal" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="예: 25000" /></label>
-          <button>현금 저장</button>
-        </form>}
-      </Card>
       {toss && <TossFills />}
-      <Ledger today={nyToday()} prefill={sellFor ?? params.get("trade")} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
+      {/* with the Toss account connected the account is the source: hand entry and the ledger are for holdings outside it,
+          folded until needed (opens by itself for an edit or a prefilled trade) */}
+      {toss ? (
+        <Disclosure title="토스 밖 보유 · 직접 입력과 거래 기록" hint="다른 증권사 보유나 토스 연결 전 거래를 적을 때" open={!!row.ticker || !!(sellFor ?? params.get("trade"))} testId="manual-entry-fold">
+          <div className="grid">
+            <Card title="보유 종목 직접 입력" explain="증권사 기록 없이 보유만 빠르게 입력합니다. 고치려면 보유 표의 ‘수정’, 빼려면 ‘삭제’를 누르세요. 거래 기록이 있는 종목은 거래 기록이 우선입니다. MarketLens는 실제 주문을 넣지 않습니다.">
+              <form className="form-grid holding" onSubmit={(e) => {
+                e.preventDefault();
+                const q = parseAmount(row.quantity), c = parseAmount(row.cost);
+                if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(row.ticker.trim().toUpperCase())) { setErr("종목 코드를 확인하세요 (예: NVDA, BRK.B)."); return; }
+                if (row.quantity.trim() === "" || !Number.isFinite(q) || q <= 0) { setErr("수량은 0보다 커야 합니다. 종목을 빼려면 보유 표의 ‘삭제’를 누르세요."); return; }
+                if (row.cost.trim() === "" || !Number.isFinite(c) || c <= 0) { setErr("평균 매입 단가는 0보다 커야 합니다."); return; }
+                void save({ holdings: [{ ticker: row.ticker.trim().toUpperCase(), quantity: q, cost_basis: c }] }).then((ok) => { if (ok) setRow({ ticker: "", quantity: "", cost: "" }); });
+              }}>
+                <label><span>종목 코드</span><input aria-label="보유 종목 코드" placeholder="예: NVDA" value={row.ticker} onChange={(e) => setRow({ ...row, ticker: e.target.value })} /></label>
+                <label><span>수량(주)</span><input aria-label="보유 수량" inputMode="decimal" placeholder="0" value={row.quantity} onChange={(e) => setRow({ ...row, quantity: e.target.value })} /></label>
+                <label><span>평균 매입 단가(USD)</span><input aria-label="매입 단가(USD)" inputMode="decimal" placeholder="0.00" value={row.cost} onChange={(e) => setRow({ ...row, cost: e.target.value })} /></label>
+                <button className="primary">{existing?.source === "manual" ? "수정 저장" : "보유 저장"}</button>
+              </form>
+              {existing?.source === "manual" && <div className="caption" data-testid="holding-edit-hint">이미 입력한 {existing.ticker} {shares(existing.quantity)}주 · 평단 {price(existing.cost_basis)}을(를) 이 값으로 바꿉니다.</div>}
+              {existing?.source === "toss" && <Notice tone="warn">{existing.ticker}는 토스증권 계좌 값(수량·평단)으로 계산하는 종목이라 여기 입력한 줄은 쓰이지 않습니다. 토스증권에서 사고팔면 자동으로 바뀝니다.</Notice>}
+              {existing?.source === "ledger" && <Notice tone="warn">{existing.ticker}는 거래 기록으로 계산하는 종목이라 여기 입력한 줄은 쓰이지 않습니다. 아래 ‘거래 기록’에 매수·매도를 적으세요.</Notice>}
+              {tossCash ? <div className="caption" data-testid="cash-from-toss">현금은 토스증권 예수금을 씁니다. 직접 입력하려면 위 토스증권 연결의 ‘설정’에서 현금 기준을 ‘직접 입력한 현금’으로 바꾸세요.</div> : <form className="form-grid cash" onSubmit={(e) => { e.preventDefault(); const v = parseAmount(cash); if (cash.trim() !== "" && Number.isFinite(v) && v >= 0) void save({ cash: v }).then((ok) => { if (ok) setCash(""); }); else setErr("현금은 0 이상의 숫자여야 합니다."); }}>
+                <label><span>현금(USD) <em className="caption">{assumed ? `미입력 · 가정 ${price(x.cash)}` : `지금 ${price(x.cash)}`}</em></span><input aria-label="현금(USD)" inputMode="decimal" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="예: 25000" /></label>
+                <button>현금 저장</button>
+              </form>}
+            </Card>
+            <Ledger today={nyToday()} prefill={sellFor ?? params.get("trade")} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
+          </div>
+        </Disclosure>
+      ) : (
+        <>
+          <Card title="보유 종목 직접 입력" explain="증권사 기록 없이 보유만 빠르게 입력합니다. 고치려면 보유 표의 ‘수정’, 빼려면 ‘삭제’를 누르세요. 거래 기록이 있는 종목은 거래 기록이 우선입니다. MarketLens는 실제 주문을 넣지 않습니다.">
+            <form className="form-grid holding" onSubmit={(e) => {
+              e.preventDefault();
+              const q = parseAmount(row.quantity), c = parseAmount(row.cost);
+              if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(row.ticker.trim().toUpperCase())) { setErr("종목 코드를 확인하세요 (예: NVDA, BRK.B)."); return; }
+              if (row.quantity.trim() === "" || !Number.isFinite(q) || q <= 0) { setErr("수량은 0보다 커야 합니다. 종목을 빼려면 보유 표의 ‘삭제’를 누르세요."); return; }
+              if (row.cost.trim() === "" || !Number.isFinite(c) || c <= 0) { setErr("평균 매입 단가는 0보다 커야 합니다."); return; }
+              void save({ holdings: [{ ticker: row.ticker.trim().toUpperCase(), quantity: q, cost_basis: c }] }).then((ok) => { if (ok) setRow({ ticker: "", quantity: "", cost: "" }); });
+            }}>
+              <label><span>종목 코드</span><input aria-label="보유 종목 코드" placeholder="예: NVDA" value={row.ticker} onChange={(e) => setRow({ ...row, ticker: e.target.value })} /></label>
+              <label><span>수량(주)</span><input aria-label="보유 수량" inputMode="decimal" placeholder="0" value={row.quantity} onChange={(e) => setRow({ ...row, quantity: e.target.value })} /></label>
+              <label><span>평균 매입 단가(USD)</span><input aria-label="매입 단가(USD)" inputMode="decimal" placeholder="0.00" value={row.cost} onChange={(e) => setRow({ ...row, cost: e.target.value })} /></label>
+              <button className="primary">{existing?.source === "manual" ? "수정 저장" : "보유 저장"}</button>
+            </form>
+            {existing?.source === "manual" && <div className="caption" data-testid="holding-edit-hint">이미 입력한 {existing.ticker} {shares(existing.quantity)}주 · 평단 {price(existing.cost_basis)}을(를) 이 값으로 바꿉니다.</div>}
+            {existing?.source === "toss" && <Notice tone="warn">{existing.ticker}는 토스증권 계좌 값(수량·평단)으로 계산하는 종목이라 여기 입력한 줄은 쓰이지 않습니다. 토스증권에서 사고팔면 자동으로 바뀝니다.</Notice>}
+            {existing?.source === "ledger" && <Notice tone="warn">{existing.ticker}는 거래 기록으로 계산하는 종목이라 여기 입력한 줄은 쓰이지 않습니다. 아래 ‘거래 기록’에 매수·매도를 적으세요.</Notice>}
+            {tossCash ? <div className="caption" data-testid="cash-from-toss">현금은 토스증권 예수금을 씁니다. 직접 입력하려면 위 토스증권 연결의 ‘설정’에서 현금 기준을 ‘직접 입력한 현금’으로 바꾸세요.</div> : <form className="form-grid cash" onSubmit={(e) => { e.preventDefault(); const v = parseAmount(cash); if (cash.trim() !== "" && Number.isFinite(v) && v >= 0) void save({ cash: v }).then((ok) => { if (ok) setCash(""); }); else setErr("현금은 0 이상의 숫자여야 합니다."); }}>
+              <label><span>현금(USD) <em className="caption">{assumed ? `미입력 · 가정 ${price(x.cash)}` : `지금 ${price(x.cash)}`}</em></span><input aria-label="현금(USD)" inputMode="decimal" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="예: 25000" /></label>
+              <button>현금 저장</button>
+            </form>}
+          </Card>
+          <Ledger today={nyToday()} prefill={sellFor ?? params.get("trade")} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
+        </>
+      )}
 
     </div>
   );

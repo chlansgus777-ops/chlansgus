@@ -468,7 +468,7 @@ class Scanner:
             log_event(log, Event.SCORE_CREATED, ticker=t, score=full[t].scorecard.total)
 
         ranked = sorted(full.values(), key=lambda r: (r.decision.action == Action.DATA_INSUFFICIENT, -r.scorecard.total, r.ticker))[: sc.final_candidates]
-        stages.append(StageStats("5-final-ranking", len(full), len(ranked), f"AI 위원회는 상위 {sc.ai_committee_top_n}종목만"))
+        stages.append(StageStats("5-final-ranking", len(full), len(ranked), "점수·판단 순 최종 순위"))
         log_event(log, Event.SCAN_FINISHED, candidates=len(ranked), eligible=len(eligible))
         return ScanResult(as_of, ctx.mode, stages, ranked, {r.ticker: inputs[r.ticker] for r in ranked}, ctx, excluded)
 

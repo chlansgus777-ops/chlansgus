@@ -119,3 +119,12 @@ export const VERDICT_KO: Record<string, string> = {
   "BUY": "매수 검토 가능", "BUY SMALL": "소량 매수 검토", "ADD": "추가 매수 검토", "HOLD": "보유 유지", "WATCH": "지켜보기",
   "WAIT": "지금은 기다리기", "REDUCE": "비중 축소 검토", "SELL": "매도 검토", "DATA INSUFFICIENT": "판단 보류 — 자료 부족",
 };
+
+/** Sector names in Korean (the providers' English sector names; unknown ones are shown as given). */
+export const SECTOR_KO: Record<string, string> = {
+  Technology: "기술", "Information Technology": "기술", Healthcare: "헬스케어", "Health Care": "헬스케어", "Financial Services": "금융", Financials: "금융",
+  "Consumer Cyclical": "경기소비재", "Consumer Discretionary": "경기소비재", "Consumer Defensive": "필수소비재", "Consumer Staples": "필수소비재",
+  "Communication Services": "커뮤니케이션", Industrials: "산업재", Energy: "에너지", "Basic Materials": "소재", Materials: "소재",
+  "Real Estate": "부동산", Utilities: "유틸리티", Unknown: "업종 미확인",
+};
+export const sectorKo = (s: string | null | undefined): string => (s ? SECTOR_KO[s] ?? s : "");

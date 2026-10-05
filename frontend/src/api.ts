@@ -111,7 +111,10 @@ async function req<T>(method: string, path: string, body?: unknown, opts: Reques
     } catch {
       detail = undefined;
     }
-    last = new ApiError(r.status, detail ? `${describeStatus(r.status)} — ${detail}` : describeStatus(r.status), detail);
+    // a request the server refused with its own Korean reason (400/409/422 …: "미래 날짜의 거래는 적을 수 없음") says just
+    // that — a generic "요청 형식이 올바르지 않습니다 —" in front of it read like a program fault
+    const own = !!detail && [400, 409, 422].includes(r.status) && /[가-힣]/.test(detail);
+    last = new ApiError(r.status, own ? detail! : detail ? `${describeStatus(r.status)} — ${detail}` : describeStatus(r.status), detail);
     if (r.status !== 503 && r.status !== 429) break; // only transient statuses are retried
   }
   throw last ?? new ApiError(0, describeStatus(0));

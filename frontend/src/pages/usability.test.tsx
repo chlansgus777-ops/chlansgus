@@ -14,12 +14,12 @@ const coverage = {
 };
 
 describe("coverage card", () => {
-  it("shows how much of the market was judged, the missing-data rate and the AI cost", () => {
+  it("shows how much of the market was judged and the missing-data rate (no AI cost line: the AI review was removed 2026-10-05)", () => {
     render(<MemoryRouter><CoverageCard s={{ state: { scan_id: 1, status: "COMPLETE", started_at: "", saved: 40, total: 40 }, coverage }} /></MemoryRouter>);
     expect(screen.getByText("5,200개")).toBeTruthy();
     expect(screen.getByText(/6개 \(15.0%\)/)).toBeTruthy();
     expect(screen.getByText(/애널리스트 추정치 없음/)).toBeTruthy();
-    expect(screen.getByText(/70회 · 약 \$1.23/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/AI 검토|70회/);
     expect(screen.getByText(/시가총액 기준 미달 2500/)).toBeTruthy();
   });
   it("says so when the last scan was interrupted, and that its saved results are kept", () => {

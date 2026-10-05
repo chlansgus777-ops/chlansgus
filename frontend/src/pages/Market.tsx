@@ -1,5 +1,6 @@
 import { useSearchParams } from "react-router-dom";
 import { Err, Loading, Quality, Tabs } from "../components/ui";
+import { SectorStrength } from "../components/SectorStrength";
 import { ago, num, pct, stamp, errKo } from "../format";
 import { REGIME_KO, ko } from "../i18n";
 import CalendarPage from "./Calendar";
@@ -51,6 +52,7 @@ export default function Market() {
           </div>
         </section>
       )}
+      <SectorStrength />
       <div className="row spread">
         <Tabs<Tab> label="시장 정보" value={tab} onChange={(v) => setParams(v === "issues" ? {} : { tab: v }, { replace: true })}
               items={[["issues", "이슈"], ["calendar", "일정"], ["macro", "거시 지표"], ["indices", "지수·시장 폭"]]} />

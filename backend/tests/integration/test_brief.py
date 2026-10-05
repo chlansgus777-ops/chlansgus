@@ -129,3 +129,20 @@ def test_the_stock_api_carries_the_brief(scanned):
     with TestClient(create_app(svc.settings, service=svc, run_migrations=False), headers={"X-MarketLens-Client": "t"}) as c:
         b = c.get(f"/api/stocks/{t}").json()["brief"]
     assert b["changed"] and b["support"] and b["triggers"] and b["valuation"]["plan"]
+
+
+def test_no_statement_shows_an_unfilled_placeholder_or_an_internal_name(scanned):
+    """A "{th.buy_enter:g}" was printed as is (a plain string where an f-string was meant), and a component's internal
+    name "return_signals" appeared as a statement's label (release audit 2026-10-05)."""
+    import re
+
+    svc, rows = scanned
+    for action in ("BUY", "BUY SMALL", "WAIT", "WATCH"):
+        for row in [r for r in rows.values() if r.final_action == action][:3]:
+            b = _brief(svc, row)
+            items = [i for k in ("changed", "support", "against", "triggers") for i in b[k]] + b["valuation"]["items"] + b["valuation"]["plan"]
+            for i in items:
+                for field in ("text", "why", "label"):
+                    v = i.get(field) or ""
+                    assert "{" not in v and "}" not in v, (action, field, v)
+                    assert not re.search(r"\b[a-z]+_[a-z_]+\b", v), (action, field, v)
