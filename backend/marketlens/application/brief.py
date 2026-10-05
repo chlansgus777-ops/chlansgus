@@ -361,7 +361,7 @@ def _triggers(r: Mapping[str, Any], lv: Mapping[str, Any], action: str, score: f
             out.append(_item("VIEW", f"가격이 {_usd(mb)} 이하로 내려오면", why="가격 조건이 다시 맞아 매수 여부를 다시 판단합니다", tone="pos", label="가격"))
     if isinstance(score, (int, float)) and th is not None:
         if action == "BUY":
-            out.append(_item("VIEW", f"점수가 {th.buy_exit:g} 아래로 내려가면(현재 {score:.1f})", why="매수 판단을 해제합니다 — 한 번 내린 판단을 작은 변화로 뒤집지 않도록 진입(80)과 해제 기준을 다르게 둡니다", tone="warn", label="점수"))
+            out.append(_item("VIEW", f"점수가 {th.buy_exit:g} 아래로 내려가면(현재 {score:.1f})", why="매수 판단을 해제합니다 — 한 번 내린 판단을 작은 변화로 뒤집지 않도록 진입({th.buy_enter:g})과 해제 기준을 다르게 둡니다", tone="warn", label="점수"))
         elif action == "BUY SMALL":
             out.append(_item("VIEW", f"점수가 {th.buy_small_exit:g} 아래로 내려가면(현재 {score:.1f})", why="소량 매수 판단을 해제합니다", tone="warn", label="점수"))
             out.append(_item("VIEW", f"점수가 {th.buy_enter:g} 이상으로 오르면", why="가격 조건을 충족할 때 매수로 올립니다", tone="pos", label="점수"))
