@@ -12,6 +12,7 @@ import { ReturnSignalsCard } from "../components/ReturnSignals";
 import { LivePlanLine, LiveZone, UnlessLive, zoneView } from "../components/LiveZone";
 import { refreshQuoteSubscriptions, useQuote, useViewQuotes } from "../quotes";
 import { MaTouch } from "../components/MaTouch";
+import { SupportResistance } from "../components/SupportResistance";
 import { useAnalysisJob } from "../components/useAnalysisJob";
 import { rememberStock } from "../components/QuickSearch";
 import { PlanChart } from "../components/PlanChart";
@@ -409,6 +410,7 @@ function StockDetail({ ticker }: { ticker: string }) {
           <PlanChart data={hist} levels={{ stop: e.stop, maxBuy: e.max_buy, zoneLow: e.acceptable_low, ideal: e.ideal_entry, t1: e.target1, t2: e.target2 }} height={320} />
         ) : hist.length > 1 ? <PlanChart data={hist} levels={{}} height={260} /> : <Empty>가격 이력이 부족해 차트를 그리지 않습니다.</Empty>}
         <MaTouch technicals={a.technicals} price={priceNow} split={split} alert={d.data?.ma_alert} />
+        <SupportResistance technicals={a.technicals as Record<string, unknown>} price={priceNow} split={split} />
         <div className="divider" />
         <div className="two">
           <div>

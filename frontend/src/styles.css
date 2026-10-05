@@ -1262,3 +1262,17 @@ tr.detail-row > td { padding: 4px 12px 18px; background: var(--s2); }
 .ma-chip.above { color: var(--pos); background: rgba(52, 211, 153, 0.12); }
 .ma-chip.below { color: var(--neg); background: rgba(255, 107, 107, 0.12); }
 @media (max-width: 640px) { .ma-rows { grid-template-columns: minmax(0, 1fr); } }
+/* 지지선·저항선 (components/SupportResistance.tsx) */
+.sr-box { display: grid; gap: 10px; margin-top: 14px; }
+.sr-cols { display: grid; gap: 6px; }
+.sr-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.sr-row { display: grid; grid-template-columns: 64px 1fr auto; align-items: baseline; gap: 10px; padding: 8px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: rgba(10, 14, 28, 0.35); font-variant-numeric: tabular-nums; }
+.sr-row.r { border-left: 3px solid var(--neg); }
+.sr-row.s { border-left: 3px solid var(--pos); }
+.sr-k { color: var(--muted); font-size: 12px; font-weight: 600; }
+.sr-row b { font-size: 15px; }
+.sr-d { color: var(--sub); font-size: 12.5px; }
+.sr-now { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 12px; border-radius: 10px; color: var(--text);
+  background: linear-gradient(90deg, rgba(134, 119, 240, 0.22), rgba(134, 119, 240, 0.06)); font-variant-numeric: tabular-nums; }
+.sr-now span { font-size: 12px; color: var(--sub); font-weight: 600; }
