@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions | whymacro | swing"
+        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions | whymacro | swing | portfolio"
         required: true
         default: "probe"
       resume_run_id:
@@ -37,6 +37,40 @@ jobs:
           python-version: "3.11"
       - name: Install backend (lock file)
         run: pip install -r backend/requirements.lock && pip install --no-deps -e ./backend
+      # §19 strategies A-1.0 / C-1.0, daily portfolio (marketlens/backtest/portfolio.py); resume_run_id = the §16 run
+      # whose rows.db gives the fundamental filter (point in time: the last weekly analysis before each day)
+      - name: Backtest database (portfolio)
+        if: inputs.task == 'portfolio'
+        uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          run-id: ${{ inputs.data_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Weekly analysis rows of the §16 run (portfolio, fundamental filter)
+        if: inputs.task == 'portfolio' && inputs.resume_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: backtest-results
+          path: bt-rows
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Strategies of PREREGISTRATION §19 (portfolio)
+        if: inputs.task == 'portfolio'
+        run: |
+          gunzip -f backtest.db.gz
+          sha256sum -c backtest.db.sha256
+          ROWS=""
+          if [ -f bt-rows/rows.db.gz ]; then gunzip -f bt-rows/rows.db.gz; ROWS="--rows ../bt-rows/rows.db"; fi
+          echo "cpus: $(nproc) · memory: $(free -m | awk '/Mem:/ {print $2}') MB"
+          cd backend && python -m marketlens.backtest.portfolio --db ../backtest.db $ROWS --out ../portfolio.json --trades ../portfolio_trades.csv
+          cd .. && python3 -c "import json;d=json.load(open('portfolio.json'));print(json.dumps(d,ensure_ascii=False,separators=(',',':'),default=str))"
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.task == 'portfolio'
+        with:
+          name: backtest-portfolio
+          path: |
+            portfolio.json
+            portfolio_trades.csv
       # §17 short-term strategies (marketlens/backtest/swing.py): offline on the backtest database, nothing else
       - name: Backtest database (swing)
         if: inputs.task == 'swing'
