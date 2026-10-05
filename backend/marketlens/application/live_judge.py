@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from marketlens.domain.facts import execution_quality
 from marketlens.domain.enums import ACTION_KO, BULLISH_ACTIONS, Action, TradingSession
 from marketlens.domain.freshness import PlanCheck, RevalidationPolicy, _revalidate, quote_current, recommendation_freshness
 from marketlens.domain.market_calendar import classify_session
@@ -226,7 +227,7 @@ def plans_from_rows(rows: list[Any], levels: Callable[[Any], dict[str, Any]], mi
         h = held.get(r.ticker)
         out[r.ticker] = LivePlan(
             ticker=r.ticker, rec_id=r.id, as_of=r.as_of if r.as_of.tzinfo else r.as_of.replace(tzinfo=timezone.utc), action=r.final_action,
-            bullish=r.final_action in bullish, data_ok=r.data_quality in ("FRESH", "DELAYED"), rec_price=lv.get("price"),
+            bullish=r.final_action in bullish, data_ok=execution_quality((r.result or {}).get("data_quality"), r.data_quality) in ("FRESH", "DELAYED"), rec_price=lv.get("price"),
             max_buy=lv.get("max_buy"), stop=lv.get("stop"), target1=lv.get("target1"), ideal_entry=lv.get("ideal_entry"), min_rr=min_rr,
             held=h is not None, held_cost=h[0] if h else None, held_qty=h[1] if h else None, watched=r.ticker in watched)
     return list(out.values())

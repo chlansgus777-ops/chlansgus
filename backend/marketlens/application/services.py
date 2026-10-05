@@ -30,6 +30,7 @@ from marketlens.application.toss_quotes import TossQuoteFeed, live_quote
 from marketlens.domain.broker import merge_broker
 from marketlens.application.live_judge import LiveJudge, plans_from_rows
 from marketlens.application.live_quotes import reference_day
+from marketlens.domain.facts import execution_quality
 from marketlens.application.ma_watch import MaWatch, levels_from_result
 from marketlens.application.rule_watch import RuleWatch
 from marketlens.application.refresher import Refresher, Snapshot
@@ -1004,7 +1005,7 @@ class MarketLensService:
                 "session": q.session.value, "price_quality": res.price_quality.value, "action": action, "score": res.scorecard.total,
                 "ticker": inp.ticker, "analysed_at": constraint["as_of"].isoformat(), "size_limit": size_limit,
                 "review_reason": review_reason, "account": self._account_version,
-                "data_quality": res.data_quality.overall.value, "vetoes": [v.value for v in res.decision.vetoes],
+                "data_quality": execution_quality(res.data_quality, res.data_quality.overall.value), "vetoes": [v.value for v in res.decision.vetoes],
                 "max_buy": p.max_buy if p else None, "ideal_entry": p.ideal_entry if p else None, "stop": p.stop if p else None,
                 "target1": p.target1 if p else None, "target2": p.target2 if p else None, "rr": p.rr_at_current if p else None,
                 "downside": p.downside_pct if p else None, "buy_zone_low": p.acceptable_low if p else None, "buy_zone_high": p.acceptable_high if p else None,
@@ -1342,7 +1343,7 @@ class MarketLensService:
             q_price, q_ts = live.price, live.trade_ts
         else:
             q_price, q_ts = getattr(q, "price", None), getattr(q, "timestamp", None)
-        return recommendation_freshness(row.as_of, row.data_quality, self.now(), plan=plan,
+        return recommendation_freshness(row.as_of, execution_quality((row.result or {}).get("data_quality"), row.data_quality), self.now(), plan=plan,
                                         quote_price=q_price, quote_ts=q_ts, new_major_events=self._major_events_since(row.ticker, row.as_of), analysis_price_ts=row.price_timestamp)
 
     # ------------------------------------------------------------------ persistence

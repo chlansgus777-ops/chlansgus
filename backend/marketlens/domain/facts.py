@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from typing import Any, Mapping
 
 from marketlens.domain.enums import DataMode, DataQuality
 from marketlens.domain.freshness import FreshnessCheck
@@ -123,3 +124,28 @@ def build_quality_report(facts: dict[str, Fact | None], core_fields: tuple[str, 
     return DataQualityReport(
         fields=tuple(fields), core_missing=tuple(core_missing), conflicts=tuple(conflicts), stale=tuple(stale), checks=checks
     )
+
+
+EXECUTION_FIELDS = ("price", "price_history", "fundamentals")  # == pipeline.CORE_FIELDS
+
+
+def execution_quality(report: Any, recorded: str | None) -> str:
+    """The data quality an analysis is *acted on* with: its core fields only (price, price history, financials).
+    ``recorded`` (the overall quality) is STALE / CONFLICTING when any field is — a news headline or an estimate two
+    sources disagree on made a minute-old BUY read "만료" (owner 2026-10-05, MU: 매수 · 만료 · 충돌). The decision itself
+    already vetoes a stale, missing or seriously conflicting core field (DATA INSUFFICIENT), and weighs the rest.
+    Without the stored per-field report the recorded overall quality is used unchanged."""
+    if isinstance(report, DataQualityReport):
+        fields, core_missing = list(report.fields), list(report.core_missing)
+    elif isinstance(report, Mapping) and isinstance(report.get("fields"), list):
+        fields, core_missing = [tuple(f) for f in report["fields"]], list(report.get("core_missing") or [])
+    else:
+        return recorded or DataQuality.MISSING.value
+    q = {str(n): (v.value if isinstance(v, DataQuality) else str(v)) for n, v in fields}
+    core = [q.get(n, DataQuality.MISSING.value) for n in EXECUTION_FIELDS]
+    if core_missing or DataQuality.MISSING.value in core:
+        return DataQuality.MISSING.value
+    for level in (DataQuality.CONFLICTING.value, DataQuality.STALE.value, DataQuality.DELAYED.value):
+        if level in core:
+            return level
+    return DataQuality.FRESH.value
