@@ -252,6 +252,8 @@ def stock(req: Request, ticker: str, refresh: bool = False) -> dict[str, Any]:
             "committee": com.payload if com else None,
             "committee_recommendation_id": com.recommendation_id if com else None,  # the UI shows it only for this version
             "history": history,
+            # whether a touch of this name's 20/50/200-day line alerts now: the candidate list's live top ten
+            "ma_alert": {"on": t in s.ma_watch.symbols(), "top": s.MA_ALERT_TOP},
             "versions": {"scoring": row.scoring_model_version, "decision": row.decision_model_version, "prompt": row.agent_prompt_version, "config": row.config_version,
                          "provider": row.provider_version, "schema": row.schema_version, "code": row.code_version, "app": row.app_version, "llm_models": row.llm_model_ids,
                          "input_fingerprint": row.input_fingerprint},

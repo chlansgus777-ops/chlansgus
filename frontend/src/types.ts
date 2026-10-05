@@ -99,4 +99,4 @@ export interface Brief {
   unknowns: { text: string; impact: string; fix: string | null; label: string }[];
   triggers: BriefItem[]; as_of?: string | null;
 }
-export interface StockDetail { position_plan?: PositionPlan; brief?: Brief; recommendation: OppRow; analysis: Analysis; price_history?: { day: string; close: number }[]; committee: CommitteeResult | null; committee_recommendation_id?: number | null; history: { id: number; as_of: string; score: number; action: string }[]; versions: Record<string, string> }
+export interface StockDetail { position_plan?: PositionPlan; brief?: Brief; recommendation: OppRow; analysis: Analysis; price_history?: { day: string; close: number }[]; committee: CommitteeResult | null; committee_recommendation_id?: number | null; history: { id: number; as_of: string; score: number; action: string }[]; versions: Record<string, string>; ma_alert?: { on: boolean; top: number } }

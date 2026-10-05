@@ -29,6 +29,7 @@ from marketlens.application.toss_bars import TossBars
 from marketlens.application.toss_quotes import TossQuoteFeed, live_quote
 from marketlens.domain.broker import merge_broker
 from marketlens.application.live_judge import LiveJudge, plans_from_rows
+from marketlens.application.live_quotes import reference_day
 from marketlens.application.ma_watch import MaWatch, levels_from_result
 from marketlens.application.rule_watch import RuleWatch
 from marketlens.application.refresher import Refresher, Snapshot
@@ -40,7 +41,7 @@ from marketlens.config import AGENT_PROMPT_VERSION, CONFIG_DIR, SCHEMA_VERSION, 
 from marketlens.domain.enums import ACTION_KO, BULLISH_ACTIONS, Action, DataMode, TradingSession
 from marketlens.domain.freshness import PlanCheck, RecommendationFreshness, recommendation_freshness
 from marketlens.domain.corporate_actions import ShareBasis, analysis_basis, encoded_split_keys, share_multiplier
-from marketlens.domain.market_calendar import UTC, classify_session, to_ny
+from marketlens.domain.market_calendar import UTC, classify_session, last_completed_session, session_close_utc, to_ny
 from marketlens.domain.paper import position_notional
 from marketlens.domain.ledger import LedgerError, LedgerNotFound, Trade, check_delete, check_new, positions
 from marketlens.domain.portfolio import Holding, Portfolio
@@ -67,7 +68,7 @@ class ProviderUnavailableForView(Exception):
     """A screen's background read found no data (the reason is shown; the last good value is kept)."""
 
 
-REANALYZE_WHY = {"STOP_HIT": "손절 기준 도달", "TARGET_HIT": "목표가 도달"}
+REANALYZE_WHY = {"STOP_HIT": "손절 기준 도달", "TARGET_HIT": "목표가 도달", "STALE": "지난 장 이전 분석 — 화면에 떠 있어 새로 분석"}
 PLAN_PRICE_FIELDS = ("ideal_entry", "acceptable_low", "acceptable_high", "max_buy", "add_zone_low", "add_zone_high", "stop", "target1", "target2",
                      "support_used", "resistance_used")
 
@@ -283,6 +284,7 @@ class MarketLensService:
         self.data.daily_bars = self.toss_bars.ensure
         self.attach_broker(BrokerSync(self.sf, self.now, getattr(settings, "toss_client_id", None), getattr(settings, "toss_client_secret", None),
                                       enabled=settings.mode == DataMode.LIVE))
+        self.quotes.previous_close_of = self._previous_close
         self.data.live_quote = self._live_quote  # an analysis prices at the same second the screens show
         self.data.prefetch_quotes = self.toss_feed.fetch  # a scan's final names: one Toss request per batch, not per name
         self._readiness_lock = threading.Lock()
@@ -792,7 +794,27 @@ class MarketLensService:
             issued_at = issued_at.replace(tzinfo=timezone.utc)
         return issued_at < datetime.fromisoformat(self._account_changed_at)
 
-    MA_ALERT_MIN_SCORE = 60.0  # owner 2026-10-05: only names scoring 60 or more alert on a moving-average touch
+    MA_ALERT_TOP = 10  # moving-average touches alert for the candidate list's top ten (owner 2026-10-05: "상위 10종목만")
+
+    def _previous_close(self, ticker: str, day: date) -> float | None:
+        """The close of ``day`` for the change % of a live price without one (토스 prices carry none): the stored daily
+        bar of exactly that session, else the price provider's own previous close (its quote, not the live feed's)."""
+        if self.store is not None:
+            bars = self.store.bars(ticker, day - timedelta(days=7), day)
+            if bars and bars[-1].day == day:
+                return bars[-1].close
+        f = self.data._get("price", "price", "get_quote", ticker, ticker)
+        q = f.value
+        pc = getattr(q, "previous_close", None)
+        ts = getattr(q, "timestamp", None)
+        # the provider's previous close belongs to the session before its own quote's day: only that day is accepted
+        if pc and ts is not None and reference_day(ts) == day:
+            return float(pc)
+        # before the next session opens the provider's last price IS that day's close (its "previous close" is the day before)
+        px = getattr(q, "price", None)
+        if px and ts is not None and to_ny(ts).date() == day and to_ny(ts) >= to_ny(session_close_utc(day)) - timedelta(minutes=1):
+            return float(px)
+        return None
 
     def _toss_bar_names(self) -> list[str]:
         """Held, watched, the analysed pool of the shown scan and the benchmark — the names whose daily history comes
@@ -804,18 +826,32 @@ class MarketLensService:
                 names |= {r.ticker for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None and r.rank <= self.LIVE_POOL}
         return ["SPY"] + sorted(names - {"SPY"})
 
-    def _ma_levels(self) -> list[Any]:
-        """The 20 / 50 / 200-day lines of every name whose newest analysis scores ``MA_ALERT_MIN_SCORE`` or more — the
-        held and watched names and the analysed pool of the shown scan — on today's share basis."""
-        out = []
+    def _ma_alert_names(self) -> list[str]:
+        """The top ``MA_ALERT_TOP`` names of the candidate list in its live order (the score each name has now; data
+        insufficient never) — the names whose moving-average touches alert (owner 2026-10-05: "상위 10종목만")."""
         with self.sf() as s:
-            names = {h.ticker for h in self.portfolio(s).holdings} | {w.ticker for w in repo.watchlist(s)}
             scan = self.shown_scan(s)
-            if scan is not None:
-                names |= {r.ticker for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None and r.rank <= self.LIVE_POOL}
-            for t in sorted(names):
+            if scan is None:
+                return []
+            recs = [r for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None and r.rank <= self.LIVE_POOL]
+            newer = repo.newer_single_analyses(s, [r.ticker for r in recs], scan.as_of, self.mode.value)
+            rows = [newer.get(r.ticker) or r for r in recs]
+
+        def live(r: Any) -> tuple[str, float]:
+            lj = self._rejudged.get(r.id)
+            return (lj["action"], lj["score"]) if lj else (r.final_action, r.score or 0.0)
+        ranked = sorted((r for r in rows if live(r)[0] != "DATA INSUFFICIENT"), key=lambda r: (-live(r)[1], r.rank or 0))
+        return list(dict.fromkeys(r.ticker for r in ranked))[: self.MA_ALERT_TOP]
+
+    def _ma_levels(self) -> list[Any]:
+        """The 20 / 50 / 200-day lines of the top ``MA_ALERT_TOP`` candidates, from each one's newest analysis, on
+        today's share basis."""
+        out = []
+        names = self._ma_alert_names()
+        with self.sf() as s:
+            for t in names:
                 r = self.latest_company_recommendation(s, t)
-                if r is None or r.score is None or r.score < self.MA_ALERT_MIN_SCORE:
+                if r is None:
                     continue
                 lv = levels_from_result(t, r.result, r.as_of, self.levels_now(r).get("split_factor") or 1.0)
                 if lv is not None:
@@ -973,7 +1009,27 @@ class MarketLensService:
             self._rejudge_constraints = {k: v for k, v in self._rejudge_constraints.items() if k in keep}
         if changed:
             self.invalidate_live_plans()  # the tick-by-tick verdict follows the new decision and levels
+        self._reanalyze_stale_viewed(head)
         return done
+
+    def _reanalyze_stale_viewed(self, pool: list[tuple[int, str, float]]) -> int:
+        """Names on screen (the stock list, a stock page, Glance) whose analysis is from before the last completed session
+        are analysed again in the background — the list shows a current judgement instead of "만료"/"오래됨" (owner
+        2026-10-05: "알아서 좀 재확인하고"). Bounded by request_reanalysis (30 min per name, 20 an hour)."""
+        viewed = self.quotes.viewed()
+        if not viewed:
+            return 0
+        last = last_completed_session(self.now())
+        started = 0
+        for rid, t, _sc in pool:
+            c = self._rejudge_constraints.get(rid)
+            as_of = c.get("as_of") if c else None
+            if t not in viewed or as_of is None:
+                continue
+            as_of = as_of if as_of.tzinfo is not None else as_of.replace(tzinfo=UTC)
+            if last_completed_session(as_of) < last and self.request_reanalysis(t, "STALE"):
+                started += 1
+        return started
 
     def _live_plan(self, p: Any) -> Any:
         from dataclasses import replace as _replace
@@ -1130,7 +1186,8 @@ class MarketLensService:
             was = before.action if before else None
             text = f"{ticker} 자동 재분석 ({REANALYZE_WHY.get(reason, '가격 변동')}) — " + (
                 f"{ACTION_KO.get(Action(was), was)} → {ACTION_KO.get(Action(after), after)}" if was and was != after else f"판단 유지: {ACTION_KO.get(Action(after), after)}")
-            self.judge.add(ticker, "REANALYZED", "warning" if was and was != after else "info", text, r.price, _id)
+            if reason != "STALE" or (was and was != after):  # a routine refresh of a name on screen says something only when the call changed
+                self.judge.add(ticker, "REANALYZED", "warning" if was and was != after else "info", text, r.price, _id)
             return after
 
         self.refresher.get(f"reanalyze:{ticker}", job, max_age=self.REANALYZE_EVERY, retry_after=self.REANALYZE_EVERY)

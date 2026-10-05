@@ -33,7 +33,9 @@ export async function closeGlance(): Promise<void> {
 
 /** Show the full app (Analyze Mode) at ``path`` — the main window on the desktop, this page in a browser. */
 export async function openAnalyze(path = "/"): Promise<void> {
-  if (!(await call("main_show", { path }))) window.location.hash = `#${path}`;
+  if (await call("main_show", { path })) return;
+  // in the desktop app the Glance window never turns into the full app (it is too small: it looked like a phone layout)
+  if (!isDesktop()) window.location.hash = `#${path}`;
 }
 
 export async function setAlwaysOnTop(on: boolean): Promise<boolean> {

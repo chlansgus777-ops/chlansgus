@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { num, pct, price, stamp } from "../format";
 import { RISK_KO, ko } from "../i18n";
 import type { OppRow } from "../types";
-import { useQuote } from "../quotes";
+import { useQuote, useViewQuotes } from "../quotes";
 import { LivePrice } from "./LivePrice";
 import { LiveZone } from "./LiveZone";
 import { Action, Quality, StatusBadge, Vetoes } from "./ui";
@@ -93,6 +93,9 @@ export function OppTable({ rows, compact = false, commonStale = false }: { rows:
     return r;
   }, [rows, sort, asc]);
   const cols = compact ? COLS.filter(([k]) => k !== "risk") : COLS;
+  // the names in the list join the live quote stream (first 40): their verdicts are re-checked with a current price
+  // every second instead of reading "현재가 재확인 필요", and a stale analysis among them is redone in the background
+  useViewQuotes(sorted.slice(0, 40).map((r) => r.ticker));
   return (
     <div className="scroll">
       <table>

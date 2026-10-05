@@ -44,6 +44,13 @@ export function LiveZone({ ticker, recId, compact = false }: { ticker: string; r
 }
 
 const ALERT_ICON: Record<LiveAlert["level"], string> = { positive: "▲", warning: "!", danger: "⛔", info: "i" };
+const toastLife = (a: LiveAlert) => (a.level === "danger" ? 20_000 : 9_000);
+
+/** "AMZN 매수 구간 진입 — $251.60 (최대 매수가 …)" → a headline and its detail line (one line when there is no dash). */
+export function splitAlert(text: string): [string, string] {
+  const i = text.indexOf(" — ");
+  return i > 0 ? [text.slice(0, i), text.slice(i + 3)] : [text, ""];
+}
 
 /** Toasts for alerts that arrive live, and the bell with the recent list (mounted once, in the app frame). */
 export function AlertCenter() {
@@ -57,7 +64,7 @@ export function AlertCenter() {
     const fresh = toastQueue.splice(0, toastQueue.length);
     setToasts((t) => [...t, ...fresh].slice(-4));
     for (const a of fresh) {
-      window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== a.id)), a.level === "danger" ? 20_000 : 9_000);
+      window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== a.id)), toastLife(a));
       notifyDesktop(a);
     }
   }, [alerts]);
@@ -90,8 +97,11 @@ export function AlertCenter() {
       </div>
       {createPortal(<div className="toasts" aria-live="polite">
         {toasts.map((a) => (
-          <div key={a.id} className={`toast lvl-${a.level}`} role="status">
-            <button type="button" className="toast-body" onClick={() => go(a)}><span className="ico" aria-hidden>{ALERT_ICON[a.level]}</span>{a.text}</button>
+          <div key={a.id} className={`toast lvl-${a.level}`} role="status" style={{ ["--life" as string]: `${toastLife(a)}ms` }}>
+            <button type="button" className="toast-body" onClick={() => go(a)}>
+              <span className="ico" aria-hidden>{ALERT_ICON[a.level]}</span>
+              <span className="toast-txt"><b>{splitAlert(a.text)[0]}</b>{splitAlert(a.text)[1] && <small>{splitAlert(a.text)[1]}</small>}</span>
+            </button>
             <button type="button" className="toast-x" aria-label="닫기" onClick={() => setToasts((t) => t.filter((x) => x.id !== a.id))}>×</button>
           </div>
         ))}

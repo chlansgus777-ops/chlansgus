@@ -197,6 +197,15 @@ async fn glance_open(app: AppHandle) -> Result<(), String> {
     }
     let handle = app.clone();
     w.on_window_event(move |e| {
+        if matches!(e, WindowEvent::Destroyed) {
+            // Glance closed while the main window was only hidden (closed by the owner): the app ends as it would have
+            if let Some(m) = handle.get_webview_window("main") {
+                if !m.is_visible().unwrap_or(true) {
+                    handle.exit(0);
+                }
+            }
+            return;
+        }
         if matches!(e, WindowEvent::Moved(_) | WindowEvent::Resized(_)) {
             if let Some(w) = handle.get_webview_window(GLANCE) {
                 if let (Ok(p), Ok(s)) = (w.outer_position(), w.inner_size()) {
@@ -266,6 +275,19 @@ fn main() {
                 // External links use the scoped opener; don't expose the API token to remote pages.
                 .on_navigation(is_app_url)
                 .build()?;
+            // closing the main window while Glance is open only hides it: Glance keeps working, and "open in MarketLens"
+            // from Glance shows this same window again (before, the main window was gone and the full app opened
+            // inside the small Glance window, looking like a phone layout)
+            let main_w = window.clone();
+            let handle = app.handle().clone();
+            window.on_window_event(move |e| {
+                if let WindowEvent::CloseRequested { api, .. } = e {
+                    if handle.get_webview_window(GLANCE).is_some() {
+                        api.prevent_close();
+                        let _ = main_w.hide();
+                    }
+                }
+            });
             if let Err(error) = spawn_backend(app.handle()) {
                 eprintln!("failed to start marketlens-backend: {error}");
                 let _ = window.eval("window.marketlensStartupFailure?.('앱 서버를 실행하지 못했습니다. 앱을 닫고 다시 실행해주세요. 계속 실패하면 데이터 폴더의 logs를 확인해주세요.');");

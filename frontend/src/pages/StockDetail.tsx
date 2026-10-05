@@ -94,7 +94,6 @@ function PositionPlanView({ p, shown, why, live }: { p?: PositionPlan; shown: bo
 
 export default function StockDetailPage() {
   const { ticker = "" } = useParams();
-  useEffect(() => { if (ticker) setFocusSymbol(ticker); }, [ticker]);  // Glance follows the last stock opened
   return <StockDetail key={ticker.toUpperCase()} ticker={ticker.toUpperCase()} />;
 }
 
@@ -322,6 +321,8 @@ function StockDetail({ ticker }: { ticker: string }) {
           {watched
             ? <button disabled={!!busy} aria-pressed onClick={() => run("watch", async () => { await api.del(`/watchlist/${a.ticker}`); wl.reload(); refreshQuoteSubscriptions(); setNote("관심 종목에서 뺐습니다."); })}><IStar />관심 종목에서 빼기</button>
             : <button disabled={!!busy} aria-pressed={false} onClick={() => run("watch", async () => { await api.post(`/watchlist/${a.ticker}`); wl.reload(); refreshQuoteSubscriptions(); setNote("관심 종목에 추가했습니다. 종목 → 관심 탭과 홈에서 볼 수 있습니다."); })}><IStar />관심 종목 추가</button>}
+          <button className="ghost" data-testid="pin-glance" title="Glance 위젯이 이 종목을 보여주게 합니다 (종목 화면을 연다고 바뀌지는 않습니다)"
+                  onClick={() => { setFocusSymbol(a.ticker); setNote(`Glance에 ${a.ticker}를 띄웠습니다. Glance 설정의 '자동으로'를 누르면 원래대로 돌아갑니다.`); }}>Glance에 띄우기</button>
           <Link className="btn ghost" to={`/portfolio?trade=${a.ticker}`} title="이 종목을 실제로 사거나 팔았다면 기록하세요 — 보유 수량·평단이 계산됩니다">거래 기록하기</Link>
         </div>
         {note && <div className="explain" role="status" style={{ marginTop: 10 }}>{note}</div>}
@@ -407,7 +408,7 @@ function StockDetail({ ticker }: { ticker: string }) {
         {hist.length > 1 && e ? (
           <PlanChart data={hist} levels={{ stop: e.stop, maxBuy: e.max_buy, zoneLow: e.acceptable_low, ideal: e.ideal_entry, t1: e.target1, t2: e.target2 }} height={320} />
         ) : hist.length > 1 ? <PlanChart data={hist} levels={{}} height={260} /> : <Empty>가격 이력이 부족해 차트를 그리지 않습니다.</Empty>}
-        <MaTouch technicals={a.technicals} price={priceNow} split={split} score={rec.score} />
+        <MaTouch technicals={a.technicals} price={priceNow} split={split} alert={d.data?.ma_alert} />
         <div className="divider" />
         <div className="two">
           <div>

@@ -161,3 +161,33 @@ def test_a_scan_prices_its_final_names_in_batches_not_one_call_each():
         recs = [r for r in repo.recommendations_for_scan(s, scan.id) if r.rank is not None]
     assert recs and all(r.price_source == "toss" for r in recs), {r.ticker: r.price_source for r in recs}
     assert not any(r.final_action == "DATA INSUFFICIENT" and r.price is None for r in recs)
+
+
+def test_a_toss_price_gets_its_change_from_the_previous_sessions_close():
+    """토스 prices carry no previous close: the change % (Glance's sectors, the lists) came out empty (owner 2026-10-05)."""
+    import time as _t
+    from datetime import date
+
+    from marketlens.application.live_quotes import reference_day
+
+    now = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)  # Monday 08:00 New York, pre-market
+    hub = QuoteHub(source="finnhub", max_symbols=50, coverage_ko="t", now=lambda: now)
+    asked = []
+    hub.previous_close_of = lambda t, day: asked.append((t, day)) or {"XLK": 200.0}.get(t)
+    hub.ingest_poll("XLK", 202.0, now, "toss")
+    hub.ingest_poll("ZZZ", 10.0, now, "toss")
+    hub.rows()  # the first look asks in the background
+    for _ in range(100):
+        if len(asked) == 2:
+            break
+        _t.sleep(0.01)
+    _t.sleep(0.05)
+    rows = {r["ticker"]: r for r in hub.rows()}
+    assert sorted(asked) == [("XLK", date(2026, 10, 2)), ("ZZZ", date(2026, 10, 2))]  # Friday's close for Monday
+    assert rows["XLK"]["change_pct"] == pytest.approx(0.01) and rows["XLK"]["previous_close"] == 200.0
+    assert rows["ZZZ"]["change_pct"] is None  # not known: no number is made up
+    hub.rows()
+    assert len(asked) == 2  # cached; a miss is asked again only after a while
+    # overnight trading from 20:00 belongs to the next day; a weekend to Monday
+    assert reference_day(datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc)) == date(2026, 10, 5)
+    assert reference_day(datetime(2026, 10, 4, 15, 0, tzinfo=timezone.utc)) == date(2026, 10, 2)

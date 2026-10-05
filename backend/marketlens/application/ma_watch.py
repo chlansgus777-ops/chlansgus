@@ -1,5 +1,5 @@
-"""이동평균선 닿음 알림 (owner 2026-10-05: "200일선에 닿았다 몇일선에 닿았다 … 닿았을때 알람", "60점 이상 종목들만"): every
-live price of a name whose newest analysis scores 60 or more (held, watched or in the analysed pool) is checked against the 20 / 50 / 200-day moving averages of its newest analysis (on today's share
+"""이동평균선 닿음 알림 (owner 2026-10-05: "200일선에 닿았다 몇일선에 닿았다 … 닿았을때 알람", then "상위 10종목만"): every
+live price of the candidate list's top ten (live order) is checked against the 20 / 50 / 200-day moving averages of its newest analysis (on today's share
 basis), and a touch becomes an alert in the app's alert center — once per name, line and New York trading day, never on
 every tick. Only a display and an alert: nothing here changes a score or a decision.
 

@@ -32,7 +32,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterable, Protocol
 
 from marketlens.domain.enums import TradingSession
-from marketlens.domain.market_calendar import classify_session, last_completed_session, session_close_utc
+from concurrent.futures import ThreadPoolExecutor
+
+from marketlens.domain.market_calendar import classify_session, is_trading_day, last_completed_session, next_trading_day, previous_trading_day, session_close_utc, to_ny
 from marketlens.infrastructure.logging import redact_text
 
 log = logging.getLogger("marketlens.quotes")
@@ -70,6 +72,15 @@ class Trade:
     volume: float | None
     source: str
     feed: str                 # "stream", "snapshot" or "poll" (a 1-second REST feed, e.g. 토스증권) — never mixed
+
+
+def reference_day(ts: datetime) -> Any:
+    """The session whose previous close a price at ``ts`` is compared with: the New York trading day it belongs to —
+    pre-market, regular and after-hours of that day; overnight trading (from 20:00) and weekends belong to the next."""
+    ny = to_ny(ts)
+    d = ny.date()
+    day = d if is_trading_day(d) and ny.hour < 20 else next_trading_day(d)
+    return previous_trading_day(day)
 
 
 @dataclass(slots=True)
@@ -175,6 +186,11 @@ class QuoteHub:
         self.connected = False
         self.stats = StreamStats()
         self._subs_changed = threading.Event()
+        # the close of the session before a price's trading day, when the price feed itself has none (토스 prices carry
+        # no previous close: the change % — Glance's sectors, the lists — stayed empty). Looked up off the lock, cached.
+        self.previous_close_of: Callable[[str, Any], float | None] | None = None
+        self._prev: dict[tuple[str, Any], tuple[float | None, float]] = {}
+        self._prev_pool: ThreadPoolExecutor | None = None
         self._snap_queue: list[str] = []
         self._snap_event = threading.Event()
         # the live verdict (application.live_judge): ``annotate`` adds it to each row, ``on_price`` sees every new price
@@ -401,14 +417,44 @@ class QuoteHub:
         if shown is not None:
             base.update(price=shown.price, trade_time=shown.trade_ts.isoformat(), received_time=shown.received_ts.isoformat(),
                         source=shown.source, feed=shown.feed)
-            if st.previous_close:
-                base["change_pct"] = shown.price / st.previous_close - 1
+            prev = st.previous_close or self._prev_close(st.ticker, shown.trade_ts)
+            if prev:
+                base["previous_close"] = prev
+                base["change_pct"] = shown.price / prev - 1
             if self.annotate is not None:
                 try:
                     base["judge"] = self.annotate(st.ticker, shown.price, shown.trade_ts)
                 except Exception as e:  # noqa: BLE001 - the price is shown without a verdict
                     log.warning("live verdict failed for %s: %s", st.ticker, type(e).__name__)
         return base
+
+    PREV_RETRY_S = 600.0
+
+    def _prev_close(self, ticker: str, ts: datetime) -> float | None:
+        """Cached previous close for ``ts``'s trading day; a miss is looked up in the background (never under the lock)."""
+        if self.previous_close_of is None:
+            return None
+        day = reference_day(ts)
+        hit = self._prev.get((ticker, day))
+        if hit is not None and (hit[0] is not None or time.monotonic() - hit[1] < self.PREV_RETRY_S):
+            return hit[0]
+        self._prev[(ticker, day)] = (None, time.monotonic())  # pending: asked once per retry period
+        if self._prev_pool is None:
+            self._prev_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="prev-close")
+        self._prev_pool.submit(self._fill_prev, ticker, day)
+        return None
+
+    def _fill_prev(self, ticker: str, day: Any) -> None:
+        try:
+            v = self.previous_close_of(ticker, day) if self.previous_close_of else None
+        except Exception as e:  # noqa: BLE001 - the change % stays empty, the price is still shown
+            log.info("previous close of %s: %s", ticker, type(e).__name__)
+            v = None
+        with self._lock:
+            self._prev[(ticker, day)] = (float(v) if v and v > 0 else None, time.monotonic())
+            st = self._states.get(ticker)
+            if st is not None and v:
+                self._bump(st)
 
     def status(self) -> dict[str, Any]:
         subscribed, over = self.plan()
