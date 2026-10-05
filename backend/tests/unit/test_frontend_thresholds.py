@@ -21,3 +21,10 @@ def test_no_screen_states_an_old_threshold_as_a_number():
            for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
            if re.search(r"매수 기준\s*\(?\d|\b(80|72)점? 이상", line)]
     assert bad == []
+
+
+def test_no_backend_explanation_states_an_old_threshold_as_a_number():
+    src = ROOT / "backend" / "marketlens"
+    bad = [f"{p.relative_to(ROOT)}:{i}" for p in src.rglob("*.py")
+           for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if re.search(r"매수 80|소량 72|\(80\)", line)]
+    assert bad == []

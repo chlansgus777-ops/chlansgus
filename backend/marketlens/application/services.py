@@ -268,6 +268,7 @@ class MarketLensService:
         self.ma_watch.loader = self._ma_levels
         self.quotes.on_price = self._on_price
         self._reanalyzed: dict[str, float] = {}
+        self._manual_analyses = 0  # '분석 다시하기' runs now: background refreshes of stale names wait
         self._briefing: tuple[str, float, dict[str, Any]] | None = None  # (KST day, monotonic time built, briefing)
         self._briefing_lock = threading.Lock()
         self._rejudge_inputs: dict[int, Any] = {}  # rec id -> decoded stored inputs (they never change)
@@ -398,8 +399,16 @@ class MarketLensService:
                 "duplicates_removed": dropped}
 
     def start_analysis(self, ticker: str) -> dict[str, Any]:
+        """'분석 다시하기': the owner's own request goes first (owner 2026-10-05: "최우선적으로") — it runs on its own
+        workers, and while it runs no background refresh of a stale name starts (they share the free providers' limits)."""
         def run() -> dict[str, Any]:
-            _result, _committee, rec_id = self.analyze(ticker, run_committee=False, persist=True)
+            with self._ledger_lock:
+                self._manual_analyses += 1
+            try:
+                _result, _committee, rec_id = self.analyze(ticker, run_committee=False, persist=True)
+            finally:
+                with self._ledger_lock:
+                    self._manual_analyses -= 1
             self.invalidate_live_plans()
             return {"recommendation_id": rec_id}
         self.analyses.get(f"analysis:{ticker}", run, max_age=2.0, retry_after=0.0)
@@ -1173,6 +1182,8 @@ class MarketLensService:
             return False
         now = time.monotonic()
         with self._ledger_lock:
+            if reason == "STALE" and self._manual_analyses:  # the owner's own '분석 다시하기' goes first
+                return False
             if now - self._reanalyzed.get(ticker, -1e9) < self.REANALYZE_EVERY:
                 return False
             if sum(1 for v in self._reanalyzed.values() if now - v < 3600) >= self.REANALYZE_PER_HOUR:
@@ -1220,7 +1231,7 @@ class MarketLensService:
         rows = self.company_recommendations(s, ticker, before, limit=1, inclusive=inclusive, exclude_id=exclude_id)
         return rows[0] if rows else None
 
-    def _previous_lookup(self, s: Session) -> Any:
+    def _previous_lookup(self, s: Session, decision_version: str | None = None) -> Any:
         def lookup(ticker: str, as_of: datetime) -> tuple[AnalysisDigest | None, Action | None]:
             # recommendations already stored when this analysis runs (same timestamp included)
             # the company's latest recommendation — under an earlier ticker after a rename, never another company's
@@ -1229,12 +1240,17 @@ class MarketLensService:
             if row is None:
                 return None, None
             digest = decode(AnalysisDigest, row.result["digest"])
+            # a verdict made under other decision rules (e.g. the buy thresholds 80→68, decision-3.4.0) is not carried
+            # over: "no material change → keep the previous verdict" kept a 79.5 at WATCH after 68 became the bar (owner
+            # 2026-10-05, MU). The new rules decide afresh; the digest still shows what changed since.
+            if decision_version is not None and row.decision_model_version != decision_version:
+                return digest, None
             return digest, Action(row.deterministic_action)
 
         return lookup
 
     def scanner(self, cfg: ModelConfig, s: Session) -> Scanner:
-        return Scanner(self.data, cfg, self.seed, self.theses, previous_lookup=self._previous_lookup(s))
+        return Scanner(self.data, cfg, self.seed, self.theses, previous_lookup=self._previous_lookup(s, cfg.decision_model_version))
 
     def provider_version(self) -> str:
         names = sorted({p.name for ch in self.registry.chains.values() for p in ch.providers})

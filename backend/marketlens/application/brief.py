@@ -47,7 +47,7 @@ CHANGE_WHY = {
     "stop": "직전 추천의 손절 기준을 종가가 깨면 매수 근거가 없어집니다",
     "rr": "손익비 2.0 미만이면 매수 조건을 통과하지 못합니다",
     "thesis": "투자 논리 철회 조건이 발생하면 매수할 수 없습니다",
-    "score": "총점이 판정 경계(매수 80, 소량 72)에 얼마나 가까운지가 바뀌었습니다",
+    "score": "총점이 판정 경계(매수 {buy:g}, 소량 {small:g})에 얼마나 가까운지가 바뀌었습니다",
     "score_drift": "작은 변화가 쌓여 판정 경계에 가까워졌는지 봅니다",
     "component": "세부 점수 변화가 총점에 반영됐습니다",
     "price": "가격 변화는 가격 계획과 손익비를 바꿉니다",
@@ -90,7 +90,7 @@ def _issue_name(issue_id: str, titles: Mapping[str, str]) -> str:
     return f"{ISSUE_KO.get(body, body.replace('_', ' ').title())} 관련 이슈"
 
 
-def _changed(r: Mapping[str, Any], lv: Mapping[str, Any], titles: Mapping[str, str]) -> list[dict[str, Any]]:
+def _changed(r: Mapping[str, Any], lv: Mapping[str, Any], titles: Mapping[str, str], th: Any = None) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     changes = r.get("changes") or []
     first = len(changes) == 1 and changes[0].get("kind") == "initial"
@@ -101,7 +101,10 @@ def _changed(r: Mapping[str, Any], lv: Mapping[str, Any], titles: Mapping[str, s
             if c.get("kind") in ("agent",) or (not c.get("material") and len(out) >= 3):
                 continue
             tone = "neg" if c.get("kind") in ("stop", "thesis") else "neutral"
-            out.append(_item("CALC", c.get("text", ""), why=CHANGE_WHY.get(c.get("kind", "")), tone=tone, label="지난 분석 대비"))
+            why = CHANGE_WHY.get(c.get("kind", ""))
+            if why and "{buy" in why:  # the thresholds of the model in force, never a number written into the text
+                why = why.format(buy=th.buy_enter, small=th.buy_small_enter) if th is not None else "총점이 판정 경계에 얼마나 가까운지가 바뀌었습니다"
+            out.append(_item("CALC", c.get("text", ""), why=why, tone=tone, label="지난 분석 대비"))
             if len(out) >= 5:
                 break
     e = r.get("earnings") or {}
@@ -400,7 +403,7 @@ def build_brief(result: Mapping[str, Any], inputs: Mapping[str, Any] | None = No
     min_rr = getattr(thresholds, "min_rr", 2.0) if thresholds is not None else 2.0
     support, against = _support_against(r, lv)
     return {
-        "changed": _changed(r, lv, issue_titles or {}),
+        "changed": _changed(r, lv, issue_titles or {}, thresholds),
         "support": support,
         "against": against,
         "valuation": _valuation(r, inputs, lv, min_rr),

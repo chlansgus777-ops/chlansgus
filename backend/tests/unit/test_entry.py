@@ -40,3 +40,20 @@ def test_thesis_invalidation_separate_from_price_stop():
     assert bad2
     ok, _ = evaluate_thesis(conds, {"revenue_growth_yoy": None}, set())
     assert not ok
+
+
+def test_the_first_target_does_not_jump_when_the_price_crosses_one_atr_below_a_resistance():
+    """Owner 2026-10-05 (MU): $1,065.70 skipped a resistance less than 1 ATR above and aimed at the next one (max buy
+    $1,086.17); at $1,059.82 that resistance counted (max buy $1,037.41). The nearest resistance above the price is
+    the first target either way, so a small price move no longer moves the plan."""
+    from dataclasses import replace
+
+    t = compute_technicals(make_bars(date(2026, 9, 24)))
+    a = t.atr14
+    near = t.last_close + 0.6 * a
+    t2 = replace(t, resistances=(near, t.last_close + 4 * a), high_52w=t.last_close + 6 * a)
+    up = build_entry_plan(t.last_close + 0.15 * a, t2)
+    down = build_entry_plan(t.last_close - 0.15 * a, t2)
+    assert up.target1 == pytest.approx(near, abs=0.01) and down.target1 == pytest.approx(near, abs=0.01)
+    assert up.max_buy == pytest.approx(down.max_buy, abs=0.01)  # the plan is the same; only where the price sits moved
+    assert (up.rr_at_current or 0) < 2.0  # a resistance this close leaves little reward: the plan says wait

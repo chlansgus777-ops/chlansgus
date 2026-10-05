@@ -106,15 +106,19 @@ def build_entry_plan(
         stop = price - cfg.fallback_stop_atr * a
         notes.append(f"{cfg.max_stop_atr} ATR 이내 지지선 없음 → 변동성 손절 {cfg.fallback_stop_atr} ATR")
 
-    # --- targets: resistances at least min_target_atr above price
-    res = sorted(r for r in tech.resistances if r >= price + cfg.min_target_atr * a)
-    if tech.high_52w is not None and tech.high_52w >= price + cfg.min_target_atr * a and tech.high_52w not in res:
+    # --- targets: the NEAREST resistance above the price is the first target, however close (decision-3.5.0). Skipping
+    # one closer than ``min_target_atr`` ATR made the plan jump with the price (owner 2026-10-05, MU: $1,065.70 skipped
+    # the $1,108.8 resistance and aimed at $1,254.9 — max buy $1,086.17, score 79.5; four minutes later at $1,059.82 the
+    # same resistance counted — max buy $1,037.41, score 72.6). The supply just overhead is real: a close one gives a
+    # small reward/risk and the plan says wait, instead of an inflated target.
+    res = sorted(r for r in tech.resistances if r > price)
+    if tech.high_52w is not None and tech.high_52w > price and tech.high_52w not in res:
         res = sorted(res + [tech.high_52w])
     resistance: float | None = None
     if res:
         resistance = res[0]
         t1 = res[0]
-        notes.append(f"1차 목표가: 저항선 {t1:.2f}")
+        notes.append(f"1차 목표가: 바로 위 저항선 {t1:.2f}" + (f" (현재가에서 {cfg.min_target_atr:g} ATR 이내 — 손익비가 작게 나옴)" if t1 < price + cfg.min_target_atr * a else ""))
     else:
         t1 = price + cfg.fallback_target1_atr * a
         notes.append(f"상단 저항 없음 → 1차 목표가 = 현재가 + {cfg.fallback_target1_atr} ATR (신고가 구간)")

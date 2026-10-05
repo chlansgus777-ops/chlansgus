@@ -7,7 +7,7 @@
   "components": {
    "catalyst": 0.3437,
    "earnings_revision": 0.2419,
-   "entry_rr": 0.7046,
+   "entry_rr": 0.2561,
    "fundamental": 0.2191,
    "macro": 0.4359,
    "return_signals": 0.3568,
@@ -17,16 +17,16 @@
   },
   "entry": [
    6.28,
-   6.54,
-   7.04,
-   1.95
+   6.41,
+   6.67,
+   0.49
   ],
   "issues": {
    "ISSUE_EXPORT_CONTROL_eb52d2cd": -2.59
   },
   "raw_action": "WATCH",
   "scoring_model_version": "scoring-2.2.0",
-  "total": 41.06,
+  "total": 36.58,
   "vetoes": [
    "INSUFFICIENT_MODEL_COVERAGE"
   ]
@@ -39,7 +39,7 @@
   "components": {
    "catalyst": 0.4086,
    "earnings_revision": 0.2776,
-   "entry_rr": 0.2326,
+   "entry_rr": 0.1504,
    "fundamental": 0.4161,
    "macro": 0.5761,
    "return_signals": 0.6568,
@@ -49,16 +49,16 @@
   },
   "entry": [
    112.74,
-   115.75,
-   121.77,
-   0.68
+   115.11,
+   119.85,
+   0.32
   ],
   "issues": {
    "ISSUE_INFLATION_e80d95bf": 3.97
   },
   "raw_action": "WATCH",
   "scoring_model_version": "scoring-2.2.0",
-  "total": 50.74,
+  "total": 49.92,
   "vetoes": [
    "THESIS_INVALIDATED"
   ]
@@ -71,7 +71,7 @@
   "components": {
    "catalyst": 0.4356,
    "earnings_revision": 0.7472,
-   "entry_rr": 0.6273,
+   "entry_rr": 0.452,
    "fundamental": 0.8101,
    "macro": 0.6504,
    "return_signals": 0.6321,
@@ -81,9 +81,9 @@
   },
   "entry": [
    360.93,
-   371.59,
-   392.93,
-   1.71
+   369.45,
+   386.48,
+   1.16
   ],
   "issues": {
    "ISSUE_AI_e02baf60": 11.47,
@@ -91,7 +91,7 @@
   },
   "raw_action": "WAIT",
   "scoring_model_version": "scoring-2.2.0",
-  "total": 73.85,
+  "total": 72.1,
   "vetoes": []
  },
  "TSM": {
