@@ -1,11 +1,12 @@
 import { sectorKo } from "../i18n";
-import { Fragment } from "react";
+import { Fragment, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { IArrow, IEvent, IPortfolio, IStar } from "../components/icons";
 import { Action, Card, Empty, Err, Loading, Notice, ScoreMeter, StaleData, StatePanel } from "../components/ui";
 import { NotReady, ReadinessBanner, SyncControl, type ReadinessInfo } from "../components/Readiness";
 import { type ScanStatus, usePageTime, useStatus } from "../components/status";
 import { useApi, usePoll } from "../components/useApi";
+import { recordHomeShown } from "../components/Diagnostics";
 import { LivePrice } from "../components/LivePrice";
 import { useJudgedRows, useQuote, useViewQuotes, type QuoteRow } from "../quotes";
 import { LiveZone } from "../components/LiveZone";
@@ -186,6 +187,7 @@ function SectionAge({ s, nowMs, what }: { s?: SectionStatus; nowMs: number; what
 
 export default function Dashboard() {
   const d = useApi<Dash>("/dashboard");
+  useEffect(() => { if (d.data) recordHomeShown(); }, [d.data]);
   const st = useStatus();
   // the macro regime / the calendar still loading in the background: ask again shortly (cheap — stored data only)
   const sectionsLoading = !!(d.data?.regime_status?.pending || d.data?.catalysts_status?.pending || (d.data?.readiness?.stats_pending && d.data.readiness.recommendation_readiness == null));

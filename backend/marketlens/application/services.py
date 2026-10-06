@@ -194,6 +194,9 @@ def scan_coverage(result: ScanResult, llm: Mapping[str, Any]) -> dict[str, Any]:
     deep = result.stages[-1].input_count if result.stages else analysed
     return {
         "universe": universe, "excluded": len(result.excluded), "deep_analysed": deep, "analysed": analysed,
+        # passed every filter but ranked below the fully analysed pool (scanner.stage2/3/4_keep): neither excluded nor
+        # analysed — counted so excluded + ranked_out + deep_analysed is the whole universe
+        "ranked_out": max(0, universe - len(result.excluded) - deep),
         "data_insufficient": insufficient, "data_insufficient_rate": round(insufficient / analysed, 4) if analysed else None,
         "missing_by_field": {k: {"count": v, "rate": round(v / analysed, 4)} for k, v in missing_fields.most_common()} if analysed else {},
         "excluded_by_reason": dict(reasons.most_common(8)), "stages": stages,
@@ -262,6 +265,11 @@ class MarketLensService:
         self.quotes, self._quote_stream = self._build_quotes()
         # screen reads never wait for a provider or a market-wide recount: last good result + one background refresh
         self.refresher = Refresher(workers=3, wall=self.now)
+        # 이 PC의 실제 속도 (owner 2026-10-07): request and background-job times, CPU and memory — in memory only
+        from marketlens.application.diagnostics import Diagnostics
+
+        self.diagnostics = Diagnostics()
+        self.refresher.on_done = self.diagnostics.job
         self.realtime = Refresher(workers=1, wall=self.now)
         self.accounts = Refresher(workers=1, wall=self.now)
         self.analyses = Refresher(workers=2, wall=self.now)
@@ -933,8 +941,8 @@ class MarketLensService:
         return len(plans)
 
     # Owner 2026-09-29 ("9800X3D"): the whole pool every second — ~5 ms a name, so 100 names are a fraction of one core.
-    LIVE_TOP = 100  # the list's top names: re-judged on the live price every round (every second)
-    LIVE_POOL = 100  # the fully analysed pool: a name that improves climbs into the top the same second
+    LIVE_TOP = 20  # the list's top names: re-judged on the live price every round (every second); owner 2026-10-07: 100 → 20
+    LIVE_POOL = 20  # the stored candidates (scanner.final_candidates): owner 2026-10-07 "100개에서 상위 20개로 줄여"
     LIVE_ROTATE = 20  # names of the rest per round (when LIVE_TOP < LIVE_POOL)
     LIVE_REJUDGE_EVERY = 1.0  # seconds between two rounds over them (owner: "1초마다")
     LIVE_QUOTE_MAX_AGE = 60.0

@@ -83,10 +83,12 @@ def test_a_state_changing_method_without_the_client_header_is_refused(app_and_sv
                 assert c.request(method, url).status_code == 403, (method, url)
 
 
-def test_the_app_itself_still_reads_and_analyses(app_and_svc):
+def test_the_app_itself_still_reads_and_analyses():
+    # its own service: the module fixture's background workers are stopped when an earlier test's TestClient closes,
+    # and this test must really start an analysis (AMD is no longer among the 20 stored candidates since 2026-10-07)
     from fastapi.testclient import TestClient
 
-    app, _svc = app_and_svc
+    app, _svc = app_and_svc.__wrapped__()
     with TestClient(app, headers={"X-MarketLens-Client": "web"}) as c:
         assert c.get("/api/stocks/AMD?refresh=true").status_code == 405
         assert c.post("/api/stocks/AMD/analysis").status_code == 202

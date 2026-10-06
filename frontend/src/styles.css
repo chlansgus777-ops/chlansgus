@@ -1518,3 +1518,12 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(164, 148,
 .routine-list li .why { grid-column: 1 / -1; font-size: 12px; color: var(--sub); }
 .routine-fund { display: grid; gap: 3px; margin-top: 10px; font-size: 13.5px; }
 .routine-short { color: var(--warn); }
+/* 이 PC의 실제 속도 (Diagnostics.tsx) */
+.diag-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.diag-table th, .diag-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+.diag-table .r { text-align: right; }
+.diag-table tr.s-over td { color: var(--warn); }
+.diag-table tr.s-ok td:last-child { color: var(--good, var(--up, inherit)); }
+.diag-slow { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.diag-slow li { display: flex; gap: 10px; justify-content: space-between; }
+.diag-pages { display: flex; flex-wrap: wrap; gap: 6px; }

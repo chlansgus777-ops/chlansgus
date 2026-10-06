@@ -4,6 +4,7 @@ import { api } from "../api";
 import { QuoteFeedStatus } from "../components/LivePrice";
 import { TossCard, type TossView } from "../components/TossConnect";
 import { Card, Disclosure, Err, Loading, Tabs } from "../components/ui";
+import { DiagnosticsCard } from "../components/Diagnostics";
 import { clientLatency, useQuoteStatus } from "../quotes";
 import Health from "./Health";
 import { useApi } from "../components/useApi";
@@ -67,7 +68,7 @@ export function SetupCard({ configured, mode, onSaved }: { configured: Record<st
 interface S { mode: string; keys_configured: Record<string, boolean>; weights: Record<string, number>; decision: Record<string, number>; entry: Record<string, number>; scanner: Record<string, unknown>; calibration: Record<string, number>; sector_models: { id: string; name: string; rationale: string; primary_multiple: string; fundamental: { metric: string; label: string; weight: number; bad: number; good: number }[] }[]; note: string;
   scheduler?: { enabled: boolean; interval_minutes: number } }
 
-type Tab = "data" | "quotes" | "auto" | "phone" | "status";
+type Tab = "data" | "quotes" | "auto" | "phone" | "status" | "diag";
 
 /** Saves a few non-secret values through the same setup endpoint (restart applies them). */
 function useSave(onSaved: () => void) {
@@ -132,7 +133,7 @@ export default function Settings() {
   const s = useApi<S>("/settings");
   const [params, setParams] = useSearchParams();
   const t = params.get("tab");
-  const tab: Tab = t === "model" ? "status" : t === "quotes" || t === "auto" || t === "status" || t === "phone" ? t : "data";
+  const tab: Tab = t === "model" ? "status" : t === "quotes" || t === "auto" || t === "status" || t === "phone" || t === "diag" ? t : "data";
   if (s.state === "loading") return <Loading what="설정" />;
   if (!s.data) return <Err error={s.error} retry={s.reload} />;
   const d = s.data;
@@ -142,7 +143,7 @@ export default function Settings() {
       <div className="page-head enter"><div><h1>설정</h1><div className="t-sub">데이터 연결, 실시간 시세, 자동 갱신, 연결 상태를 한곳에서 봅니다. 저장한 키는 다시 표시하지 않습니다.</div></div></div>
       <div className="row spread">
         <Tabs<Tab> label="설정 항목" value={tab} onChange={(v) => setParams(v === "data" ? {} : { tab: v }, { replace: true })}
-              items={[["data", "데이터 연결"], ["quotes", "실시간 시세"], ["auto", "자동 갱신"], ["phone", "폰 연결"], ["status", "연결 상태·데이터 준비"]]} />
+              items={[["data", "데이터 연결"], ["quotes", "실시간 시세"], ["auto", "자동 갱신"], ["phone", "폰 연결"], ["status", "연결 상태·데이터 준비"], ["diag", "진단"]]} />
       </div>
       {tab === "data" && (
         <>
@@ -152,6 +153,7 @@ export default function Settings() {
         </>
       )}
       {tab === "quotes" && <Quotes />}
+      {tab === "diag" && <DiagnosticsCard />}
       {tab === "phone" && <PhoneSettings />}
       {tab === "auto" && <AutoRefresh d={d} onSaved={s.reload} />}
       {tab === "status" && (

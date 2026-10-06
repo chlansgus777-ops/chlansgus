@@ -3,6 +3,7 @@ import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom"
 import { Loading, ModeBanner, StatePanel } from "./components/ui";
 import { QuickSearch } from "./components/QuickSearch";
 import { PhoneGate } from "./components/Phone";
+import { VisitCounter } from "./components/Diagnostics";
 import { StatusBar, StatusProvider, useStatus } from "./components/status";
 import { BrandMark, IFlag, IHelp, IHome, IMarket, IPerf, IPortfolio, ISettings, IStocks } from "./components/icons";
 import type { SystemInfo } from "./types";
@@ -84,6 +85,7 @@ function Shell() {
       <div className="main-col">
         {sys.data && sys.data.mode === "MOCK" && <ModeBanner mode="MOCK" />}
         <StatusBar />
+        <VisitCounter />
         {sys.error && (
           <div style={{ padding: "14px 34px 0" }}>
             <StatePanel kind="disconnected" what={`백엔드 연결 실패: ${sys.error}`} actions={<button onClick={st.refresh}>다시 시도</button>} />

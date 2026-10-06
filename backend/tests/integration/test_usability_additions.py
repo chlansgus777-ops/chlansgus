@@ -109,7 +109,10 @@ def test_scan_status_reports_coverage_and_cost():
     st = svc.scan_status()
     assert st["state"]["status"] == "COMPLETE" and st["state"]["saved"] == st["state"]["total"]
     c = st["coverage"]
-    assert c["universe"] == 80 and c["excluded"] + c["deep_analysed"] == 80 and c["analysed"] <= c["deep_analysed"]
+    # every name is accounted for: excluded by a filter, ranked below the fully analysed pool, or fully analysed
+    # (the pool became smaller than this 80-name market on 2026-10-07, so ranked_out is no longer always 0)
+    assert c["universe"] == 80 and c["excluded"] + c["ranked_out"] + c["deep_analysed"] == 80 and c["analysed"] <= c["deep_analysed"]
+    assert c["deep_analysed"] <= 40 and c["analysed"] <= 20
     assert 0 <= (c["data_insufficient_rate"] or 0) <= 1 and "llm" in c
     assert not any(k.startswith("주가 ") and k != "주가 기준 미달" for k in c["excluded_by_reason"])  # one reason, not one per price
 

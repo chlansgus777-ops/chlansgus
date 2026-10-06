@@ -661,6 +661,13 @@ def strategies(req: Request) -> dict[str, Any]:
     return svc(req).strategy_signals()
 
 
+@router.get("/diagnostics")
+def diagnostics(req: Request) -> dict[str, Any]:
+    """이 PC의 실제 속도: screen request times, background job times, CPU and memory measured since the app started,
+    against the agreed targets. Route templates only — no tickers, amounts or account data."""
+    return svc(req).diagnostics.snapshot()
+
+
 @router.get("/routine")
 def routine(req: Request) -> dict[str, Any]:
     """이번 달 할 일: what to sell and buy this month by the momentum book, against the account. No orders."""

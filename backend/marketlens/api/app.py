@@ -19,6 +19,7 @@ import hmac
 import logging
 import os
 import re
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable
@@ -92,6 +93,9 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
             sched = BackgroundScheduler(app.state.service)
             sched.start()
         app.state.ready = True
+        diag = getattr(app.state.service, "diagnostics", None)
+        if diag is not None:
+            diag.start_sampler()  # the CPU every 30 s for the 진단 screen (one cheap call)
         start_quotes = getattr(app.state.service, "start_quotes", None)
         if start_quotes is not None:
             start_quotes()  # the app-wide quote stream: one connection, independent of analysis
@@ -101,6 +105,8 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
             threading.Thread(target=_warm, args=(app.state.service,), daemon=True, name="readiness-warmup").start()
         yield
         app.state.ready = False
+        if diag is not None:
+            diag.stop()
         if getattr(app.state, "phone", None) is not None and app.state.phone.server is not None:
             app.state.phone.server.stop()
         stop_quotes = getattr(app.state.service, "stop_quotes", None)
@@ -190,7 +196,20 @@ def create_app(settings: Settings | None = None, service: MarketLensService | No
             if api_token and path not in ("/api/health/live", "/api/health/ready"):
                 if not hmac.compare_digest(request.headers.get(TOKEN_HEADER, ""), api_token):
                     return JSONResponse({"detail": "API 토큰이 없거나 올바르지 않습니다."}, status_code=401)
-        resp = await call_next(request)
+        diag = getattr(app.state.service, "diagnostics", None) if path.startswith("/api/") and not path.endswith("/stream") else None
+        if diag is not None:
+            diag.request_started()
+            t0 = time.perf_counter()
+            status = 500
+            try:
+                resp = await call_next(request)
+                status = resp.status_code
+            finally:
+                route = request.scope.get("route")
+                # the route's template only ("/api/stocks/{ticker}"): never a ticker, a query or a body
+                diag.request(f"{request.method} {getattr(route, 'path', '(없는 경로)')}", time.perf_counter() - t0, status)
+        else:
+            resp = await call_next(request)
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers.setdefault("X-Frame-Options", "DENY")
         resp.headers.setdefault("Referrer-Policy", "no-referrer")

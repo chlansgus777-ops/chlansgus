@@ -54,6 +54,7 @@ class Refresher:
         self._generation: dict[str, int] = {}
         self.runs = 0  # background computations started (tests / diagnostics)
         self._closed = False
+        self.on_done: Callable[[str, float, bool], None] | None = None  # (key, seconds, ok): the app's diagnostics
 
     def get(self, key: str, fn: Callable[[], Any], max_age: float, wait: float = 0.0, retry_after: float = 60.0) -> Snapshot:
         """The value for ``key``; starts one background ``fn()`` when it is missing or older than ``max_age``.
@@ -116,11 +117,17 @@ class Refresher:
         return fut
 
     def _run(self, key: str, fn: Callable[[], Any], gen: int) -> None:
+        t0 = time.perf_counter()
         try:
             value, err = fn(), None
         except Exception as ex:  # noqa: BLE001 - a failed refresh keeps the last good value
             log.warning("background refresh %s failed: %s", key, type(ex).__name__)
             value, err = None, f"{type(ex).__name__}: {ex}"[:300]
+        if self.on_done is not None:
+            try:
+                self.on_done(key, time.perf_counter() - t0, err is None)
+            except Exception:  # noqa: BLE001 - diagnostics never break a refresh
+                log.debug("diagnostics hook failed", exc_info=True)
         with self._lock:
             if self._generation.get(key, 0) == gen:
                 e = self._entries.setdefault(key, _Entry())
