@@ -32,21 +32,46 @@ export const IShield = (p: P) => <S {...p}><path d="M12 3.5 5 6.5v5.2c0 4 2.9 7.
 export const IFlag = (p: P) => <S {...p}><path d="M5 20.5V4.5M5 5h11l-2 4 2 4H5" /></S>;
 export const ILayers = (p: P) => <S {...p}><path d="m12 4 8.5 4.5L12 13 3.5 8.5z" /><path d="m3.5 12.5 8.5 4.5 8.5-4.5" /></S>;
 
-/** Brand mark: a lens ring with a price trace inside. */
+/** Brand mark: "Lenny", a round lens buddy — the lens ring with a small face and a price-trace smile. */
 export function BrandMark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
       <defs>
         <linearGradient id="ml-ring" x1="4" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#c9bfff" /><stop offset="1" stopColor="#6a5bdc" />
+          <stop stopColor="#d9d0ff" /><stop offset="0.55" stopColor="#a494f8" /><stop offset="1" stopColor="#ff9ecf" />
         </linearGradient>
         <radialGradient id="ml-glow" cx="16" cy="16" r="14" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#6a5bdc" stopOpacity="0.45" /><stop offset="1" stopColor="#6a5bdc" stopOpacity="0" />
+          <stop stopColor="#a494f8" stopOpacity="0.4" /><stop offset="1" stopColor="#a494f8" stopOpacity="0" />
         </radialGradient>
       </defs>
       <circle cx="16" cy="16" r="14" fill="url(#ml-glow)" />
-      <circle cx="16" cy="16" r="11" fill="#0d1220" stroke="url(#ml-ring)" strokeWidth="2.2" />
-      <path d="M9.5 18.5 13 15l2.6 2.4 3.4-5 3.5 3.4" fill="none" stroke="#5fe0bd" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M23.4 23.4 27 27" stroke="url(#ml-ring)" strokeWidth="3" strokeLinecap="round" />
+      <circle cx="15" cy="15" r="10.5" fill="#141a2e" stroke="url(#ml-ring)" strokeWidth="2.2" />
+      <circle cx="11.6" cy="13.4" r="1.45" fill="#f3f2fa" />
+      <circle cx="18.4" cy="13.4" r="1.45" fill="#f3f2fa" />
+      <circle cx="9.6" cy="17" r="1.3" fill="#ff9ecf" opacity="0.55" />
+      <circle cx="20.4" cy="17" r="1.3" fill="#ff9ecf" opacity="0.55" />
+      <path d="M11.8 17.6c1 1.3 2.1 1.9 3.2 1.9s2.2-.6 3.2-1.9" fill="none" stroke="#5fe0bd" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** The same buddy for empty and quiet states: calm (nothing to show), sleepy (closed / waiting), happy (all clear). */
+export function Buddy({ mood = "calm", className }: { mood?: "calm" | "sleepy" | "happy"; className?: string }) {
+  const eyes = mood === "sleepy"
+    ? <><path d="M17 27.5q2.4 1.6 4.8 0" /><path d="M30.2 27.5q2.4 1.6 4.8 0" /></>
+    : <><circle cx="19.4" cy="27" r="2.5" fill="#f3f2fa" stroke="none" /><circle cx="32.6" cy="27" r="2.5" fill="#f3f2fa" stroke="none" /></>;
+  const mouth = mood === "happy" ? "M21.5 33.5q4.5 4.6 9 0" : mood === "sleepy" ? "M24.4 35h3.2" : "M22.6 34.2q3.4 2.4 6.8 0";
+  return (
+    <svg className={className ?? "buddy"} viewBox="0 0 52 52" fill="none" stroke="#f3f2fa" strokeWidth="2" strokeLinecap="round" aria-hidden="true" focusable="false">
+      <path d="M38.5 38.5 46 46" stroke="#a494f8" strokeWidth="5" />
+      <circle cx="26" cy="27" r="17" fill="#161d33" stroke="#a494f8" strokeWidth="3" />
+      <path d="M17.5 17.5q3-3.4 7.5-4" stroke="#d9d0ff" strokeWidth="2.2" opacity="0.6" />
+      {eyes}
+      <circle cx="15.6" cy="32.2" r="2.4" fill="#ff9ecf" stroke="none" opacity="0.5" />
+      <circle cx="36.4" cy="32.2" r="2.4" fill="#ff9ecf" stroke="none" opacity="0.5" />
+      <path d={mouth} stroke="#5fe0bd" />
+      {mood === "sleepy" && <path d="M39 8.5h5l-5 6h5" stroke="#a494f8" strokeWidth="1.8" strokeLinejoin="round" />}
     </svg>
   );
 }

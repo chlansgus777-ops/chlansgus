@@ -1371,3 +1371,90 @@ tr.detail-row > td { padding: 4px 12px 18px; background: var(--s2); }
 .st-fwd { display: grid; gap: 4px; margin: 8px 0; font-size: 13px; }
 .st-fwd-table { width: 100%; font-size: 12.5px; }
 @media (max-width: 640px) { .st-sig-body { grid-template-columns: minmax(0, 1fr); } }
+
+/* ------------------------------------------------------------------ soft & cute layer (owner 2026-10-06: "트렌디하고
+   귀여운 느낌 살짝") — rounder shapes, a candy-pink partner for the violet, the lens buddy in quiet states and small,
+   springy motion. The colour rules above still hold: action and price colours are unchanged, state keeps its word. */
+:root {
+  --candy: #ff9ecf;
+  --candy-soft: rgba(255, 158, 207, 0.12);
+  --r-sm: 12px; --r-md: 16px; --r-lg: 24px; --r-xl: 30px;
+  --radius: 24px; --radius-sm: 12px;
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+body {
+  background:
+    radial-gradient(1100px 520px at 12% -12%, rgba(106, 91, 220, 0.14), transparent 62%),
+    radial-gradient(800px 420px at 100% -10%, rgba(255, 158, 207, 0.07), transparent 60%),
+    radial-gradient(700px 380px at 60% 110%, rgba(95, 224, 189, 0.04), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+::selection { background: rgba(255, 158, 207, 0.32); }
+::-webkit-scrollbar-thumb { background: #2f2a52; }
+::-webkit-scrollbar-thumb:hover { background: #4a3f7a; }
+
+/* the brand: the buddy bobs once on load; the name gets the violet → pink sheen */
+.brand .mark { width: 34px; height: 34px; animation: ml-hello 900ms var(--spring) 200ms both; }
+.brand > div { background: linear-gradient(92deg, #f3f2fa 30%, #d9d0ff 65%, var(--candy)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.brand small { -webkit-text-fill-color: var(--muted); }
+@keyframes ml-hello { 0% { transform: scale(0.6) rotate(-14deg); opacity: 0; } 60% { transform: scale(1.08) rotate(4deg); opacity: 1; } 100% { transform: none; } }
+
+/* navigation: soft pills */
+.nav a { border-radius: 14px; transition: background var(--t-med) var(--ease), color var(--t-med) var(--ease), transform var(--t-fast) var(--ease); }
+.nav a:hover { transform: translateX(2px); }
+.nav a.active { background: linear-gradient(90deg, rgba(164, 148, 248, 0.2), rgba(255, 158, 207, 0.07)); box-shadow: 0 0 0 1px rgba(164, 148, 248, 0.18) inset; }
+.nav a.active::before { background: linear-gradient(180deg, var(--accent), var(--candy)); box-shadow: 0 0 14px rgba(255, 158, 207, 0.55); }
+
+/* buttons: pill shape and a little squish */
+button, .btn { border-radius: 999px; transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), transform var(--t-fast) var(--spring), box-shadow var(--t-med) var(--ease); }
+button.sm, .btn.sm, button.lg { border-radius: 999px; }
+button.icon { border-radius: 50%; }
+button:active:not(:disabled), .btn:active { transform: scale(0.96); }
+button.primary, .btn.primary {
+  background: linear-gradient(135deg, #8b7bf2 0%, var(--accent-2) 55%, #b06fd8 100%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.22) inset, 0 10px 24px -12px rgba(176, 111, 216, 0.95);
+}
+button.primary:hover:not(:disabled), .btn.primary:hover { background: linear-gradient(135deg, #998af6 0%, #7767e6 55%, #bd7be3 100%); transform: translateY(-1px); }
+
+/* cards: rounder, a hairline of light on top, a gentle lift where the card is a link */
+.card, .panel { border-radius: var(--r-lg); }
+.card::after, .panel::after {
+  content: ""; position: absolute; inset: 0 18% auto; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(217, 208, 255, 0.22), transparent);
+}
+a.card, .card.link, .live-signal { transition: transform var(--t-med) var(--spring), border-color var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease); }
+a.card:hover, .card.link:hover, .live-signal:hover { transform: translateY(-2px); box-shadow: var(--shadow-2), 0 0 0 1px rgba(164, 148, 248, 0.16); }
+.card-head .icon { width: 30px; height: 30px; border-radius: 11px; justify-content: center; align-items: center; background: linear-gradient(135deg, var(--accent-soft), var(--candy-soft)); }
+
+/* badges and chips: full pills */
+.badge, .chip, .pill, .tag { border-radius: 999px; }
+.badge.lg { border-radius: 999px; }
+
+/* page titles: a small twinkling sparkle */
+.page-title h1::after, main > h1::after, .page-head h1::after {
+  /* a drawn star, not a glyph: generated text would join the heading's accessible name ("오늘 ✦") */
+  content: ""; display: inline-block; width: 0.5em; height: 0.5em; margin-left: 9px; vertical-align: 0.6em;
+  background: linear-gradient(135deg, #ffd1e8, var(--candy));
+  clip-path: polygon(50% 0, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0 50%, 39% 39%);
+  animation: ml-twinkle 2.8s ease-in-out infinite;
+}
+@keyframes ml-twinkle { 0%, 100% { opacity: 0.35; transform: scale(0.85) rotate(0deg); } 50% { opacity: 1; transform: scale(1.1) rotate(20deg); } }
+
+/* empty states: the buddy instead of a bare dashed box */
+.empty { display: grid; justify-items: center; gap: 4px; border-style: solid; border-color: rgba(164, 148, 248, 0.14);
+  background: radial-gradient(240px 120px at 50% 0%, rgba(164, 148, 248, 0.08), transparent 70%), rgba(255, 255, 255, 0.012); }
+.empty .buddy { width: 46px; height: 46px; margin-bottom: 4px; animation: ml-bob 3.2s ease-in-out infinite; }
+@keyframes ml-bob { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-4px) rotate(3deg); } }
+
+/* state boxes: rounder icon bubbles */
+.state .ico { border-radius: 16px; background: linear-gradient(135deg, var(--info-soft), var(--candy-soft)); }
+
+/* inputs: rounder, a soft focus halo */
+input:not([type="checkbox"]):not([type="radio"]), select, textarea { border-radius: 12px; }
+input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(164, 148, 248, 0.22); }
+
+@media (prefers-reduced-motion: reduce) {
+  .brand .mark, .empty .buddy, .page-title h1::after, main > h1::after, .page-head h1::after { animation: none; }
+  button:active:not(:disabled), .btn:active, a.card:hover, .card.link:hover, .live-signal:hover, .nav a:hover { transform: none; }
+}

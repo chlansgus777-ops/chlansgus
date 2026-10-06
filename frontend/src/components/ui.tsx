@@ -3,7 +3,7 @@ import { actionClass, ago, price, stamp } from "../format";
 import { DIR_KO, GLOSSARY, tip } from "../glossary";
 import { ACTION_INFO, BULLISH, DATA_TYPE_KO, QUALITY_INFO, STANCE_KO, STATUS_INFO, VETO_KO, actionLabel } from "../i18n";
 import type { Evidence, FreshnessCheck } from "../types";
-import { IAlert, IInfo } from "./icons";
+import { Buddy, IAlert, IInfo } from "./icons";
 import { BUY_SCORE, SMALL_SCORE } from "../thresholds";
 
 export type Tone = "ok" | "warn" | "danger" | "info" | "neutral";
@@ -231,8 +231,8 @@ export function StaleData({ error, at, retry, nowMs }: { error: string | null; a
   );
 }
 
-export function Empty({ children, hint }: { children: ReactNode; hint?: string }) {
-  return <div className="empty" data-testid="empty">{children}{hint && <div className="hint">{hint}</div>}</div>;
+export function Empty({ children, hint, mood = "calm" }: { children: ReactNode; hint?: string; mood?: "calm" | "sleepy" | "happy" }) {
+  return <div className="empty" data-testid="empty"><Buddy mood={mood} />{children}{hint && <div className="hint">{hint}</div>}</div>;
 }
 
 export type StateKind = "collecting" | "analyzing" | "not_scanned" | "no_candidates" | "insufficient" | "stale" | "out_of_range" | "provider_failure" | "ai_unavailable" | "disconnected";
