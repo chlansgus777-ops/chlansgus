@@ -110,3 +110,16 @@ def test_a_large_keeps_only_signals_inside_the_days_top_500_by_dollar_volume():
     cands, _ = P.s20_candidates(big | {"SMALL": small}, spy, days, up)
     assert all(k != "SMALL" for lst in cands["AL"].values() for _p, k in lst)
     assert any(k == "SMALL" for lst in P.candidates("A", {"SMALL": small}, up).values() for _p, k in lst)
+
+
+def test_the_committed_s20_summary_lists_every_variant_and_each_verdict_follows_its_checks():
+    import json
+
+    from marketlens.config import CONFIG_DIR
+
+    d = json.loads((CONFIG_DIR / "strategy_results_s20.json").read_text(encoding="utf-8"))
+    assert d["source"]["prereg"] == "PREREGISTRATION §20"
+    assert set(d["variants"]) == {v.id for v in P.S20_VARIANTS}  # failures included
+    for k, v in d["variants"].items():
+        n = 5 if k == "T" else 6
+        assert len(v["verdict"]["checks"]) == n and v["verdict"]["passed"] == all(v["verdict"]["checks"].values()), k
