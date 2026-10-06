@@ -207,3 +207,18 @@ def test_portfolio_snapshot_uses_one_valuation_session():
         assert body["nav"] == pytest.approx(body["cash"] + body["invested_value"], abs=0.01)
         assert abs(sum(h["weight"] for h in body["holdings"]) + body["cash"] / body["nav"] - 1) < 1e-3
         assert body["hhi"] > 0 and body["beta"] is not None
+
+
+def test_strategy_routes_carry_the_committed_verdict(mock_svc):
+    app = create_app(mock_svc.settings, service=mock_svc, run_migrations=False)
+    with TestClient(app, headers={"X-MarketLens-Client": "test"}) as c:
+        r = c.get("/api/strategies")
+        assert r.status_code == 200
+        body = r.json()
+        rows = body["scan"]["strategies"] if body.get("scan") else body["strategies"]  # computed, or the status while it computes
+        st = {x["id"]: x for x in rows}
+        for sid in ("A", "C"):
+            assert st[sid]["status_ko"] == "미채택" and st[sid]["backtest"]["trades"] > 0  # config/strategy_results.json: §19
+        assert c.get("/api/strategies/forward").status_code == 200
+        t = c.get("/api/stocks/AAPL/strategies")
+        assert t.status_code == 200 and t.json()["ticker"] == "AAPL"

@@ -97,3 +97,16 @@ def test_the_status_follows_the_committed_backtest_verdict():
     st = strategy_status({"variants": {"A": {"verdict": {"passed": False, "checks": {}}, "full": {"trades": {}}}, "C": {"verdict": {"passed": True, "checks": {}}, "full": {"trades": {}}}}})
     assert st["A"]["status_ko"] == "미채택" and st["C"]["status_ko"] == "백테스트 통과 · 전진 모의운영 중"
     assert strategy_status(None)["A"]["status_ko"] == "검증 중"
+
+
+def test_the_committed_result_file_is_whole_and_each_verdict_follows_its_six_checks():
+    from marketlens.application.strategy_signals import results_path
+
+    d = json.loads(results_path().read_text(encoding="utf-8"))
+    assert d["source"]["prereg"] == "PREREGISTRATION §19" and d["source"]["strategies"] == {"A": "A-1.0", "C": "C-1.0"}
+    assert set(d["variants"]) == {"A", "C", "A+C", "A+stop", "C+stop", "A+fund", "C+fund"}  # every registered variant, failures included
+    for k, v in d["variants"].items():
+        assert len(v["verdict"]["checks"]) == 6 and v["verdict"]["passed"] == all(v["verdict"]["checks"].values()), k
+    st = strategy_status(d)
+    for sid in ("A", "C"):
+        assert st[sid]["status"] == ("FORWARD" if d["variants"][sid]["verdict"]["passed"] else "NOT_ADOPTED")
