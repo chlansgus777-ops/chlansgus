@@ -28,6 +28,10 @@ from marketlens.domain.market import Bar
 from marketlens.domain.market_calendar import is_trading_day, last_completed_session, next_trading_day
 
 CHOSEN_ON = date(2026, 10, 6)  # the owner's choice: the forward record starts at the first month-end after it
+# A month-end is ranked only when at least this many names have a year of bars there: the universe is the top 500 of
+# the market, so a store still filling its history must not rank the few names it has (owner report 2026-10-06: the
+# list showed the 08-31 ranking with one name while most names were a few sessions short of a year).
+MIN_NAMES = S.LARGE_CAP_N
 HISTORY_DAYS = 420  # calendar days of bars read: 252 sessions of momentum + the 20-session dollar volume
 SPEC = S.StrategySpec(
     "MN", "대형주 모멘텀", "M-NF-1.0",
@@ -58,8 +62,20 @@ def prepare(bars: Mapping[str, list[Bar]], universe: Mapping[str, str], through:
     return out
 
 
-def rank_at(prep: Mapping[str, tuple[dict[date, int], np.ndarray, np.ndarray, np.ndarray]], d: date) -> tuple[list[tuple[str, float]], set[str]] | None:
-    """The month-end ranking at day d: (top 20 with their 12-1 return, the top-40 keep set); None without a year of bars."""
+def ready_names(prep: Mapping[str, tuple[dict[date, int], np.ndarray, np.ndarray, np.ndarray]], d: date) -> int:
+    """How many tradable names have their 12-1 return at day d (a year of bars there)."""
+    n = 0
+    for idx, trad, _dv, m in prep.values():
+        i = idx.get(d)
+        if i is not None and trad[i] and m[i] == m[i]:
+            n += 1
+    return n
+
+
+def rank_at(prep: Mapping[str, tuple[dict[date, int], np.ndarray, np.ndarray, np.ndarray]], d: date,
+            min_names: int = MIN_NAMES) -> tuple[list[tuple[str, float]], set[str]] | None:
+    """The month-end ranking at day d: (top 20 with their 12-1 return, the top-40 keep set); None while fewer than
+    ``min_names`` names have a year of bars there."""
     dv: dict[str, float] = {}
     mom: dict[str, float] = {}
     for t, (idx, trad, dv20, m) in prep.items():
@@ -69,7 +85,7 @@ def rank_at(prep: Mapping[str, tuple[dict[date, int], np.ndarray, np.ndarray, np
         dv[t] = float(dv20[i])
         if m[i] == m[i]:
             mom[t] = float(m[i])
-    if not mom:
+    if not mom or len(mom) < min_names:
         return None
     thr = S.cap_threshold(np.array(list(dv.values())))
     ranked = S.momentum_ranks({t: x for t, x in mom.items() if dv[t] >= thr})
@@ -97,7 +113,8 @@ def rebalance(held: list[str], top: list[tuple[str, float]], keep: set[str], sec
 
 class MomentumBook:
     def __init__(self, bars_all: Callable[[date, date], dict[str, list[Bar]]], now: Callable[[], datetime], data_dir: Path,
-                 universe: Callable[[], dict[str, str]], results_path: Path | None = None) -> None:
+                 universe: Callable[[], dict[str, str]], results_path: Path | None = None, min_names: int = MIN_NAMES) -> None:
+        self._min_names = min_names
         self._bars_all = bars_all
         self._now = now
         self._universe = universe  # ticker → sector of the app's stocks (ETFs excluded)
@@ -131,7 +148,7 @@ class MomentumBook:
         momentum: dict[str, float] = {}
         prep = prepare(bars, sector, session)
         for d in ends:
-            r = rank_at(prep, d)
+            r = rank_at(prep, d, self._min_names)
             if r is None:
                 continue
             top, keep = r
@@ -146,10 +163,14 @@ class MomentumBook:
                 "validation": self.validation(), "session": session.isoformat(), "computed_at": now.isoformat(),
                 "next_rebalance": self._next_end(session).isoformat(), "next_execute": next_trading_day(self._next_end(session)).isoformat(),
                 "forward": self.forward(bars, sector, session)}
-        if last is None:
-            n = max((len([b for b in bs if b.day <= session]) for t, bs in bars.items() if t in sector), default=0)
-            return base | {"state": "HELD", "reasons": [f"월말 순위에 일봉 {S.MOM_LOOKBACK + 1}거래일 이상이 필요합니다 — 가장 긴 종목이 {n}거래일"],
-                           "holdings": [], "bought": [], "sold": []}
+        latest = ends[-1] if ends else None
+        if last is None or latest is None or last["day"] != latest:
+            # never show an older month as the current list: the latest month-end is the only one that is current
+            n = ready_names(prep, latest) if latest is not None else 0
+            when = latest.isoformat() if latest is not None else "최근 월말"
+            return base | {"state": "HELD", "holdings": [], "bought": [], "sold": [], "latest_month_end": when, "ready_names": n,
+                           "reasons": [f"{when} 순위를 낼 자료가 아직 부족합니다 — 1년({S.MOM_LOOKBACK + 1}거래일) 일봉을 가진 종목 {n}개, {self._min_names}개 이상 필요",
+                                       "앱이 과거 일봉을 더 받으면(자동 동기화, 하루 몇 차례) 저절로 계산합니다."]}
         d = last["day"]
         rank = {t: k + 1 for k, (t, _m) in enumerate(last["top"])}
         rows = [{"ticker": t, "sector": sector.get(t, "Unknown"), "rank": rank.get(t), "momentum": momentum.get(t), "since": since.get(t),

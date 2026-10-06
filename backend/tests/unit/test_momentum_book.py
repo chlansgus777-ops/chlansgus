@@ -39,7 +39,7 @@ def test_month_end_follows_the_market_calendar():
 def test_the_ranking_is_the_backtests_top_20_and_the_book_keeps_5_per_sector():
     bars, sector, days = _world(date(2026, 9, 30))
     prep = prepare(bars, sector, days[-1])
-    top, keep = rank_at(prep, days[-1])
+    top, keep = rank_at(prep, days[-1], min_names=30)  # a 30-name test market (the app needs 500)
     direct = sorted(sector, key=lambda t: -S.momentum(np.array([b.close for b in bars[t]]))[-1])
     assert [t for t, _m in top] == direct[:20] and keep == set(direct[:40])
     held, bought, sold = rebalance([], top, keep, sector)
@@ -52,7 +52,7 @@ def test_the_ranking_is_the_backtests_top_20_and_the_book_keeps_5_per_sector():
 def test_the_book_shows_holdings_and_records_nothing_before_the_choice(tmp_path):
     bars, sector, _days = _world(date(2026, 10, 5))
     now = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
-    mb = MomentumBook(lambda a, b: {t: [x for x in bs if a <= x.day <= b] for t, bs in bars.items()}, lambda: now, tmp_path, lambda: sector)
+    mb = MomentumBook(lambda a, b: {t: [x for x in bs if a <= x.day <= b] for t, bs in bars.items()}, lambda: now, tmp_path, lambda: sector, min_names=30)
     r = mb.book()
     assert r["state"] == "READY" and r["rebalance_day"] == "2026-09-30" and r["execute_day"] == "2026-10-01"
     assert len(r["holdings"]) == 15 and r["validation"]["status"] == "OWNER" and r["next_rebalance"] == "2026-10-30"
@@ -63,7 +63,7 @@ def test_after_the_first_month_end_the_ranking_is_recorded_once_and_paper_filled
     bars, sector, _days = _world(date(2026, 11, 6))
     now = datetime(2026, 11, 7, 12, 0, tzinfo=timezone.utc)
     src = lambda a, b: {t: [x for x in bs if a <= x.day <= b] for t, bs in bars.items()}  # noqa: E731
-    mb = MomentumBook(src, lambda: now, tmp_path, lambda: sector)
+    mb = MomentumBook(src, lambda: now, tmp_path, lambda: sector, min_names=30)
     r = mb.book()
     mb.book()
     lines = (tmp_path / "momentum_forward.jsonl").read_text().splitlines()
@@ -71,3 +71,25 @@ def test_after_the_first_month_end_the_ranking_is_recorded_once_and_paper_filled
     f = r["forward"]
     assert f["started"] == "2026-10-30" and len(f["open"]) == 15 and 0.7 < f["invested"] <= 0.76  # 15 × 5 %, after costs
     assert "실거래" in f["note"]
+
+
+def test_a_market_without_enough_history_at_the_latest_month_end_is_held_never_shown_from_an_older_month(tmp_path):
+    """Owner report 2026-10-06: the screen showed the 08-31 ranking with one name. Most names were a few sessions short
+    of a year at 09-30, and one name with a longer history was ranked alone at 08-31."""
+    bars, sector, days = _world(date(2026, 10, 5))
+    cut = date(2026, 9, 30)
+    short = [d for d in days if d <= cut][-252:][0]  # 252 bars up to 09-30: one short of a 12-1 return there
+    first, *rest = list(sector)
+    for t in rest:
+        bars[t] = [b for b in bars[t] if b.day >= short]
+    bars[first] = [b for b in bars[first] if b.day <= date(2026, 9, 1)]  # the one long history stopped trading in September
+    now = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
+    src = lambda a, b: {t: [x for x in bs if a <= x.day <= b] for t, bs in bars.items()}  # noqa: E731
+    r = MomentumBook(src, lambda: now, tmp_path, lambda: sector, min_names=2).book()
+    assert r["state"] == "HELD" and not r["holdings"] and r["latest_month_end"] == "2026-09-30" and r["ready_names"] == 0
+    assert "09-30" in r["reasons"][0] and "부족" in r["reasons"][0]
+    # the app's own bar: fewer than 500 names with a year of bars → held as well
+    full, sector2, _d = _world(date(2026, 10, 5))
+    r2 = MomentumBook(lambda a, b: {t: [x for x in bs if a <= x.day <= b] for t, bs in full.items()}, lambda: now, tmp_path, lambda: sector2).book()
+    assert r2["state"] == "HELD" and r2["ready_names"] == 30 and "500개 이상" in r2["reasons"][0]
+    assert not (tmp_path / "momentum_forward.jsonl").exists()
