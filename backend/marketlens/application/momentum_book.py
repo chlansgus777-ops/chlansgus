@@ -50,8 +50,7 @@ SPEC = S.StrategySpec(
     max_hold=None, needs_spy=False)
 RISK_KO = ("백테스트(2017~2026)에서 최대 낙폭 −61%, 변동성 SPY의 2.4배였습니다. 몇 달 연속 크게 잃을 수 있습니다.",
            "이익의 대부분이 소수 종목(CVNA·APP·RKLB·ASTS·SMCI)에서 나왔습니다. 그런 종목이 다시 나온다는 보장은 없습니다.",
-           "2017~2023년만 보면 연 8.4%로 SPY(13.1%)보다 낮았습니다. 최근 3년의 급등주 장세에 크게 기댄 결과입니다.",
-           "이 백테스트 수치는 독립 평가(0444a21)에서 지적된 엔진 결함을 고치기 전 값이며 다시 계산 중입니다.")
+           "2017~2023년만 보면 연 8.6%로 SPY(13.1%)보다 낮았습니다. 최근 3년의 급등주 장세에 크게 기댄 결과입니다.")
 Prep = Mapping[str, tuple[dict[date, int], np.ndarray, np.ndarray, np.ndarray, np.ndarray]]
 
 
