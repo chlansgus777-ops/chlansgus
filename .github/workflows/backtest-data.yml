@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions | whymacro | swing | portfolio"
+        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions | whymacro | swing | portfolio | portfolio20"
         required: true
         default: "probe"
       resume_run_id:
@@ -40,7 +40,7 @@ jobs:
       # §19 strategies A-1.0 / C-1.0, daily portfolio (marketlens/backtest/portfolio.py); resume_run_id = the §16 run
       # whose rows.db gives the fundamental filter (point in time: the last weekly analysis before each day)
       - name: Backtest database (portfolio)
-        if: inputs.task == 'portfolio'
+        if: inputs.task == 'portfolio' || inputs.task == 'portfolio20'
         uses: actions/download-artifact@v4
         with:
           name: backtest-db
@@ -64,6 +64,22 @@ jobs:
           echo "cpus: $(nproc) · memory: $(free -m | awk '/Mem:/ {print $2}') MB"
           cd backend && python -m marketlens.backtest.portfolio --db ../backtest.db $ROWS --out ../portfolio.json --trades ../portfolio_trades.csv
           cd .. && python3 -c "import json;d=json.load(open('portfolio.json'));print(json.dumps(d,ensure_ascii=False,separators=(',',':'),default=str))"
+      # §20 candidates (M, M-NF, A-L, T) on the same database and engine; no fundamental rows needed
+      - name: Strategies of PREREGISTRATION §20 (portfolio20)
+        if: inputs.task == 'portfolio20'
+        run: |
+          gunzip -f backtest.db.gz
+          sha256sum -c backtest.db.sha256
+          echo "cpus: $(nproc) · memory: $(free -m | awk '/Mem:/ {print $2}') MB"
+          cd backend && python -m marketlens.backtest.portfolio --set s20 --db ../backtest.db --out ../portfolio20.json --trades ../portfolio20_trades.csv
+          cd .. && python3 -c "import json;d=json.load(open('portfolio20.json'));print(json.dumps(d,ensure_ascii=False,separators=(',',':'),default=str))"
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.task == 'portfolio20'
+        with:
+          name: backtest-portfolio20
+          path: |
+            portfolio20.json
+            portfolio20_trades.csv
       - uses: actions/upload-artifact@v4
         if: always() && inputs.task == 'portfolio'
         with:

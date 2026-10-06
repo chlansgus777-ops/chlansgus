@@ -48,6 +48,8 @@ class Variant:
     id: str
     name: str
     sleeves: tuple[Sleeve, ...]
+    sector_max: int = SECTOR_MAX
+    overlay: bool = False  # §20 T: judged as a risk overlay (its own five checks), not by the six
 
 
 VARIANTS: tuple[Variant, ...] = (
@@ -58,6 +60,14 @@ VARIANTS: tuple[Variant, ...] = (
     Variant("C+stop", "C + 손절(2×ATR)", (Sleeve("C", 10, stop=True),)),
     Variant("A+fund", "A + 재무 필터(≥0.6)", (Sleeve("A", 10, fundamental=True),)),
     Variant("C+fund", "C + 재무 필터(≥0.6)", (Sleeve("C", 10, fundamental=True),)),
+)
+# PREREGISTRATION §20 (strategy ids: AL = A-1.0 inside the large-cap universe, M / MN = momentum with / without the
+# market filter, T = SPY trend)
+S20_VARIANTS: tuple[Variant, ...] = (
+    Variant("M", "대형주 모멘텀(시장 필터)", (Sleeve("M", 20),), sector_max=5),
+    Variant("M-NF", "대형주 모멘텀(필터 없음)", (Sleeve("MN", 20),), sector_max=5),
+    Variant("A-L", "A 눌림목 · 대형주만", (Sleeve("AL", 10),)),
+    Variant("T", "SPY 추세(200일선, 월말)", (Sleeve("T", 1),), sector_max=1, overlay=True),
 )
 
 
@@ -169,6 +179,69 @@ def candidates(strategy: str, secs: dict[str, Sec], up: dict[date, bool]) -> dic
     return out
 
 
+def large_cap_thresholds(secs: dict[str, Sec], cal: Sequence[date]) -> dict[date, float]:
+    """Each session's large-cap bar (domain cap_threshold over the tradable names' 20-session dollar volume)."""
+    cal_ord = np.array([d.toordinal() for d in cal])
+    m = np.full((len(cal), len(secs)), np.nan, dtype=np.float32)
+    for col, s in enumerate(secs.values()):
+        if not s.days:
+            continue
+        so = np.array([d.toordinal() for d in s.days])
+        j = np.searchsorted(cal_ord, so)
+        ok = (j < len(cal)) & (cal_ord[np.minimum(j, len(cal) - 1)] == so) & S.tradable(s.ind)
+        m[j[ok], col] = s.ind["dv20"][ok]
+    return {d: S.cap_threshold(m[r]) for r, d in enumerate(cal)}
+
+
+def s20_candidates(secs: dict[str, Sec], spy: Sec, cal: Sequence[date], up: dict[date, bool]
+                   ) -> tuple[dict[str, dict[date, list[tuple[float, str]]]], Callable[[str, str, date], str | None]]:
+    """§20: AL (A's signals inside the large caps), M / MN (the month-end top 20 by 12-1 momentum), T (SPY above its
+    200-day line at a month-end) — and the cross-sectional exits, decided at a month-end close."""
+    thr = large_cap_thresholds(secs, cal)
+    ends = S.month_ends(list(cal))
+
+    def large(s: Sec, i: int, d: date) -> bool:
+        return bool(S.tradable(s.ind)[i]) and float(s.ind["dv20"][i]) >= thr.get(d, float("inf"))
+
+    al: dict[date, list[tuple[float, str]]] = {}
+    for d, lst in candidates("A", secs, up).items():
+        keep = [(pr, k) for pr, k in lst if large(secs[k], secs[k].index[d], d)]
+        if keep:
+            al[d] = keep
+    mom = {k: S.momentum(s.c) for k, s in secs.items()}
+    trad = {k: S.tradable(s.ind) for k, s in secs.items()}
+    m: dict[date, list[tuple[float, str]]] = {}
+    mn: dict[date, list[tuple[float, str]]] = {}
+    keep40: dict[date, set[str]] = {}
+    for d in sorted(ends):
+        scores: dict[str, float] = {}
+        for k, s in secs.items():
+            i = s.index.get(d)
+            if i is None or not trad[k][i] or not float(s.ind["dv20"][i]) >= thr[d]:
+                continue
+            v = float(mom[k][i])
+            if v == v:
+                scores[k] = v
+        ranked = S.momentum_ranks(scores)
+        top = [(scores[k], k) for k in ranked[: S.MOM_TOP]]
+        mn[d] = top
+        if up.get(d, False):
+            m[d] = top
+        keep40[d] = set(ranked[: S.MOM_KEEP])
+    t = {d: [(1.0, spy.key)] for d in ends if up.get(d, False)}
+
+    def xexit(strategy: str, key: str, d: date) -> str | None:
+        if d not in ends:
+            return None
+        if strategy == "T":
+            return None if up.get(d, False) else "trend"
+        if strategy == "M" and not up.get(d, False):
+            return "trend"
+        return None if key in keep40.get(d, ()) else "rule"
+
+    return {"AL": al, "M": m, "MN": mn, "T": t}, xexit
+
+
 # ---------------------------------------------------------------------- the account
 @dataclass
 class Pos:
@@ -204,7 +277,9 @@ class Trade:
 
 def simulate(variant: Variant, secs: dict[str, Sec], spy: Sec, calendar: Sequence[date], cands: dict[str, dict[date, list[tuple[float, str]]]],
              cost: float = COST, start: date | None = None, end: date | None = None,
-             fund: Callable[[str, date], float | None] | None = None) -> dict[str, Any]:
+             fund: Callable[[str, date], float | None] | None = None,
+             xexit: Callable[[str, str, date], str | None] | None = None) -> dict[str, Any]:
+    slots_total = sum(x.slots for x in variant.sleeves)
     cal = [d for d in calendar if (start is None or d >= start) and (end is None or d <= end)]
     cash = START_CASH
     pos: dict[str, Pos] = {}
@@ -246,14 +321,14 @@ def simulate(variant: Variant, secs: dict[str, Sec], spy: Sec, calendar: Sequenc
             if k in pos or used[j] >= sl.slots or len(pos) >= sum(x.slots for x in variant.sleeves):
                 continue
             s = secs[k]
-            if sectors.get(s.sector, 0) >= SECTOR_MAX:
+            if sectors.get(s.sector, 0) >= variant.sector_max:
                 continue
             i = s.index.get(d)
             if i is None or not s.o[i] > 0:
                 missed += 1
                 continue
             px = float(s.o[i])
-            budget = min(eq_prev * 0.10, cash / (1 + cost))
+            budget = min(eq_prev / slots_total, cash / (1 + cost))
             if budget < 100:  # no money left today
                 break
             qty = budget / px
@@ -295,7 +370,10 @@ def simulate(variant: Variant, secs: dict[str, Sec], spy: Sec, calendar: Sequenc
             last_close[k] = float(s.c[i])
             p.held += 1
             if p.exit_reason is None:
-                why = S.exit_due(p.strategy, s.ind, i, p.held)
+                if p.strategy in ("A", "AL", "C"):
+                    why = S.exit_due("A" if p.strategy == "AL" else p.strategy, s.ind, i, p.held)
+                else:
+                    why = xexit(p.strategy, k, d) if xexit else None
                 if why:
                     p.exit_reason = why
             value += p.qty * last_close[k]
@@ -440,10 +518,32 @@ def verdict(full: dict[str, Any], halves: list[dict[str, Any]], stress: dict[str
     return {"checks": checks, "passed": all(checks.values())}
 
 
+def verdict_overlay(full: dict[str, Any], halves: list[dict[str, Any]], stress: dict[str, Any], spy_tr: dict[str, Any]) -> dict[str, Any]:
+    """§20 T's five conditions (a risk overlay: less loss for about the market's return)."""
+    ok = lambda x: x is not None  # noqa: E731
+    checks = {
+        "sharpe_beats_spy_total_return": bool(ok(full.get("sharpe")) and ok(spy_tr.get("sharpe")) and full["sharpe"] > spy_tr["sharpe"]),
+        "drawdown_at_most_two_thirds_of_spy": bool(ok(full.get("max_drawdown")) and ok(spy_tr.get("max_drawdown"))
+                                                   and abs(full["max_drawdown"]) <= abs(spy_tr["max_drawdown"]) * 2 / 3),
+        "cagr_within_3pp_of_spy": bool(ok(full.get("cagr")) and ok(spy_tr.get("cagr")) and full["cagr"] >= spy_tr["cagr"] - 0.03),
+        "both_halves_positive": all(h.get("cagr") is not None and h["cagr"] > 0 for h in halves),
+        "stress_cagr_positive": bool(ok(stress.get("cagr")) and stress["cagr"] > 0),
+    }
+    return {"checks": checks, "passed": all(checks.values())}
+
+
 def run_all(secs: dict[str, Sec], spy: Sec, cal: list[date], fund: Callable[[str, date], float | None] | None,
             variants: Sequence[Variant] = VARIANTS, log: Callable[[str], None] = print) -> tuple[dict[str, Any], list[tuple[str, Trade]]]:
     up = spy_up_map(spy)
-    cands = {st: candidates(st, secs, up) for st in ("A", "C")}
+    xexit = None
+    if any(sl.strategy in ("AL", "M", "MN", "T") for v in variants for sl in v.sleeves):
+        cands, xexit = s20_candidates(secs, spy, cal, up)
+        secs = dict(secs) | {spy.key: spy}  # T holds SPY itself
+    else:
+        cands = {}
+    for st in ("A", "C"):
+        if any(sl.strategy == st for v in variants for sl in v.sleeves):
+            cands[st] = candidates(st, secs, up)
     spy_full = spy_total_return(spy, *FULL)
     spy_stats = series_stats(spy_full)
     out: dict[str, Any] = {"benchmarks": {"spy_total_return": spy_stats | {"by_year": by_year(spy_full), "by_regime": by_regime(spy_full, up),
@@ -454,20 +554,20 @@ def run_all(secs: dict[str, Sec], spy: Sec, cal: list[date], fund: Callable[[str
         if any(sl.fundamental for sl in v.sleeves) and fund is None:
             out["variants"][v.id] = {"name": v.name, "skipped": "재무 점수 자료(rows.db) 없음 — 계산하지 않음"}
             continue
-        sim = simulate(v, secs, spy, cal, cands, COST, *FULL, fund=fund)
+        sim = simulate(v, secs, spy, cal, cands, COST, *FULL, fund=fund, xexit=xexit)
         eq = sim["equity"]
         full = series_stats(eq) | {"trades": trade_stats(sim["trades"], eq), "exposure": float(np.mean(sim["invested"])),
                                    "missed_entries": sim["missed"], "delayed_exits": sim["delayed"], "by_year": by_year(eq),
                                    "by_regime": by_regime(eq, up)}
         matched = series_stats(matched_spy([d for d, _ in eq], sim["invested"], spy_full))
-        st = simulate(v, secs, spy, cal, cands, COST_STRESS, *FULL, fund=fund)
+        st = simulate(v, secs, spy, cal, cands, COST_STRESS, *FULL, fund=fund, xexit=xexit)
         stress = series_stats(st["equity"]) | {"trades": trade_stats(st["trades"], st["equity"])}
         halves = []
         for a, b in HALVES:
-            h = simulate(v, secs, spy, cal, cands, COST, a, b, fund=fund)
+            h = simulate(v, secs, spy, cal, cands, COST, a, b, fund=fund, xexit=xexit)
             halves.append(series_stats(h["equity"]) | {"trades": trade_stats(h["trades"], h["equity"]), "exposure": float(np.mean(h["invested"]))})
         res = {"name": v.name, "full": full, "exposure_matched_spy": matched, "stress_cost": stress, "halves": halves}
-        res["verdict"] = verdict(full, halves, stress, spy_stats, matched)
+        res["verdict"] = verdict_overlay(full, halves, stress, spy_stats) if v.overlay else verdict(full, halves, stress, spy_stats, matched)
         out["variants"][v.id] = res
         all_trades += [(v.id, t) for t in sim["trades"]]
         brief = {k: full.get(k) for k in ("cagr", "sharpe", "max_drawdown", "exposure")} | {"trades": full["trades"].get("trades"), "matched_cagr": matched.get("cagr"), "passed": res["verdict"]["passed"]}
@@ -491,13 +591,15 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--rows", default=None, help="rows.db of the §16 run (the fundamental filter); without it the +재무 variants are skipped")
     ap.add_argument("--out", required=True)
     ap.add_argument("--trades", default=None)
+    ap.add_argument("--set", default="s19", choices=("s19", "s20"), help="s19: PREREGISTRATION §19 (A, C …); s20: §20 (M, M-NF, A-L, T)")
     a = ap.parse_args(argv)
     secs, spy, cal = load(a.db)
     print(f"securities {len(secs)} · sessions {len(cal)} ({cal[0]} ~ {cal[-1]})", flush=True)
-    res, trades = run_all(secs, spy, cal, fundamental_lookup(a.rows))
+    s20 = a.set == "s20"
+    res, trades = run_all(secs, spy, cal, None if s20 else fundamental_lookup(a.rows), S20_VARIANTS if s20 else VARIANTS)
     res["source"] = {"commit": os.environ.get("GITHUB_SHA"), "workflow_run": os.environ.get("GITHUB_RUN_ID"), "data_sha256": _sha(a.db),
-                     "rows_sha256": _sha(a.rows), "finished_at": datetime.utcnow().isoformat() + "Z", "prereg": "PREREGISTRATION §19",
-                     "strategies": {k: v.version for k, v in S.STRATEGIES.items()}, "cost": COST, "cost_stress": COST_STRESS,
+                     "rows_sha256": _sha(a.rows), "finished_at": datetime.utcnow().isoformat() + "Z", "prereg": "PREREGISTRATION §20" if s20 else "PREREGISTRATION §19",
+                     "strategies": {k: v.version for k, v in (S.CANDIDATES | {"A": S.A} if s20 else S.STRATEGIES).items()}, "cost": COST, "cost_stress": COST_STRESS,
                      "securities": len(secs), "sessions": len(cal)}
     res["comparison_note"] = "기존 MarketLens 전략(§16)은 주간 엔진 결과를 인용: 연 −0.02%, 최대 낙폭 −14.0%, 샤프 −0.36, 1,623회 (같은 자료, 다른 엔진)"
     with open(a.out, "w", encoding="utf-8") as f:

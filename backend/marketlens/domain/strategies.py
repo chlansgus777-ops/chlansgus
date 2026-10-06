@@ -53,6 +53,24 @@ C = StrategySpec(
     max_hold=None, needs_spy=True)
 STRATEGIES: dict[str, StrategySpec] = {"A": A, "C": C}
 
+# PREREGISTRATION §20 candidates — measured before the app may show them (not in STRATEGIES until a backtest passes)
+M = StrategySpec(
+    "M", "대형주 모멘텀", "M-1.0",
+    entry=("대형주(그날 거래대금 상위 500) 안에서 12개월 전→1개월 전 수익률 상위 20위 (매달 마지막 거래일 종가)",
+           "SPY 종가 > SPY 200일 단순이동평균 (같은 월말)"),
+    exit=("월말 순위가 40위 밖이거나 대형주에서 빠지면 다음 거래일 시가에 매도",
+          "월말 SPY가 200일선 이하이면 전부 매도"),
+    max_hold=None, needs_spy=True)
+T = StrategySpec(
+    "T", "SPY 추세", "T-1.0",
+    entry=("월말 SPY 종가 > SPY 200일 단순이동평균이면 다음 거래일 시가에 SPY 100%",),
+    exit=("월말 SPY 종가 ≤ 200일선이면 다음 거래일 시가에 매도 후 현금",),
+    max_hold=None, needs_spy=True)
+CANDIDATES: dict[str, StrategySpec] = {"M": M, "T": T}
+LARGE_CAP_N = 500  # the large-cap universe: the day's top names by 20-session dollar volume (inside the common one)
+MOM_LOOKBACK, MOM_SKIP = 252, 21  # 12 months back → 1 month back
+MOM_TOP, MOM_KEEP = 20, 40  # buy the top 20; hold while still inside the top 40
+
 # the registered variants of PREREGISTRATION §19 (not separate strategies: the same signals with one rule added)
 STOP_ATR = 2.0  # variant "+손절": stop = entry price − 2 × ATR(14) of the signal day
 FUNDAMENTAL_MIN = 0.6  # variant "+재무": the analysis' fundamental sub-score (0–1) at the last weekly analysis ≥ this
@@ -244,3 +262,37 @@ def split_adjust(days: Sequence[Any], rows: Sequence[tuple[float, float, float, 
         if ratio > 0 and ratio != 1:
             f[dd < ex.toordinal()] *= ratio
     return a[:, 0] / f, a[:, 1] / f, a[:, 2] / f, a[:, 3] / f, a[:, 4] * f, a[:, 3], f
+
+
+
+# ---------------------------------------------------------------------- §20: cross-section and calendar
+def momentum(close: np.ndarray) -> np.ndarray:
+    """12-1 month return at each close: close[i − 21] / close[i − 252] − 1 (the latest month left out)."""
+    c = np.asarray(close, dtype=float)
+    out = np.full(len(c), np.nan)
+    if len(c) > MOM_LOOKBACK:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            out[MOM_LOOKBACK:] = c[MOM_LOOKBACK - MOM_SKIP:len(c) - MOM_SKIP] / c[:len(c) - MOM_LOOKBACK] - 1
+    return out
+
+
+def month_ends(days: Sequence[Any]) -> set[Any]:
+    """The last session of each month in a calendar (the last day given counts only if a later month follows it)."""
+    return {d for d, nxt in zip(days, days[1:]) if (nxt.year, nxt.month) != (d.year, d.month)}
+
+
+def cap_threshold(dollar_volumes: np.ndarray, n: int = LARGE_CAP_N) -> float:
+    """The n-th largest dollar volume of the day among the tradable names: a name is large-cap when its own is ≥ this.
+    Fewer than n names: every one of them is."""
+    v = np.asarray(dollar_volumes, dtype=float)
+    v = v[np.isfinite(v)]
+    if len(v) == 0:
+        return float("inf")
+    if len(v) <= n:
+        return float(v.min())
+    return float(np.partition(v, len(v) - n)[len(v) - n])
+
+
+def momentum_ranks(scores: Mapping[str, float]) -> list[str]:
+    """Names by 12-1 momentum, best first; ties by name."""
+    return [k for k, _ in sorted(((k, v) for k, v in scores.items() if v == v), key=lambda x: (-x[1], x[0]))]
