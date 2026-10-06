@@ -241,3 +241,21 @@ def test_the_momentum_book_route_answers_with_its_owner_status():
             time.sleep(1)
         assert b["version"] == "M-NF-1.0" and b["validation"]["status"] == "OWNER" and b["state"] in ("READY", "HELD")
         assert b["validation"]["backtest"]["mdd"] < -0.5 and b["validation"]["risks"]  # the risk travels with the list
+
+
+def test_the_routine_route_answers_without_any_order_path():
+    svc = make_service()
+    app = create_app(svc.settings, service=svc, run_migrations=False)
+    with TestClient(app, headers={"X-MarketLens-Client": "test"}) as c:
+        import time
+
+        r = None
+        for _ in range(30):
+            r = c.get("/api/routine")
+            assert r.status_code == 200
+            if r.json()["state"] != "COMPUTING":
+                break
+            time.sleep(1)
+        b = r.json()
+        assert b["state"] in ("PREPARING", "ACT", "DONE") and "주문" in b["risk"]  # MOCK's 80 names: the book is held
+        assert c.post("/api/routine").status_code in (404, 405)

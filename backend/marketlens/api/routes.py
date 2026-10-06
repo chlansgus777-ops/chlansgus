@@ -659,6 +659,12 @@ def strategies(req: Request) -> dict[str, Any]:
     return svc(req).strategy_signals()
 
 
+@router.get("/routine")
+def routine(req: Request) -> dict[str, Any]:
+    """이번 달 할 일: what to sell and buy this month by the momentum book, against the account. No orders."""
+    return svc(req).routine()
+
+
 @router.get("/strategies/momentum")
 def strategies_momentum(req: Request) -> dict[str, Any]:
     """대형주 모멘텀 (M-NF-1.0, the owner's choice): this month's book, last changes, next rebalance, the paper record."""

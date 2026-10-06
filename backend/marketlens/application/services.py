@@ -1225,6 +1225,27 @@ class MarketLensService:
         return {"ready": snap.ready, "refreshing": snap.refreshing, "error": snap.error,
                 "computed_at": snap.computed_at.isoformat() if snap.computed_at else None, "book": snap.value}
 
+    def routine(self) -> dict[str, Any]:
+        """이번 달 할 일: the momentum book against the owner's account (application/routine.py). No orders."""
+        from marketlens.application.routine import plan
+
+        snap = self.refresher.get("strategies:momentum", self.momentum.book, max_age=self.STRATEGY_EVERY, wait=8.0)
+        with self.sf() as ss:
+            pf = self.portfolio(ss)
+            cash_entered = repo.get_setting(ss, "portfolio_cash") is not None
+        end = last_completed_session(self.now())
+
+        def price(t: str) -> float | None:
+            q = self._live_price(t)
+            if q is not None:
+                return q[0]
+            bs = self.store.bars(t, end - timedelta(days=10), end) if self.store is not None else (self.data.bars(t, end - timedelta(days=10), end).value or [])
+            return bs[-1].close if bs else None
+
+        out = plan(snap.value, [(h.ticker, h.quantity) for h in pf.holdings], pf.cash, cash_entered or pf.cash_source != "manual",
+                   price, to_ny(self.now()).date())
+        return out | {"refreshing": snap.refreshing, "error": snap.error}
+
     def strategy_ticker(self, ticker: str) -> dict[str, Any]:
         return self.strategy.ticker(ticker, self._live_price(ticker.upper()))
 

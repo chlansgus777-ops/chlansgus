@@ -11,8 +11,7 @@ import { useJudgedRows, useQuote, useViewQuotes, type QuoteRow } from "../quotes
 import { LiveZone } from "../components/LiveZone";
 import { useLiveRows } from "../components/liveBoard";
 import { MorningBriefing } from "../components/Briefing";
-import { StrategyToday } from "../components/StrategyViews";
-import { MomentumToday } from "../components/MomentumViews";
+import { RoutineCard } from "../components/RoutineCard";
 import { HoldingPlans } from "../components/HoldingPlans";
 import { ago, day, num, pct, price, stampEt, errKo } from "../format";
 import { ACTION_PLAIN, BULLISH, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
@@ -227,10 +226,11 @@ export default function Dashboard() {
                     actions={<Link to="/settings?tab=status">원인 보기 →</Link>} />
       )}
 
+      {/* the one routine first (owner 2026-10-06: "쉽고 직관적이게"): this month's sells and buys; the strategies'
+          details live on 전략 */}
+      <RoutineCard />
       <MorningBriefing />
       <HoldingPlans actionsOnly />
-      <MomentumToday />
-      <StrategyToday />
       <div className="home-grid">
         <div className="home-main">
           {/* the first five seconds: how many names pass right now, the market's mood, the biggest risk, the next event */}
