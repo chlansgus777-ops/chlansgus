@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import date, timedelta
 from typing import Any, Literal
@@ -24,6 +25,7 @@ from marketlens.domain.portfolio import portfolio_snapshot
 from marketlens.infrastructure.db import repository as repo
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 TICKER_RE = r"^[A-Za-z][A-Za-z0-9.\-]{0,9}$"
 
 
@@ -662,7 +664,16 @@ def strategies(req: Request) -> dict[str, Any]:
 @router.get("/routine")
 def routine(req: Request) -> dict[str, Any]:
     """이번 달 할 일: what to sell and buy this month by the momentum book, against the account. No orders."""
-    return svc(req).routine()
+    from marketlens.api import habits_routes as hr
+
+    s = svc(req)
+    try:  # the owner's own trade rules on the same names (보유 종목 계획) — shown next to the strategy, never merged
+        rules = {p["symbol"]: p for p in hr.plans(s, hr._plan_inputs(s), hr._rules(s)[1]) if p.get("action") in ("STOP", "TRAIL", "TAKE1", "ADD")}
+    except Exception:
+        log.exception("routine: holding plans unavailable")
+        rules = None
+    out = s.routine(rule_actions=rules)
+    return out | {"rules_known": rules is not None}
 
 
 @router.get("/strategies/momentum")

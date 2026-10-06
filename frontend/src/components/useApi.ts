@@ -99,13 +99,16 @@ export function invalidateApi(prefixes?: string[]): void {
 const AFFECTS: [RegExp, string[]][] = [
   [/^\/saveticker\//, ["/saveticker/", "/news"]],
   [/^\/quotes\//, []],
-  [/^\/(portfolio|transactions)/, ["/portfolio", "/transactions", "/dashboard", "/stocks/", "/opportunities"]],
+  // the routine's shares and the holding plans are sized with the account: a typed holding, cash or trade changes them
+  [/^\/(portfolio|transactions)/, ["/portfolio", "/transactions", "/dashboard", "/stocks/", "/opportunities", "/routine", "/habits"]],
+  // saved trade rules (손절·익절·추가매수) change each holding's plan and the routine's side-by-side view of them
+  [/^\/habits/, ["/habits", "/routine", "/dashboard", "/stocks/"]],
   [/^\/watchlist/, ["/watchlist", "/dashboard", "/stocks/"]],
   [/^\/scan/, ["/dashboard", "/opportunities", "/stocks/", "/watchlist", "/scan", "/performance", "/readiness", "/issues"]],
   [/^\/recommendations\//, ["/stocks/", "/dashboard", "/opportunities"]],
   [/^\/(evaluation|calibration|paper)/, ["/performance", "/calibration", "/paper", "/dashboard"]],
   [/^\/sync/, ["/readiness", "/sync"]],
-  [/^\/broker\//, ["/portfolio", "/broker/", "/transactions", "/dashboard", "/stocks/", "/opportunities"]],
+  [/^\/broker\//, ["/portfolio", "/broker/", "/transactions", "/dashboard", "/stocks/", "/opportunities", "/routine", "/habits"]],
 ];
 
 onMutation((_method, path) => {
@@ -127,7 +130,7 @@ onAppState((prev, next) => {
   if (prev.sync_running && !next.sync_running) invalidateAfterSync();
   // the account changed in the background (a trade at Toss, a deposit): holdings, cash and everything sized with them
   if ((prev.broker?.version ?? 0) !== (next.broker?.version ?? 0) || (prev.broker?.error ?? null) !== (next.broker?.error ?? null)) {
-    invalidateApi(["/portfolio", "/broker/", "/dashboard", "/stocks/", "/opportunities", "/routine"]);
+    invalidateApi(["/portfolio", "/broker/", "/dashboard", "/stocks/", "/opportunities", "/routine", "/habits"]);
   }
 });
 

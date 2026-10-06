@@ -15,7 +15,7 @@ export type Validation = {
 export type Cond = { rule: string; ok: boolean; value: number | null; ref: number | null };
 export type Signal = {
   strategy: string; name: string; version: string; ticker: string; kind: "confirmed" | "preliminary"; kind_ko: string; signal_day: string; close: number;
-  conditions: Cond[]; execute_at: string; exit: string[]; max_hold: number | null; price_ts: string | null; bars_through: string; validation: Validation;
+  conditions: Cond[]; execute_at: string; execute_ts?: string | null; exit: string[]; max_hold: number | null; price_ts: string | null; bars_through: string; validation: Validation;
 };
 export type StrategyInfo = { id: string; name: string; version: string; entry: string[]; exit: string[]; max_hold: number | null } & Validation;
 export type Scan = { session: string; computed_at: string; names: number; names_without_last_bar: number; spy_up: boolean | null; confirmed: Signal[];
@@ -57,9 +57,17 @@ export function BacktestLine({ v }: { v: Validation }) {
   );
 }
 
-function SignalRow({ s, today }: { s: Signal; today: string }) {
+/** A confirmed signal's open has passed when the instant of that open is behind now — not when its date is before
+ * the UTC date (that missed the same day after 9:30 New York, and flipped at 09:00 KST). */
+export function openPassed(s: Pick<Signal, "kind" | "execute_ts">, now: number = Date.now()): boolean {
+  if (s.kind !== "confirmed" || !s.execute_ts) return false;
+  const t = Date.parse(s.execute_ts);
+  return Number.isFinite(t) && now > t;
+}
+
+function SignalRow({ s }: { s: Signal }) {
   const exec = s.execute_at.slice(0, 10);
-  const passed = s.kind === "confirmed" && exec < today;
+  const passed = openPassed(s);
   return (
     <div className={`st-sig ${s.kind}`} data-testid="strategy-signal">
       <div className="st-sig-head">
@@ -90,7 +98,6 @@ export function StrategyBoard() {
   const s = r.data?.scan && Array.isArray(r.data.scan.strategies) ? r.data.scan : null;
   if (!r.data) return <Card title="전략 신호"><Empty>{r.error ? "불러오지 못했습니다." : "계산하는 중…"}</Empty></Card>;
   if (!s) return <Card title="전략 신호"><Empty>{r.data.refreshing ? "전체 종목의 일봉으로 전략을 계산하는 중입니다." : r.data.error ?? "아직 계산 결과가 없습니다."}</Empty></Card>;
-  const today = new Date().toISOString().slice(0, 10);
   const adopted = s.confirmed.filter((x) => x.validation.status !== "NOT_ADOPTED");
   const recordOnly = s.confirmed.filter((x) => x.validation.status === "NOT_ADOPTED");
   return (
@@ -109,18 +116,18 @@ export function StrategyBoard() {
         ))}
       </div>
       <Card title={`확정 신호 · ${s.session} 종가`} explain={`${s.names}종목 계산 · 마지막 일봉이 없는 종목 ${s.names_without_last_bar}개 제외 · SPY 200일선 ${s.spy_up == null ? "판단 불가" : s.spy_up ? "위" : "아래"} · 계산 ${new Date(s.computed_at).toLocaleString("ko-KR")}`}>
-        {adopted.length ? adopted.map((x) => <SignalRow key={`${x.strategy}${x.ticker}`} s={x} today={today} />)
+        {adopted.length ? adopted.map((x) => <SignalRow key={`${x.strategy}${x.ticker}`} s={x} />)
           : <Empty>{recordOnly.length ? "알릴 신호가 없습니다(아래는 미채택 전략의 기록)." : "오늘 종가 기준 조건을 모두 충족한 종목이 없습니다."}</Empty>}
         {recordOnly.length > 0 && (
           <details className="disclosure" style={{ marginTop: 10 }}>
             <summary>미채택 전략의 신호 {recordOnly.length}개<span className="hint">· 검증 기준 미달 — 기록만, 매수 신호로 보지 마세요</span></summary>
-            {recordOnly.map((x) => <SignalRow key={`${x.strategy}${x.ticker}`} s={x} today={today} />)}
+            {recordOnly.map((x) => <SignalRow key={`${x.strategy}${x.ticker}`} s={x} />)}
           </details>
         )}
       </Card>
       {s.preliminary.length > 0 && (
         <Card title="예비 신호 (장중)" explain={s.preliminary_note}>
-          {s.preliminary.map((x) => <SignalRow key={`p${x.strategy}${x.ticker}`} s={x} today={today} />)}
+          {s.preliminary.map((x) => <SignalRow key={`p${x.strategy}${x.ticker}`} s={x} />)}
         </Card>
       )}
       <ForwardCard f={f.data} />

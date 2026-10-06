@@ -40,7 +40,17 @@ PRELIM_MAX_AGE = timedelta(minutes=20)
 
 def fresh_quote(q: tuple[float, datetime] | None, now: datetime) -> bool:
     return (q is not None and classify_session(q[1]) == TradingSession.REGULAR and timedelta(0) <= now - q[1] <= PRELIM_MAX_AGE)  # calendar days of bars read (≥ 252 sessions + the 200-day line)
-STOCK_KINDS = {"CS", "ADRC", "OS", "stock", "STOCK", ""}
+# what counts as a stock: the instrument directory's kinds (providers/live/nasdaq_symbols.classify — the LIVE store keeps
+# "common", "unknown", "preferred", "warrant", "unit", "right", "note", "etf") and older provider codes. Missing
+# "common" here once kept every listed common stock out of the strategies in LIVE (owner 2026-10-06: "유동 종목 3개").
+STOCK_KINDS = {"common", "unknown", "CS", "ADRC", "OS", "stock", "STOCK", ""}
+
+
+def is_stock(kinds: Mapping[str, str], ticker: str) -> bool:
+    """A name the directory does not list counts as a stock (unknown ≠ excluded); keys are the directory's spelling."""
+    from marketlens.providers.live.nasdaq_symbols import canonical
+
+    return not kinds or kinds.get(canonical(ticker), kinds.get(ticker, "unknown")) in STOCK_KINDS
 
 STATUS_KO = {"VERIFYING": "검증 중", "NOT_ADOPTED": "미채택", "FORWARD": "백테스트 통과 · 전진 모의운영 중"}
 
@@ -91,6 +101,8 @@ def _signal_row(spec: S.StrategySpec, ticker: str, a: Arrays, i: int, kind: str,
         "signal_day": signal_day.isoformat(), "close": float(a.ind["close"][i]),
         "conditions": S.explain_entry(spec.id, a.ind, i, spy_up),
         "execute_at": f"{execute.isoformat()} 시가 (미국 동부)" if kind == "confirmed" else "오늘 종가로 확정되면 다음 거래일 시가",
+        # the open itself as an instant: the screen compares it with now, not a date with the UTC date
+        "execute_ts": session_open_utc(execute).isoformat() if kind == "confirmed" else None,
         "exit": list(spec.exit), "max_hold": spec.max_hold,
         "price_ts": price_ts.isoformat() if price_ts else None, "bars_through": a.days[i].isoformat() if kind == "confirmed" else a.days[-1].isoformat(),
     }
@@ -106,6 +118,7 @@ class StrategySignals:
         self._log = Path(data_dir) / (f"strategy_forward_{mode.lower()}.jsonl" if mode else "strategy_forward.jsonl")
         self._results_path = results_path
         self._lock = threading.Lock()
+        self._confirmed_cache: dict[str, tuple[Any, list[dict[str, Any]], list[tuple[str, str]]]] = {}
 
     # ------------------------------------------------------------------ status
     def results(self) -> dict[str, Any] | None:
@@ -121,6 +134,28 @@ class StrategySignals:
         return strategy_status(self.results())
 
     # ------------------------------------------------------------------ the market
+    @staticmethod
+    def _confirmed_one(t: str, done: list[Bar], session: date, spy: Any, spy_up_by_day: Mapping[date, bool]
+                       ) -> tuple[list[dict[str, Any]], list[tuple[str, str]]]:
+        """One name at the last completed session: its confirmed signal rows and the data holds per strategy."""
+        a = arrays(done)
+        i = len(a.days) - 1
+        rows: list[dict[str, Any]] = []
+        holds: list[tuple[str, str]] = []
+        for sid, spec in S.STRATEGIES.items():
+            why = S.data_holds(sid, len(a.days), bool(done[-1].volume), len(spy.days) if spy else None)
+            if why:
+                for w in why:
+                    holds.append((sid, w.split(" — ")[0] if "SPY" in w or "거래량" in w else f"일봉 {S.MIN_HISTORY}거래일 미만"))
+                continue
+            up = np.array([spy_up_by_day.get(d, False) for d in a.days]) if sid == "C" else None
+            if S.signals(sid, a.ind, up)[i]:
+                row = _signal_row(spec, t, a, i, "confirmed", spy_up_by_day.get(session), session, session_close_utc(session))
+                pr = S.priority(sid, a.ind)[i]
+                row["priority"] = float(pr) if pr == pr else 0.0
+                rows.append(row)
+        return rows, holds
+
     def scan(self, live: Callable[[str], tuple[float, datetime] | None] | None = None) -> dict[str, Any]:
         """Confirmed signals at the last completed session, preliminary ones at the live price (regular session only),
         and how many names each strategy had to hold for missing data."""
@@ -136,8 +171,10 @@ class StrategySignals:
         held: dict[str, dict[str, int]] = {sid: {} for sid in S.STRATEGIES}
         names = 0
         stale = 0
+        spy_key = (len(spy.days), spy.days[-1], float(spy.ind["close"][-1])) if spy else None
+        fresh_cache: dict[str, tuple[Any, list[dict[str, Any]], list[tuple[str, str]]]] = {}
         for t, bs in bars.items():
-            if t == "SPY" or (kinds and kinds.get(t, "") not in STOCK_KINDS):
+            if t == "SPY" or not is_stock(kinds, t):
                 continue
             done = [b for b in bs if b.day <= session]
             if not done:
@@ -146,21 +183,20 @@ class StrategySignals:
             if done[-1].day != session:  # no bar for the last session: a halted, delisted or not yet synced name
                 stale += 1
                 continue
-            a = arrays(done)
-            i = len(a.days) - 1
-            for sid, spec in S.STRATEGIES.items():
-                why = S.data_holds(sid, len(a.days), bool(done[-1].volume), len(spy.days) if spy else None)
-                if why:
-                    for w in why:
-                        key = w.split(" — ")[0] if "SPY" in w or "거래량" in w else f"일봉 {S.MIN_HISTORY}거래일 미만"
-                        held[sid][key] = held[sid].get(key, 0) + 1
-                    continue
-                up = np.array([spy_up_by_day.get(d, False) for d in a.days]) if sid == "C" else None
-                if S.signals(sid, a.ind, up)[i]:
-                    row = _signal_row(spec, t, a, i, "confirmed", spy_up_by_day.get(session), session, session_close_utc(session))
-                    pr = S.priority(sid, a.ind)[i]
-                    row["priority"] = float(pr) if pr == pr else 0.0
-                    confirmed.append(row)
+            # a name's confirmed result depends only on its own completed bars and SPY's: kept from the last round while
+            # neither changed (the market-wide pass took ~4 s every 10 minutes for the same answer; owner 2026-10-06)
+            ck = (session, len(done), done[0].day, done[-1], spy_key)
+            hit = self._confirmed_cache.get(t)
+            if hit is not None and hit[0] == ck:
+                rows, holds = hit[1], hit[2]
+            else:
+                rows, holds = self._confirmed_one(t, done, session, spy, spy_up_by_day)
+                fresh_cache[t] = (ck, rows, holds)
+            if hit is not None and hit[0] == ck:
+                fresh_cache[t] = hit
+            for sid, key in holds:
+                held[sid][key] = held[sid].get(key, 0) + 1
+            confirmed.extend(dict(r) for r in rows)
             # preliminary (A only): today's live price as if it were the close; C needs the day's volume, which a
             # quote does not carry — it is held, never guessed
             if live is not None and now.date() > session:
@@ -171,6 +207,7 @@ class StrategySignals:
                     j = len(pa.days) - 1
                     if not S.data_holds("A", len(pa.days), True, None) and S.signals("A", pa.ind)[j]:
                         prelim.append(_signal_row(S.A, t, pa, j, "preliminary", None, now.date(), ts))
+        self._confirmed_cache = fresh_cache  # only the names seen this round (a dropped name leaves no stale entry)
         confirmed.sort(key=lambda r: (r["strategy"], -r.get("priority", 0.0), r["ticker"]))
         self._record(confirmed)
         status = self.status()

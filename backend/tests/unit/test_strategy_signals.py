@@ -110,3 +110,39 @@ def test_the_committed_result_file_is_whole_and_each_verdict_follows_its_six_che
     st = strategy_status(d)
     for sid in ("A", "C"):
         assert st[sid]["status"] == ("FORWARD" if d["variants"][sid]["verdict"]["passed"] else "NOT_ADOPTED")
+
+
+def test_a_confirmed_signal_carries_the_instant_of_its_open(tmp_path):
+    # the screen decides "체결 시점 지남" from this instant, not from a date compared with the UTC date (report 2026-10-06 §4)
+    days = _sessions(300, SESSION)
+    data = {"PULL": _bars(_pullback(300), days), "SPY": _bars([400 + i for i in range(300)], days, 1e8)}
+    sig = _svc(tmp_path, data).scan()["confirmed"][0]
+    assert sig["execute_ts"] == "2026-09-25T13:30:00+00:00"  # 09:30 New York (EDT)
+
+
+def test_the_live_directory_kinds_count_common_stocks_as_stocks(tmp_path):
+    # owner 2026-10-06 (LIVE): "유동 종목 3개" — the LIVE store keeps the Nasdaq directory's "common"/"unknown"/"etf", and
+    # "common" was not a stock kind: every listed common stock was left out of the strategies
+    from marketlens.application.strategy_signals import is_stock
+
+    kinds = {"AAPL": "common", "BRK.B": "common", "QQQ": "etf", "XPFD": "preferred", "ABC": "unknown"}
+    assert is_stock(kinds, "AAPL") and is_stock(kinds, "BRK-B") and is_stock(kinds, "ABC") and is_stock(kinds, "NOTLISTED")
+    assert not is_stock(kinds, "QQQ") and not is_stock(kinds, "XPFD")
+    days = _sessions(300, SESSION)
+    data = {"PULL": _bars(_pullback(300), days), "SPY": _bars([400 + i for i in range(300)], days, 1e8)}
+    s = StrategySignals(lambda a, b: {t: [x for x in bs if a <= x.day <= b] for t, bs in data.items()}, lambda: NOW, tmp_path,
+                        kinds=lambda: {"PULL": "common", "SPY": "etf"})
+    assert [x["ticker"] for x in s.scan()["confirmed"]] == ["PULL"]
+
+
+def test_a_name_kept_from_the_last_round_gives_the_same_answer_and_a_new_bar_is_read_again(tmp_path):
+    # the per-name result is reused while its bars and SPY's are unchanged (performance, owner 2026-10-06) — never stale
+    days = _sessions(300, SESSION)
+    data = {"PULL": _bars(_pullback(300), days), "SPY": _bars([400 + i for i in range(300)], days, 1e8)}
+    s = _svc(tmp_path, data)
+    first = s.scan()
+    again = s.scan()
+    strip = lambda r: [{k: v for k, v in x.items() if k != "validation"} for x in r["confirmed"]]
+    assert strip(first) == strip(again) and first["held"] == again["held"] and strip(first)
+    data["PULL"] = data["PULL"][:-1] + [type(data["PULL"][-1])(days[-1], 100.0, 101.0, 99.0, 100.0, 1e6)]  # the last bar corrected
+    assert strip(s.scan()) != strip(first)

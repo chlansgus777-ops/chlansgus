@@ -259,3 +259,27 @@ def test_the_routine_route_answers_without_any_order_path():
         b = r.json()
         assert b["state"] in ("PREPARING", "ACT", "DONE") and "주문" in b["risk"]  # MOCK's 80 names: the book is held
         assert c.post("/api/routine").status_code in (404, 405)
+
+
+def test_the_routine_route_hands_my_own_trade_rules_to_the_plan(monkeypatch):
+    # report 2026-10-06 §2: the strategy and the owner's rules (보유 종목 계획) on one name are shown side by side
+    from marketlens.api import habits_routes as hr
+
+    svc = make_service()
+    seen: dict = {}
+    monkeypatch.setattr(hr, "plans", lambda s, inp, tr: [{"symbol": "AAA", "action": "STOP", "action_ko": "손절", "detail": "x"},
+                                                         {"symbol": "BBB", "action": "HOLD", "action_ko": "유지", "detail": ""}])
+    monkeypatch.setattr(svc, "routine", lambda rule_actions=None: seen.setdefault("r", rule_actions) and {"state": "DONE"} or {"state": "DONE"})
+    app = create_app(svc.settings, service=svc, run_migrations=False)
+    with TestClient(app, headers={"X-MarketLens-Client": "test"}) as c:
+        b = c.get("/api/routine").json()
+    assert set(seen["r"]) == {"AAA"} and seen["r"]["AAA"]["action"] == "STOP"  # only the actions that ask for a trade
+    assert b["rules_known"] is True
+
+    def boom(*a, **k):
+        raise RuntimeError("no plans")
+
+    monkeypatch.setattr(hr, "plans", boom)
+    with TestClient(app, headers={"X-MarketLens-Client": "test"}) as c:
+        b = c.get("/api/routine").json()
+    assert b["rules_known"] is False and b["state"] == "DONE"  # the routine still answers, and says it could not check

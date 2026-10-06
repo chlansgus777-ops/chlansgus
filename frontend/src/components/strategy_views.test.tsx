@@ -4,7 +4,7 @@
  * a backtest is a simulation, never performance; nothing reads as a probability of success. */
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { StockStrategies, StrategyBoard, type StrategiesResp, type Validation } from "./StrategyViews";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -57,4 +57,16 @@ it("the stock card says why a strategy is held and ignores another name's answer
   render(<MemoryRouter><StockStrategies ticker="AAA" /></MemoryRouter>);
   await new Promise((r) => setTimeout(r, 30));
   expect(screen.queryByTestId("stock-strategies")).toBeNull();
+});
+
+describe("a confirmed signal's open", () => {
+  it("is passed when the instant of the open is behind now — the same day after 9:30 New York too", async () => {
+    const { openPassed } = await import("./StrategyViews");
+    const s = { kind: "confirmed" as const, execute_ts: "2026-10-06T13:30:00+00:00" };
+    expect(openPassed(s, Date.parse("2026-10-06T13:29:00Z"))).toBe(false); // 09:29 New York
+    expect(openPassed(s, Date.parse("2026-10-06T13:31:00Z"))).toBe(true); // 09:31 New York, same UTC date
+    // 14:00 KST on the 6th is 01:00 New York, before the open: not passed although the dates agree
+    expect(openPassed(s, Date.parse("2026-10-06T14:00:00+09:00"))).toBe(false);
+    expect(openPassed({ kind: "preliminary", execute_ts: null }, Date.parse("2027-01-01T00:00:00Z"))).toBe(false);
+  });
 });

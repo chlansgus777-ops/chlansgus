@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Card, Notice } from "./ui";
 import { useApi, usePoll } from "./useApi";
-import { day, shares } from "../format";
+import { day, shares, stamp } from "../format";
 
 /** One holding under the owner's saved rules (marketlens.domain.habit_diagnosis.holding_plan). */
 export interface Plan {
@@ -130,11 +130,16 @@ export function PlanCard({ p }: { p: Plan }) {
         <div><dt>추가매수</dt><dd>{addRule(p)}</dd></div>
       </dl>
       <footer className="caption">
-        {p.price_source ?? "가격 없음"}{p.opened ? ` · 첫 매수 ${day(p.opened)}` : ""}
+        {p.price_source ?? "가격 없음"}{p.price_at ? ` · ${priceTime(p.price_at)}` : ""}{p.opened ? ` · 첫 매수 ${day(p.opened)}` : ""}
         {p.notes.map((n, i) => <div key={i}>· {n}</div>)}
       </footer>
     </article>
   );
+}
+
+/** When the plan's price is from: a close is a day ("2026-10-05 종가"), a live or synced price an instant (ET and KST). */
+export function priceTime(at: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(at) ? `${at} 종가` : `가격 시각 ${stamp(at)}`;
 }
 
 export interface Preview { price: number | null; appStop: number | null; appTarget: number | null }

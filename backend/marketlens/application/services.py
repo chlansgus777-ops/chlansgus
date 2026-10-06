@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import logging
+import bisect
 import threading
 import time
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ from marketlens.application.data_access import DataAccess
 from marketlens.application.evaluation_service import rec_session_day
 from marketlens.application.graph_seed import GraphSeed
 from marketlens.application.issue_engine import news_for_ticker
-from marketlens.application.market_store import MarketStore
+from marketlens.application.market_store import GROUPED_DAYS_KEY, MarketStore
 from marketlens.application.pipeline import AnalysisInputs, AnalysisResult, run_analysis
 from marketlens.domain.market import Bar, Quote
 from marketlens.application.broker import BrokerSync
@@ -73,6 +74,23 @@ REANALYZE_WHY = {"STOP_HIT": "손절 기준 도달", "TARGET_HIT": "목표가 �
                  "STALE": "지난 장 이전 분석 — 화면에 떠 있어 새로 분석"}
 PLAN_PRICE_FIELDS = ("ideal_entry", "acceptable_low", "acceptable_high", "max_buy", "add_zone_low", "add_zone_high", "stop", "target1", "target2",
                      "support_used", "resistance_used")
+
+
+def _window(bars: Mapping[str, list[Bar]], start: date, end: date) -> dict[str, list[Bar]]:
+    """Each name's bars within [start, end] from a wider shared read (bars sorted by day; the lists are not copied
+    when they already fit)."""
+    out: dict[str, list[Bar]] = {}
+    for t, bs in bars.items():
+        if not bs or bs[-1].day < start or bs[0].day > end:
+            continue
+        if bs[0].day >= start and bs[-1].day <= end:
+            out[t] = bs
+            continue
+        i = bisect.bisect_left(bs, start, key=lambda b: b.day)
+        j = bisect.bisect_right(bs, end, key=lambda b: b.day)
+        if i < j:
+            out[t] = bs[i:j]
+    return out
 
 
 def stored_size_class(r: AnalysisResult, committee: CommitteeResult | None) -> str | None:
@@ -258,6 +276,8 @@ class MarketLensService:
         # names it cannot reach (no live price) are re-analysed by the scheduler (``scan_wanted``)
         self._account_version = 0
         self._account_inputs: dict[tuple[int, int], tuple[bool, Any]] = {}
+        self._bars_lock = threading.Lock()  # one market-wide read at a time, shared by every strategy (_strategy_bars)
+        self._bars_cache: dict[str, Any] | None = None
         self._account_view: tuple[int, Any, Any, Any] | None = None  # (version, portfolio, holdings view, scanner)
         self.scan_wanted: str | None = None
         # the price-dependent verdict on every quote (buy zone, stop, target, live reward/risk) + alerts
@@ -1197,9 +1217,26 @@ class MarketLensService:
     # ------------------------------------------------------------------ strategies (A-1.0 · C-1.0)
     STRATEGY_EVERY = 600.0  # seconds a market-wide strategy scan is reused (bars change once a day; preliminary every 10 min)
 
+    BARS_MAX_AGE = 3 * 3600.0  # seconds the market-wide bars stay shared when no sync round changed them
+
     def _strategy_bars(self, start: date, end: date) -> dict[str, list[Bar]]:
+        """The whole market's stored bars for the strategies (signals, momentum book, paper records) — read once and
+        shared. One read of ~420 days × every stored name takes 8-15 s and holds the interpreter: done three times every
+        10 minutes, it stalled the API past the screen's 15 s limit ("분석 서버 연결 끊김", owner 2026-10-06). A sync
+        round (sync_market), a new market-wide download day or a new instrument list reads it again at once; anything
+        else (a held name's intraday bars from Toss) within ``BARS_MAX_AGE``."""
         if self.store is not None:
-            return self.store.last_bars_all(start, end)
+            key = (self.store.get_setting(GROUPED_DAYS_KEY), self.store.get_setting("instrument_kinds_day"))
+            with self._bars_lock:
+                c = self._bars_cache
+                fresh = (c is not None and c["key"] == key and c["start"] <= start and c["end"] >= end
+                         and time.monotonic() - c["at"] < self.BARS_MAX_AGE)
+                if not fresh:
+                    lo = min(start, c["start"]) if c is not None and c["key"] == key else start
+                    hi = max(end, c["end"]) if c is not None and c["key"] == key else end
+                    c = self._bars_cache = {"key": key, "start": lo, "end": hi, "at": time.monotonic(),
+                                            "bars": self.store.last_bars_all(lo, hi)}
+            return _window(c["bars"], start, end)
         tickers = [x.ticker for x in (self.data.securities(end).value or [])] + ["SPY"]
         return self.data.bars_bulk(tickers, start, end)
 
@@ -1216,12 +1253,11 @@ class MarketLensService:
 
     def _stock_sectors(self) -> dict[str, str]:
         """The app's stocks (no ETFs) with their sector — the momentum book's universe and its sector cap."""
-        from marketlens.application.strategy_signals import STOCK_KINDS
+        from marketlens.application.strategy_signals import is_stock
 
         kinds = self.store.instrument_kinds() if self.store is not None else {}
         secs = self.data.securities(self.now().date()).value or []
-        return {x.ticker: (x.sector or "Unknown") for x in secs
-                if not x.is_etf and (not kinds or kinds.get(x.ticker, "") in STOCK_KINDS)}
+        return {x.ticker: (x.sector or "Unknown") for x in secs if not x.is_etf and is_stock(kinds, x.ticker)}
 
     def _non_stocks(self) -> set[str]:
         """ETFs and other non-stocks among the stored bars (kept out of the momentum ranking)."""
@@ -1229,7 +1265,8 @@ class MarketLensService:
 
         kinds = self.store.instrument_kinds() if self.store is not None else {}
         etfs = {x.ticker for x in (self.data.securities(self.now().date()).value or []) if x.is_etf}
-        return etfs | {t for t, k in kinds.items() if k not in STOCK_KINDS}
+        # the directory's spelling (BRK.B) and the stored one (BRK-B) both, so a fund is out under either
+        return etfs | {v for t, k in kinds.items() if k not in STOCK_KINDS for v in (t, t.replace(".", "-"))}
 
     def momentum_book(self) -> dict[str, Any]:
         snap = self.refresher.get("strategies:momentum", self.momentum.book, max_age=self.STRATEGY_EVERY, wait=8.0)
@@ -1237,8 +1274,9 @@ class MarketLensService:
                 "computed_at": snap.computed_at.isoformat() if snap.computed_at else None, "book": snap.value,
                 "pending": snap.value is None and not snap.error}
 
-    def routine(self) -> dict[str, Any]:
-        """이번 달 할 일: the momentum book against the owner's account (application/routine.py). No orders."""
+    def routine(self, rule_actions: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+        """이번 달 할 일: the momentum book against the owner's account (application/routine.py) — the cash, the 0.15 %
+        cost, the account's sector limit and, side by side, the owner's own trade rule on each name. No orders."""
         from marketlens.application.routine import plan
 
         snap = self.refresher.get("strategies:momentum", self.momentum.book, max_age=self.STRATEGY_EVERY, wait=8.0)
@@ -1255,7 +1293,8 @@ class MarketLensService:
             return bs[-1].close if bs else None
 
         out = plan(snap.value, [(h.ticker, h.quantity) for h in pf.holdings], pf.cash, cash_entered or pf.cash_source != "manual",
-                   price, to_ny(self.now()).date())
+                   price, to_ny(self.now()).date(), sectors={h.ticker: h.sector for h in pf.holdings},
+                   rule_actions=rule_actions, max_sector=self.model_config().portfolio.max_sector)
         return out | {"refreshing": snap.refreshing, "error": snap.error, "pending": snap.value is None and not snap.error}
 
     def strategy_ticker(self, ticker: str) -> dict[str, Any]:
@@ -1742,6 +1781,8 @@ class MarketLensService:
         finally:
             self._sync_run.release()
         self.data.cache = type(self.data.cache)()  # the store changed → drop cached provider reads
+        with self._bars_lock:
+            self._bars_cache = None  # and the strategies' shared market read (new days, back-filled history, new names)
         # "sync finished" is not "data complete": a partial sync says how much is still missing
         out = {"status": "SYNC_COMPLETE" if rep.complete else "SYNC_PARTIAL", "bar_days_remaining": max(0, rep.bar_days_missing - rep.bar_days_loaded - rep.bar_days_empty), **rep.__dict__}
         self.store.set_setting("last_sync", json.dumps({"status": out["status"], "at": self.now().isoformat(), "bar_days_remaining": out["bar_days_remaining"], "errors": rep.errors[:5]}))

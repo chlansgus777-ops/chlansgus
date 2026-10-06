@@ -89,4 +89,25 @@ describe("screen cache", () => {
     await waitFor(() => expect(f.calls.filter((u) => u.endsWith("/api/watchlist")).length).toBe(2));
     expect(screen.getByTestId("v").textContent).toBe("W1|refreshing|t"); // the last answer stays until the new one arrives
   });
+
+  it("a typed holding, cash or trade asks the routine and the holding plans again (their shares are sized with the account)", async () => {
+    const f = gatedFetch();
+    render(<><View path="/routine" /><View path="/habits/plans" /></>);
+    await act(async () => { f.pending[0]!.resolve("R1"); f.pending[1]!.resolve("H1"); });
+    const put = api.put("/portfolio/cash", { cash: 5000 });
+    await act(async () => f.pending[2]!.resolve("ok"));
+    await put;
+    await waitFor(() => expect(f.calls.filter((u) => u.endsWith("/api/routine")).length).toBe(2));
+    expect(f.calls.filter((u) => u.endsWith("/api/habits/plans")).length).toBe(2);
+  });
+
+  it("saving my trade rules asks the routine again (its strategy-vs-rule view)", async () => {
+    const f = gatedFetch();
+    render(<View path="/routine" />);
+    await act(async () => f.pending[0]!.resolve("R1"));
+    const put = api.put("/habits/rules", {});
+    await act(async () => f.pending[1]!.resolve("ok"));
+    await put;
+    await waitFor(() => expect(f.calls.filter((u) => u.endsWith("/api/routine")).length).toBe(2));
+  });
 });
