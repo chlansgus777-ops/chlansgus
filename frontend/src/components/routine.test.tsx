@@ -39,3 +39,14 @@ it("a book still preparing shows the reason and no list", async () => {
   await screen.findByText("2026-09-30 순위를 낼 자료가 아직 부족합니다");
   expect(screen.getByTestId("routine").querySelector(".routine-steps")).toBeNull();
 });
+
+it("an unpriced holding shows the warning and no amounts instead of 5 % of a partial total", async () => {
+  serve({ ...ACT, account: { total: null, cash: 1000, known: true, slot: null, unpriced: ["BIGHOLD"] },
+          buy: [{ ticker: "AAA", rank: 1, price: 100, shares: null, amount: null, target_amount: 0 }],
+          warning: "보유 종목 BIGHOLD의 가격을 받지 못해 계좌 총액을 계산할 수 없습니다 — 살 수량은 가격을 받은 뒤 표시합니다." });
+  render(<MemoryRouter><RoutineCard /></MemoryRouter>);
+  expect((await screen.findByTestId("routine-warning")).textContent).toContain("BIGHOLD");
+  const t = screen.getByTestId("routine").textContent!;
+  expect(t).toContain("수량 계산 대기");
+  expect(t).not.toContain("약 $");
+});

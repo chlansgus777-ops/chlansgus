@@ -38,3 +38,11 @@ def test_an_unknown_account_is_an_example_and_a_held_or_missing_book_is_not_a_li
     assert plan(None, [], 1.0, True, PX.get, date(2026, 10, 6))["state"] == "COMPUTING"
     nopx = plan(BOOK, [("ZZZ", 3)], 1000.0, True, lambda t: None, date(2026, 10, 6))
     assert nopx["account"]["unpriced"] == ["ZZZ"] and nopx["buy"][0]["shares"] is None
+
+
+def test_an_unpriced_holding_leaves_the_total_unknown_instead_of_shrinking_every_amount():
+    """Independent review 2 F04: a held name without a price and $1,000 cash made the account $1,000 and 5 % $50."""
+    px = dict(PX)
+    r = plan(BOOK, [("BIGHOLD", 1000)], 1000.0, True, px.get, date(2026, 9, 30))
+    assert r["account"]["total"] is None and r["account"]["slot"] is None
+    assert all(b["shares"] is None and b["amount"] is None for b in r["buy"]) and "BIGHOLD" in r["warning"]

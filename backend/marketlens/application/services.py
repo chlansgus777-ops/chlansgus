@@ -265,12 +265,14 @@ class MarketLensService:
         # the strategies' signals (docs/strategies/STRATEGIES.md): the backtest's own rules on the stored daily bars
         from marketlens.application.strategy_signals import StrategySignals, results_path
         self.strategy = StrategySignals(self._strategy_bars, self.now, settings.data_dir,
-                                        kinds=(self.store.instrument_kinds if self.store is not None else None), results_path=results_path())
+                                        kinds=(self.store.instrument_kinds if self.store is not None else None), results_path=results_path(),
+                                        mode=settings.mode.value)
         # the owner's 대형주 모멘텀 (application/momentum_book.py): the backtest's monthly book on the stored bars
         from marketlens.application.momentum_book import MomentumBook
         from marketlens.config import CONFIG_DIR
         self.momentum = MomentumBook(self._strategy_bars, self.now, settings.data_dir, self._stock_sectors,
-                                     results_path=CONFIG_DIR / "strategy_results_s20.json")
+                                     results_path=CONFIG_DIR / "strategy_results_s20.json", mode=settings.mode.value,
+                                     exclude=self._non_stocks)
         self.quotes.annotate = self.judge.annotate
         self.judge.on_reanalyze = self.request_reanalysis
         # the owner's own trade rules on the held names (내 규칙 알림): same prices, same alert center
@@ -1209,6 +1211,7 @@ class MarketLensService:
         snap = self.refresher.get("strategies:scan", lambda: self.strategy.scan(self._live_price), max_age=self.STRATEGY_EVERY, wait=8.0)
         return {"ready": snap.ready, "refreshing": snap.refreshing, "error": snap.error,
                 "computed_at": snap.computed_at.isoformat() if snap.computed_at else None, "scan": snap.value,
+                "pending": snap.value is None and not snap.error,  # the screen asks again until it settles (review F09)
                 "strategies": None if snap.value else [{"id": k} | v for k, v in self.strategy.status().items()]}
 
     def _stock_sectors(self) -> dict[str, str]:
@@ -1220,10 +1223,19 @@ class MarketLensService:
         return {x.ticker: (x.sector or "Unknown") for x in secs
                 if not x.is_etf and (not kinds or kinds.get(x.ticker, "") in STOCK_KINDS)}
 
+    def _non_stocks(self) -> set[str]:
+        """ETFs and other non-stocks among the stored bars (kept out of the momentum ranking)."""
+        from marketlens.application.strategy_signals import STOCK_KINDS
+
+        kinds = self.store.instrument_kinds() if self.store is not None else {}
+        etfs = {x.ticker for x in (self.data.securities(self.now().date()).value or []) if x.is_etf}
+        return etfs | {t for t, k in kinds.items() if k not in STOCK_KINDS}
+
     def momentum_book(self) -> dict[str, Any]:
         snap = self.refresher.get("strategies:momentum", self.momentum.book, max_age=self.STRATEGY_EVERY, wait=8.0)
         return {"ready": snap.ready, "refreshing": snap.refreshing, "error": snap.error,
-                "computed_at": snap.computed_at.isoformat() if snap.computed_at else None, "book": snap.value}
+                "computed_at": snap.computed_at.isoformat() if snap.computed_at else None, "book": snap.value,
+                "pending": snap.value is None and not snap.error}
 
     def routine(self) -> dict[str, Any]:
         """이번 달 할 일: the momentum book against the owner's account (application/routine.py). No orders."""
@@ -1244,7 +1256,7 @@ class MarketLensService:
 
         out = plan(snap.value, [(h.ticker, h.quantity) for h in pf.holdings], pf.cash, cash_entered or pf.cash_source != "manual",
                    price, to_ny(self.now()).date())
-        return out | {"refreshing": snap.refreshing, "error": snap.error}
+        return out | {"refreshing": snap.refreshing, "error": snap.error, "pending": snap.value is None and not snap.error}
 
     def strategy_ticker(self, ticker: str) -> dict[str, Any]:
         return self.strategy.ticker(ticker, self._live_price(ticker.upper()))

@@ -298,7 +298,15 @@ def simulate(variant: Variant, secs: dict[str, Sec], spy: Sec, calendar: Sequenc
         trades.append(Trade(p.key, secs[p.key].label, p.strategy, p.sector, p.entry_day, d, p.entry_px, px, p.qty, pnl,
                             pnl / (p.qty * p.entry_px * (1 + cost)), p.held, reason))
 
+    last_seen: dict[str, date] = {}
     for d in cal:
+        # 0) the ex-date: an ordinary dividend belongs to whoever held at the previous close, so it is credited before
+        #    anything is sold today (independent review 0444a21 F05: an ex-date sale lost it); a day without a bar too
+        for k, p in pos.items():
+            amt = secs[k].dividends.get(d)
+            if amt and p.entry_day < d:
+                cash += p.qty * amt
+                p.dividends += p.qty * amt
         # 1) the open: exits decided at an earlier close (a name not traded today waits for its next traded open)
         for k in list(pos):
             p = pos[k]
@@ -357,16 +365,16 @@ def simulate(variant: Variant, secs: dict[str, Sec], spy: Sec, calendar: Sequenc
             s = secs[k]
             i = s.index.get(d)
             if i is None:
-                if s.days[-1] < d and (d - s.days[-1]).days > 7:  # stopped trading: delisted
+                # no bar for more than 7 calendar days up to today: treated as delisted. Only what is known by today
+                # decides — never whether the name trades again later (independent review 0444a21 F01: the full
+                # history's last day let a later bar undo a sale); a long halt is therefore sold at the same loss
+                if (d - last_seen.get(k, p.entry_day)).days > 7:
                     sell(p, d, last_close.get(k, p.entry_px) * (1 - DELIST_LOSS), "delisted")
                     del pos[k]
                     continue
                 value += p.qty * last_close.get(k, p.entry_px)
                 continue
-            amt = s.dividends.get(d)
-            if amt and p.entry_day < d:
-                cash += p.qty * amt
-                p.dividends += p.qty * amt
+            last_seen[k] = d
             last_close[k] = float(s.c[i])
             p.held += 1
             if p.exit_reason is None:
@@ -394,9 +402,8 @@ def simulate(variant: Variant, secs: dict[str, Sec], spy: Sec, calendar: Sequenc
                     if v is None or v < S.FUNDAMENTAL_MIN:
                         continue
                 pending.append((j, k, d))
-                got += 1
-                if got >= free + 5:  # a few spares for names that do not open tomorrow or hit the sector limit
-                    break
+                got += 1  # the whole ranked list waits: the open fills slots in order, past sector and no-open rejections
+                # (independent review 0444a21 F06: cutting it at free + 5 left slots empty behind a crowded sector)
     return {"equity": equity, "invested": invested, "trades": trades, "missed": missed, "delayed": delayed,
             "open": [(p.key, p.sector, p.entry_day, p.strategy) for p in pos.values()]}
 

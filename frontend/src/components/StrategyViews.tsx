@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Card, Empty } from "./ui";
-import { useApi } from "./useApi";
+import { useApi, useSettling } from "./useApi";
 import { pct, price } from "../format";
 
 /** 전략 신호 (docs/strategies/STRATEGIES.md): rule-based strategies apart from the composite score. Every signal says
@@ -20,7 +20,7 @@ export type Signal = {
 export type StrategyInfo = { id: string; name: string; version: string; entry: string[]; exit: string[]; max_hold: number | null } & Validation;
 export type Scan = { session: string; computed_at: string; names: number; names_without_last_bar: number; spy_up: boolean | null; confirmed: Signal[];
   preliminary: Signal[]; held: Record<string, Record<string, number>>; strategies: StrategyInfo[]; preliminary_note: string };
-export type StrategiesResp = { ready: boolean; refreshing: boolean; error: string | null; computed_at: string | null; scan: Scan | null; strategies: (Validation & { id: string })[] | null };
+export type StrategiesResp = { ready: boolean; refreshing: boolean; pending?: boolean; error: string | null; computed_at: string | null; scan: Scan | null; strategies: (Validation & { id: string })[] | null };
 
 const CHECK_KO: Record<string, string> = {
   cagr_beats_exposure_matched_spy: "연복리 > 노출 맞춘 SPY", sharpe_beats_spy_total_return: "샤프 > SPY(배당 포함)", both_halves_positive: "두 구간 모두 플러스",
@@ -85,7 +85,7 @@ function SignalRow({ s, today }: { s: Signal; today: string }) {
 }
 
 export function StrategyBoard() {
-  const r = useApi<StrategiesResp>("/strategies");
+  const r = useSettling<StrategiesResp>("/strategies");
   const f = useApi<Forward>("/strategies/forward");
   const s = r.data?.scan && Array.isArray(r.data.scan.strategies) ? r.data.scan : null;
   if (!r.data) return <Card title="전략 신호"><Empty>{r.error ? "불러오지 못했습니다." : "계산하는 중…"}</Empty></Card>;
@@ -142,7 +142,7 @@ function ForwardCard({ f }: { f: Forward | undefined | null }) {
         ))}
       </div>
       {f.trades.length > 0 && (
-        <table className="st-fwd-table"><thead><tr><th>전략</th><th>종목</th><th>신호일</th><th>상태</th><th className="num">모의 수익(비용 차감)</th></tr></thead>
+        <table className="st-fwd-table"><thead><tr><th>전략</th><th>종목</th><th>신호일</th><th>상태</th><th className="num">모의 수익(비용 차감 · 보유 중은 진입 비용만)</th></tr></thead>
           <tbody>{f.trades.slice(0, 30).map((t) => (
             <tr key={`${t.strategy}${t.ticker}${t.signal_day}`}><td>{t.strategy}</td><td><Link to={`/stocks/${t.ticker}`}>{t.ticker}</Link></td><td>{t.signal_day}</td><td>{t.state_ko}</td>
               <td className="num">{t.ret != null ? pct(t.ret, 2) : t.ret_open != null ? <span className="caption">평가 {pct(t.ret_open, 2)}</span> : "—"}</td></tr>
@@ -181,7 +181,7 @@ export function StockStrategies({ ticker }: { ticker: string }) {
 
 /** Home: today's confirmed signals by strategy, with how far each strategy is verified. */
 export function StrategyToday() {
-  const r = useApi<StrategiesResp>("/strategies");
+  const r = useSettling<StrategiesResp>("/strategies");
   const s = r.data?.scan && Array.isArray(r.data.scan.strategies) ? r.data.scan : null;
   return (
     <Card title="오늘의 전략 신호" right={<Link to="/strategies" className="row tight">전략 보기 →</Link>} testId="strategy-today"

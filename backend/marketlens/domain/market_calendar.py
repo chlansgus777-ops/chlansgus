@@ -174,6 +174,10 @@ def trading_days_between(start: date, end: date) -> int:
     return count
 
 
+def session_open_utc(d: date) -> datetime:
+    return datetime.combine(d, REGULAR_OPEN, tzinfo=NY).astimezone(UTC)
+
+
 def session_close_utc(d: date) -> datetime:
     return datetime.combine(d, regular_close_time(d), tzinfo=NY).astimezone(UTC)
 

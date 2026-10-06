@@ -21,8 +21,8 @@ def _sessions(start: date, end: date) -> list[date]:
     return out
 
 
-def _world(end: date, names: int = 30):
-    days = _sessions(end - timedelta(days=500), end)
+def _world(end: date, names: int = 30, start: date | None = None):
+    days = _sessions(start or end - timedelta(days=500), end)
     rng = np.random.default_rng(5)
     bars = {}
     for j in range(names):
@@ -61,16 +61,51 @@ def test_the_book_shows_holdings_and_records_nothing_before_the_choice(tmp_path)
 
 def test_after_the_first_month_end_the_ranking_is_recorded_once_and_paper_filled_at_the_next_open(tmp_path):
     bars, sector, _days = _world(date(2026, 11, 6))
-    now = datetime(2026, 11, 7, 12, 0, tzinfo=timezone.utc)
     src = lambda a, b: {t: [x for x in bs if a <= x.day <= b] for t, bs in bars.items()}  # noqa: E731
-    mb = MomentumBook(src, lambda: now, tmp_path, lambda: sector, min_names=30)
-    r = mb.book()
+    clock = [datetime(2026, 10, 30, 22, 0, tzinfo=timezone.utc)]  # seen after the month-end close, before the next open
+    mb = MomentumBook(src, lambda: clock[0], tmp_path, lambda: sector, min_names=30)
     mb.book()
-    lines = (tmp_path / "momentum_forward.jsonl").read_text().splitlines()
-    assert [json.loads(x)["day"] for x in lines] == ["2026-10-30"] and date.fromisoformat("2026-10-30") > CHOSEN_ON
+    clock[0] = datetime(2026, 11, 7, 12, 0, tzinfo=timezone.utc)
+    r = mb.book()
+    lines = [json.loads(x) for x in (tmp_path / "momentum_forward.jsonl").read_text().splitlines()]
+    assert [x["day"] for x in lines] == ["2026-10-30"] and lines[0]["timely"] and date.fromisoformat("2026-10-30") > CHOSEN_ON
     f = r["forward"]
     assert f["started"] == "2026-10-30" and len(f["open"]) == 15 and 0.7 < f["invested"] <= 0.76  # 15 × 5 %, after costs
-    assert "실거래" in f["note"]
+    assert "실거래" in f["note"] and "배당 미포함" in f["note"]
+
+
+def test_a_month_end_first_seen_after_its_next_open_is_kept_as_late_and_never_filled(tmp_path):
+    """Independent review 0444a21 F04 / review 2 F01: opening the app on 11-07 must not buy the 11-02 open."""
+    bars, sector, _days = _world(date(2026, 12, 4))
+    src = lambda a, b: {t: [x for x in bs if a <= x.day <= b] for t, bs in bars.items()}  # noqa: E731
+    r = MomentumBook(src, lambda: datetime(2026, 12, 7, 12, 0, tzinfo=timezone.utc), tmp_path, lambda: sector, min_names=30).book()
+    lines = [json.loads(x) for x in (tmp_path / "momentum_forward.jsonl").read_text().splitlines()]
+    assert [x["day"] for x in lines] == ["2026-11-30"] and not lines[0]["timely"]  # only the latest month, never 10-30 back-filled
+    assert r["forward"]["started"] is None and r["forward"]["open"] == [] and r["forward"]["late_records"] == 1
+
+
+def test_the_paper_account_keeps_its_first_fills_years_later(tmp_path):
+    """Review 2 F02: the account must not lose its early trades once they are older than the ranking window."""
+    bars, sector, _days = _world(date(2028, 1, 14), start=date(2025, 6, 2))
+    src = lambda a, b: {t: [x for x in bs if a <= x.day <= b] for t, bs in bars.items()}  # noqa: E731
+    clock = [datetime(2026, 10, 30, 22, 0, tzinfo=timezone.utc)]
+    mb = MomentumBook(src, lambda: clock[0], tmp_path, lambda: sector, min_names=30)
+    mb.book()
+    clock[0] = datetime(2028, 1, 15, 12, 0, tzinfo=timezone.utc)
+    f = mb.book()["forward"]
+    assert f["started"] == "2026-10-30" and f["measured_from"] == "2026-10-30" and f["first_rankings"][0] == "2026-10-30"
+    assert f["invested"] > 0.7 and f["through"] == "2028-01-14"
+
+
+def test_a_name_missing_from_todays_securities_list_still_ranks_in_its_month(tmp_path):
+    """Review 2 F03: the ranking reads every stored name, not only the current list (no survivorship)."""
+    bars, sector, days = _world(date(2026, 10, 5))
+    now = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
+    src = lambda a, b: {t: [x for x in bs if a <= x.day <= b] for t, bs in bars.items()}  # noqa: E731
+    full = MomentumBook(src, lambda: now, tmp_path / "a", lambda: sector, min_names=30).book()
+    top = full["holdings"][0]["ticker"]
+    gone = MomentumBook(src, lambda: now, tmp_path / "b", lambda: {t: s for t, s in sector.items() if t != top}, min_names=30).book()
+    assert [h["ticker"] for h in gone["holdings"]][:3] == [h["ticker"] for h in full["holdings"]][:3]
 
 
 def test_a_market_without_enough_history_at_the_latest_month_end_is_held_never_shown_from_an_older_month(tmp_path):
@@ -88,8 +123,8 @@ def test_a_market_without_enough_history_at_the_latest_month_end_is_held_never_s
     r = MomentumBook(src, lambda: now, tmp_path, lambda: sector, min_names=2).book()
     assert r["state"] == "HELD" and not r["holdings"] and r["latest_month_end"] == "2026-09-30" and r["ready_names"] == 0
     assert "09-30" in r["reasons"][0] and "부족" in r["reasons"][0]
-    # the app's own bar: fewer than 500 names with a year of bars → held as well
+    # the app's own floor: fewer than 40 names with a year of bars → held as well
     full, sector2, _d = _world(date(2026, 10, 5))
     r2 = MomentumBook(lambda a, b: {t: [x for x in bs if a <= x.day <= b] for t, bs in full.items()}, lambda: now, tmp_path, lambda: sector2).book()
-    assert r2["state"] == "HELD" and r2["ready_names"] == 30 and "500개 이상" in r2["reasons"][0]
+    assert r2["state"] == "HELD" and r2["ready_names"] == 30 and "40개 이상" in r2["reasons"][0]  # the floor: the top 40
     assert not (tmp_path / "momentum_forward.jsonl").exists()

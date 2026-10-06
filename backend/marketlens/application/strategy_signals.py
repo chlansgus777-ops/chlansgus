@@ -27,12 +27,19 @@ import numpy as np
 
 from marketlens.domain import strategies as S
 from marketlens.domain.market import Bar
-from marketlens.domain.market_calendar import last_completed_session, next_trading_day, session_close_utc
+from marketlens.domain.market_calendar import TradingSession, classify_session, last_completed_session, next_trading_day, session_close_utc, session_open_utc
 
 log = logging.getLogger("marketlens.strategies")
 
 COST = 0.0015  # a side, as the backtest
-HISTORY_DAYS = 420  # calendar days of bars read (≥ 252 sessions + the 200-day line)
+HISTORY_DAYS = 420
+# a preliminary signal reads a regular-session trade this recent; an older or pre/after-market price holds it
+# (independent review 0444a21 F07: an 8-hour-old premarket quote made a "current" preliminary signal)
+PRELIM_MAX_AGE = timedelta(minutes=20)
+
+
+def fresh_quote(q: tuple[float, datetime] | None, now: datetime) -> bool:
+    return (q is not None and classify_session(q[1]) == TradingSession.REGULAR and timedelta(0) <= now - q[1] <= PRELIM_MAX_AGE)  # calendar days of bars read (≥ 252 sessions + the 200-day line)
 STOCK_KINDS = {"CS", "ADRC", "OS", "stock", "STOCK", ""}
 
 STATUS_KO = {"VERIFYING": "검증 중", "NOT_ADOPTED": "미채택", "FORWARD": "백테스트 통과 · 전진 모의운영 중"}
@@ -91,11 +98,12 @@ def _signal_row(spec: S.StrategySpec, ticker: str, a: Arrays, i: int, kind: str,
 
 class StrategySignals:
     def __init__(self, bars_all: Callable[[date, date], dict[str, list[Bar]]], now: Callable[[], datetime], data_dir: Path,
-                 kinds: Callable[[], dict[str, str]] | None = None, results_path: Path | None = None) -> None:
+                 kinds: Callable[[], dict[str, str]] | None = None, results_path: Path | None = None, mode: str = "") -> None:
         self._bars_all = bars_all
         self._now = now
         self._kinds = kinds or (lambda: {})
-        self._log = Path(data_dir) / "strategy_forward.jsonl"
+        # one journal per data mode: a MOCK signal never enters the LIVE record (independent review 0444a21 F02)
+        self._log = Path(data_dir) / (f"strategy_forward_{mode.lower()}.jsonl" if mode else "strategy_forward.jsonl")
         self._results_path = results_path
         self._lock = threading.Lock()
 
@@ -157,7 +165,7 @@ class StrategySignals:
             # quote does not carry — it is held, never guessed
             if live is not None and now.date() > session:
                 q = live(t)
-                if q is not None and q[1].date() == now.date():
+                if fresh_quote(q, now):
                     px, ts = q
                     pa = arrays(done + [Bar(now.date(), px, px, px, px, 0.0)])
                     j = len(pa.days) - 1
@@ -205,7 +213,7 @@ class StrategySignals:
                           "execute_at": next_trading_day(session).isoformat() if sig else None}
             if not tradable:
                 row["reasons"] = [f"거래 대상 아님 — 종가 ${S.MIN_PRICE:g} 이상·20일 평균 거래대금 $2,000만 이상이어야 함"]
-            if sid == "A" and live is not None and live[1].date() == now.date() and now.date() > session:
+            if sid == "A" and fresh_quote(live, now) and now.date() > session:
                 pa = arrays(done + [Bar(now.date(), live[0], live[0], live[0], live[0], 0.0)])
                 row["preliminary"] = bool(S.signals("A", pa.ind)[len(pa.days) - 1])
                 row["preliminary_price_ts"] = live[1].isoformat()
@@ -276,6 +284,11 @@ class StrategySignals:
             return base | {"state": "MISSED", "state_ko": "체결 불가(신호일 일봉 불일치)"}
         if bars[k0].day != next_trading_day(d0):
             return base | {"state": "MISSED", "state_ko": "체결 불가(다음 거래일 거래 없음)"}
+        seen = s.get("recorded_at")
+        if not seen or datetime.fromisoformat(seen) > session_open_utc(bars[k0].day):
+            # first seen after the open it would have bought at: a replay of the past, never a forward fill
+            # (independent review 0444a21 F04)
+            return base | {"state": "MISSED", "state_ko": "체결 불가(다음 거래일 시가 이후에 처음 기록됨)", "recorded_at": seen}
         a = arrays(bars)
         entry = bars[k0].open
         held = 0
@@ -289,10 +302,10 @@ class StrategySignals:
                     return base | {"state": "CLOSED", "state_ko": "청산", "entry_day": bars[k0].day.isoformat(), "entry": entry,
                                    "exit_day": bars[k + 1].day.isoformat(), "exit": px, "ret": ret, "sessions": held, "reason": why}
                 return base | {"state": "EXITING", "state_ko": "다음 거래일 시가 청산 예정", "entry_day": bars[k0].day.isoformat(), "entry": entry,
-                               "last": bars[k].close, "ret_open": bars[k].close / entry - 1, "sessions": held, "reason": why}
+                               "last": bars[k].close, "ret_open": bars[k].close / (entry * (1 + COST)) - 1, "sessions": held, "reason": why}
         last = bars[-1]
         return base | {"state": "OPEN", "state_ko": "모의 보유 중", "entry_day": bars[k0].day.isoformat(), "entry": entry, "last": last.close,
-                       "ret_open": last.close / entry - 1, "sessions": held}
+                       "ret_open": last.close / (entry * (1 + COST)) - 1, "sessions": held}  # the entry cost paid (review F08)
 
 
 def results_path() -> Path:

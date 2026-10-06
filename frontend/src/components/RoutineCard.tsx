@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Buddy } from "./icons";
-import { useApi } from "./useApi";
+import { useSettling } from "./useApi";
 import { price } from "../format";
 
 /** 이번 달 할 일 (owner 2026-10-06: "쉽고 직관적이게") — the one routine on top of home: sell these, buy these (shares and
@@ -11,13 +11,14 @@ export type Routine = {
   state: "COMPUTING" | "PREPARING" | "ACT" | "DONE"; headline: string; when?: string; reasons?: string[]; risk?: string;
   strategy?: string; next_rebalance?: string; next_execute?: string; days_to_next?: number; rebalance_day?: string; execute_day?: string;
   buy?: Buy[]; sell?: Sell[]; keep?: string[]; outside?: string[];
-  account?: { total: number; cash: number; known: boolean; slot: number; unpriced: string[] }; note?: string;
+  account?: { total: number | null; cash: number; known: boolean; slot: number | null; unpriced: string[] }; note?: string;
+  warning?: string | null; pending?: boolean; refreshing?: boolean;
 };
 
 const shares = (n: number) => `${n.toLocaleString("en-US", { maximumFractionDigits: 4 })}주`;
 
 export function RoutineCard() {
-  const r = useApi<Routine>("/routine");
+  const r = useSettling<Routine>("/routine");
   const x = r.data;
   const mood = x?.state === "DONE" ? "happy" : x?.state === "ACT" ? "calm" : "sleepy";
   return (
@@ -32,6 +33,7 @@ export function RoutineCard() {
         {x?.days_to_next != null && <div className="routine-dday" title={`다음 교체 ${x.next_rebalance}`}><b>D-{x.days_to_next}</b><span>다음 교체</span></div>}
       </div>
 
+      {x?.warning && <div className="routine-warn" role="alert" data-testid="routine-warning">{x.warning}</div>}
       {x?.state === "PREPARING" && <div className="routine-prep">{(x.reasons ?? []).map((t) => <div key={t}>{t}</div>)}</div>}
 
       {(x?.sell?.length || x?.buy?.length) ? (
@@ -46,12 +48,12 @@ export function RoutineCard() {
           )}
           {x.buy && x.buy.length > 0 && (
             <li>
-              <div className="step-h"><span className="step-n" aria-hidden>{x.sell?.length ? 2 : 1}</span>사기 — 종목당 계좌의 5%{x.account ? ` (약 ${price(x.account.slot)})` : ""}</div>
+              <div className="step-h"><span className="step-n" aria-hidden>{x.sell?.length ? 2 : 1}</span>사기 — 종목당 계좌의 5%{x.account?.slot != null ? ` (약 ${price(x.account.slot)})` : ""}</div>
               <ul className="routine-list">
                 {x.buy.map((b) => (
                   <li key={b.ticker}>
                     <Link to={`/stocks/${b.ticker}`}>{b.ticker}</Link>
-                    <span>{b.shares != null ? (b.shares > 0 ? shares(b.shares) : "1주 가격이 5%보다 큼") : "가격 없음"}</span>
+                    <span>{b.shares != null ? (b.shares > 0 ? shares(b.shares) : "1주 가격이 5%보다 큼") : x.account?.slot == null ? "수량 계산 대기" : "가격 없음"}</span>
                     <span className="muted">{b.amount != null && b.shares ? `약 ${price(b.amount)}` : price(b.price)}</span>
                   </li>
                 ))}

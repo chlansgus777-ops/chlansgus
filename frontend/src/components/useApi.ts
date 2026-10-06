@@ -122,18 +122,18 @@ onMutation((_method, path) => {
 onAppState((prev, next) => {
   if (!prev) return;
   if (prev.scan_id !== next.scan_id || (prev.scan_running && !next.scan_running)) {
-    invalidateApi(["/dashboard", "/opportunities", "/stocks/", "/watchlist", "/performance", "/issues", "/scan", "/readiness"]);
+    invalidateApi(["/dashboard", "/opportunities", "/stocks/", "/watchlist", "/performance", "/issues", "/scan", "/readiness", "/strategies", "/routine"]);
   }
   if (prev.sync_running && !next.sync_running) invalidateAfterSync();
   // the account changed in the background (a trade at Toss, a deposit): holdings, cash and everything sized with them
   if ((prev.broker?.version ?? 0) !== (next.broker?.version ?? 0) || (prev.broker?.error ?? null) !== (next.broker?.error ?? null)) {
-    invalidateApi(["/portfolio", "/broker/", "/dashboard", "/stocks/", "/opportunities"]);
+    invalidateApi(["/portfolio", "/broker/", "/dashboard", "/stocks/", "/opportunities", "/routine"]);
   }
 });
 
 /** Data preparation finished (seen by the status poller): prices, readiness and everything computed from them. */
 export function invalidateAfterSync(): void {
-  invalidateApi(["/readiness", "/dashboard", "/opportunities", "/portfolio", "/stocks/", "/watchlist", "/performance"]);
+  invalidateApi(["/readiness", "/dashboard", "/opportunities", "/portfolio", "/stocks/", "/watchlist", "/performance", "/strategies", "/routine"]);
 }
 
 /** Tests only: start every test from an empty cache. */

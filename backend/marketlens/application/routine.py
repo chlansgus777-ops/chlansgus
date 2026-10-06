@@ -42,12 +42,14 @@ def plan(book: Mapping[str, Any] | None, holdings: Sequence[tuple[str, float]], 
             unpriced.append(t)
         else:
             value += q * p
-    total = cash + value
-    slot = total * SLOT
+    # a holding without a price leaves the account total unknown: no 5 % amount is computed from a partial total
+    # (independent review 2 F04: an unpriced holding shrank the total and every amount with it)
+    total = cash + value if not unpriced else None
+    slot = total * SLOT if total is not None else None
     buys = []
     for t in buy:
         p = price(t)
-        shares = math.floor(slot / p) if p and p > 0 else None
+        shares = math.floor(slot / p) if slot is not None and p and p > 0 else None
         buys.append({"ticker": t, "rank": rank.get(t), "price": p, "shares": shares,
                      "amount": shares * p if shares is not None and p else None, "target_amount": slot})
     sells = [{"ticker": t, "shares": held[t], "price": price(t)} for t in sell]
@@ -67,6 +69,8 @@ def plan(book: Mapping[str, Any] | None, holdings: Sequence[tuple[str, float]], 
         "state": state, "headline": headline, "when": when, "rebalance_day": book.get("rebalance_day"), "execute_day": book["execute_day"],
         "sell": sells, "buy": buys, "keep": keep, "outside": outside,
         "account": {"total": total, "cash": cash, "known": cash_known, "slot": slot, "unpriced": unpriced},
+        "warning": (f"보유 종목 {', '.join(sorted(unpriced))}의 가격을 받지 못해 계좌 총액을 계산할 수 없습니다 — 살 수량은 가격을 받은 뒤 표시합니다."
+                    if unpriced else None),
         "note": ("계좌 금액을 몰라 10만 달러 기준 예시입니다 — 설정에서 토스증권을 연결하거나 현금을 입력하면 내 계좌 기준으로 바뀝니다."
                  if not cash_known else "종목당 계좌의 5% 기준입니다. 주문은 증권사 앱에서 직접 하세요."),
     }
