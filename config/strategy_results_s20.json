@@ -14,7 +14,16 @@
   "cost": 0.0015,
   "cost_stress": 0.003,
   "securities": 8551,
-  "sessions": 2698
+  "sessions": 2698,
+  "reproduced": [
+   {
+    "commit": "aa707f82795b9d51e83e7bd688f1d8dbe7da9ae8",
+    "workflow_run": "37485968970",
+    "finished_at": "2026-10-06T15:18:36Z",
+    "identical": true,
+    "note": "루틴·화면·LIVE 수정 커밋에서 같은 자료(data_sha256 동일)로 다시 계산 — 모든 변형의 수치가 그대로입니다(엔진 변경 없음)."
+   }
+  ]
  },
  "benchmarks": {
   "spy_total_return": {
