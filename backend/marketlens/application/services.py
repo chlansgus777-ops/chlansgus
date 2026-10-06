@@ -266,6 +266,11 @@ class MarketLensService:
         from marketlens.application.strategy_signals import StrategySignals, results_path
         self.strategy = StrategySignals(self._strategy_bars, self.now, settings.data_dir,
                                         kinds=(self.store.instrument_kinds if self.store is not None else None), results_path=results_path())
+        # the owner's 대형주 모멘텀 (application/momentum_book.py): the backtest's monthly book on the stored bars
+        from marketlens.application.momentum_book import MomentumBook
+        from marketlens.config import CONFIG_DIR
+        self.momentum = MomentumBook(self._strategy_bars, self.now, settings.data_dir, self._stock_sectors,
+                                     results_path=CONFIG_DIR / "strategy_results_s20.json")
         self.quotes.annotate = self.judge.annotate
         self.judge.on_reanalyze = self.request_reanalysis
         # the owner's own trade rules on the held names (내 규칙 알림): same prices, same alert center
@@ -1205,6 +1210,20 @@ class MarketLensService:
         return {"ready": snap.ready, "refreshing": snap.refreshing, "error": snap.error,
                 "computed_at": snap.computed_at.isoformat() if snap.computed_at else None, "scan": snap.value,
                 "strategies": None if snap.value else [{"id": k} | v for k, v in self.strategy.status().items()]}
+
+    def _stock_sectors(self) -> dict[str, str]:
+        """The app's stocks (no ETFs) with their sector — the momentum book's universe and its sector cap."""
+        from marketlens.application.strategy_signals import STOCK_KINDS
+
+        kinds = self.store.instrument_kinds() if self.store is not None else {}
+        secs = self.data.securities(self.now().date()).value or []
+        return {x.ticker: (x.sector or "Unknown") for x in secs
+                if not x.is_etf and (not kinds or kinds.get(x.ticker, "") in STOCK_KINDS)}
+
+    def momentum_book(self) -> dict[str, Any]:
+        snap = self.refresher.get("strategies:momentum", self.momentum.book, max_age=self.STRATEGY_EVERY, wait=8.0)
+        return {"ready": snap.ready, "refreshing": snap.refreshing, "error": snap.error,
+                "computed_at": snap.computed_at.isoformat() if snap.computed_at else None, "book": snap.value}
 
     def strategy_ticker(self, ticker: str) -> dict[str, Any]:
         return self.strategy.ticker(ticker, self._live_price(ticker.upper()))

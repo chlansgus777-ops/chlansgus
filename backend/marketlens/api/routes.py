@@ -659,6 +659,12 @@ def strategies(req: Request) -> dict[str, Any]:
     return svc(req).strategy_signals()
 
 
+@router.get("/strategies/momentum")
+def strategies_momentum(req: Request) -> dict[str, Any]:
+    """대형주 모멘텀 (M-NF-1.0, the owner's choice): this month's book, last changes, next rebalance, the paper record."""
+    return svc(req).momentum_book()
+
+
 @router.get("/strategies/forward")
 def strategies_forward(req: Request) -> dict[str, Any]:
     """The forward paper log: the confirmed signals since the rules were fixed, filled from the stored bars."""

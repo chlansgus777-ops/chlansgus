@@ -222,3 +222,22 @@ def test_strategy_routes_carry_the_committed_verdict(mock_svc):
         assert c.get("/api/strategies/forward").status_code == 200
         t = c.get("/api/stocks/AAPL/strategies")
         assert t.status_code == 200 and t.json()["ticker"] == "AAPL"
+
+
+def test_the_momentum_book_route_answers_with_its_owner_status():
+    svc = make_service()  # its own service: the shared one's background refresher stops with earlier clients
+    app = create_app(svc.settings, service=svc, run_migrations=False)
+    with TestClient(app, headers={"X-MarketLens-Client": "test"}) as c:
+        import time
+
+        b = None
+        for _ in range(30):  # computed in the background: the first answer may arrive while it is still computing
+            r = c.get("/api/strategies/momentum")
+            assert r.status_code == 200
+            b = r.json()["book"]
+            assert not r.json()["error"], r.json()["error"]
+            if b is not None:
+                break
+            time.sleep(1)
+        assert b["version"] == "M-NF-1.0" and b["validation"]["status"] == "OWNER" and b["state"] in ("READY", "HELD")
+        assert b["validation"]["backtest"]["mdd"] < -0.5 and b["validation"]["risks"]  # the risk travels with the list

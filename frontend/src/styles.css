@@ -1458,3 +1458,24 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(164, 148,
   .brand .mark, .empty .buddy, .page-title h1::after, main > h1::after, .page-head h1::after { animation: none; }
   button:active:not(:disabled), .btn:active, a.card:hover, .card.link:hover, .live-signal:hover, .nav a:hover { transform: none; }
 }
+
+/* 대형주 모멘텀 (MomentumViews.tsx): the monthly book with its risk always next to it */
+.st-badge.st-warn { color: var(--warn); background: var(--warn-soft); white-space: normal; text-align: right; }
+.mom { display: grid; gap: 14px; }
+.mom-risk { padding: 12px 14px; border-radius: var(--r-md); border: 1px solid rgba(243, 201, 106, 0.28); background: var(--warn-soft); font-size: 13.5px; }
+.mom-risk b { color: var(--warn); }
+.mom-risk ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); }
+.mom-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
+.mom-changes { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip.up { color: var(--up); border-color: rgba(95, 224, 189, 0.3); }
+.chip.down { color: var(--down); border-color: rgba(255, 122, 152, 0.3); }
+.mom-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.mom-table th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.mom-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); }
+.mom-table .r { text-align: right; }
+.mom-fwd { padding: 12px 14px; border-radius: var(--r-md); background: rgba(255, 255, 255, 0.02); border: 1px solid var(--line); }
+.mom-today { display: grid; gap: 10px; }
+.mom-tickers { display: flex; flex-wrap: wrap; gap: 6px; }
+.mom-tickers .chip { color: var(--text); text-decoration: none; }
+.mom-tickers .chip:hover { border-color: var(--accent-line); }
+@media (max-width: 560px) { .mom-table th:nth-child(3), .mom-table td:nth-child(3), .mom-table th:nth-child(5), .mom-table td:nth-child(5) { display: none; } }

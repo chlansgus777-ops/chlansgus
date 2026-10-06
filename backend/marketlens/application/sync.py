@@ -35,7 +35,9 @@ RECENT_EMPTY = timedelta(days=7)
 # calendar days of market-wide daily bars the sync keeps: about 262 sessions — enough for the one-year history
 # (240 sessions, readiness "가격 이력(1년)") and the 200-day average. It was 300 days (~206 sessions), so the one-year
 # share could never leave 0 % (owner report 2026-09-28).
-BACKFILL_DAYS = 380
+# 400 since 2026-10-06 (~276 sessions): the momentum book ranks at a month-end up to a month back and needs 253
+# sessions there (12-1 month return), so 380 (~262) left it no margin.
+BACKFILL_DAYS = 400
 
 
 @dataclass

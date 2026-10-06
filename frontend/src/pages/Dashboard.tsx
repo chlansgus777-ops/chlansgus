@@ -12,6 +12,7 @@ import { LiveZone } from "../components/LiveZone";
 import { useLiveRows } from "../components/liveBoard";
 import { MorningBriefing } from "../components/Briefing";
 import { StrategyToday } from "../components/StrategyViews";
+import { MomentumToday } from "../components/MomentumViews";
 import { HoldingPlans } from "../components/HoldingPlans";
 import { ago, day, num, pct, price, stampEt, errKo } from "../format";
 import { ACTION_PLAIN, BULLISH, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
@@ -228,6 +229,7 @@ export default function Dashboard() {
 
       <MorningBriefing />
       <HoldingPlans actionsOnly />
+      <MomentumToday />
       <StrategyToday />
       <div className="home-grid">
         <div className="home-main">
