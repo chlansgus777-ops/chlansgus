@@ -95,6 +95,14 @@ function Shell() {
             <StatePanel kind="disconnected" what={`백엔드 연결 실패: ${sys.error}`} actions={<button onClick={st.refresh}>다시 시도</button>} />
           </div>
         )}
+        {/* phone width: the six destinations as a bottom tab bar (the top row keeps search, the view switch and settings) */}
+        <nav className="tabbar" aria-label="주 메뉴(하단)" data-testid="tabbar">
+          {NAV.map(([to, Icon, label]) => (
+            <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => (isActive || (to === "/stocks" && inStocks) ? "active" : "")}>
+              <Icon /><span>{label}</span>
+            </NavLink>
+          ))}
+        </nav>
         <main className="main" key={loc.pathname.split("/").slice(0, 2).join("/")}>
           <PageBoundary key={loc.pathname}><Suspense fallback={<Loading what="화면" rows={2} />}><Routes>
             <Route path="/" element={<Dashboard />} />

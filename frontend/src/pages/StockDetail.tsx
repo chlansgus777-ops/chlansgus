@@ -135,8 +135,17 @@ const NO_DATA = "자료 부족";
 const lv = (v: number | null | undefined) => (v === null || v === undefined ? NO_DATA : price(v));
 
 /** A brief list with a heading, or the fallback when the backend sent no brief (older API). */
-function StmtList({ items, index, empty }: { items: BriefItem[]; index: Map<string, Evidence>; empty: string }) {
-  return items.length ? <div className="reading">{items.map((it, i) => <Stmt key={i} it={it} index={index} />)}</div> : <div className="caption" style={{ padding: "12px 2px" }}>{empty}</div>;
+function StmtList({ items, index, empty, fold = false }: { items: BriefItem[]; index: Map<string, Evidence>; empty: string; fold?: boolean }) {
+  // ``fold`` (쉽게 보기): the first three reasons, the rest one click away
+  const [all, setAll] = useState(false);
+  if (!items.length) return <div className="caption" style={{ padding: "12px 2px" }}>{empty}</div>;
+  const shown = fold && !all ? items.slice(0, 3) : items;
+  return (
+    <div className="reading">
+      {shown.map((it, i) => <Stmt key={i} it={it} index={index} />)}
+      {fold && items.length > 3 && <button type="button" className="sm ghost" style={{ marginTop: 6 }} aria-expanded={all} onClick={() => setAll((v) => !v)}>{all ? "접기" : `나머지 ${items.length - 3}개 더 보기`}</button>}
+    </div>
+  );
 }
 
 /** Page order (owner's brief): 1 conclusion · 2 reasons · 3 price plan · 4 risks · 5 invalidation · 6 news, issues
@@ -253,6 +262,65 @@ function StockDetail({ ticker }: { ticker: string }) {
   const distStop = e && priceNow ? e.stop / priceNow - 1 : null;
   const distMax = e && priceNow ? e.max_buy / priceNow - 1 : null;
   const triggers = brief?.triggers ?? [];
+  const valuation = (brief ? (
+              <div className="stack">
+                {brief.valuation.items.length ? <div className="reading">{brief.valuation.items.map((it, i) => <Stmt key={i} it={it} index={evIndex} />)}</div> : <div className="caption">밸류에이션 배수를 계산할 자료가 없습니다.</div>}
+                {brief.valuation.limits.map((t, i) => <Notice key={i} tone="warn">{t}</Notice>)}
+              </div>
+            ) : <div className="caption">{e?.rationale.join(" · ") ?? "가격 계획 없음"}</div>);
+  const pricePlan = (
+    <>
+      {/* ③ 가격 계획: the chart is the centre; below it the levels, how they were computed and the buy amount */}
+      <Section no={easy ? 2 : 3} title={easy ? "얼마에 사고, 언제 정리하나" : "가격 계획"} sub={zone.text} />
+      <HoldingPlans ticker={a.ticker} preview={{ price: priceNow, appStop: e?.stop ?? null, appTarget: e?.target1 ?? null }} />
+      <div className="card" data-testid="price-plan">
+        {hist.length > 1 && e ? (
+          <PlanChart data={hist} levels={{ stop: e.stop, maxBuy: e.max_buy, zoneLow: e.acceptable_low, ideal: e.ideal_entry, t1: e.target1, t2: e.target2 }} height={320} />
+        ) : hist.length > 1 ? <PlanChart data={hist} levels={{}} height={260} /> : <Empty>가격 이력이 부족해 차트를 그리지 않습니다.</Empty>}
+        {(() => {
+          const pmap = (
+            <div className="pmap" data-testid="price-map">
+              <MaTouch technicals={a.technicals} price={priceNow} split={split} alert={d.data?.ma_alert} />
+              <SupportResistance technicals={a.technicals as Record<string, unknown>} price={priceNow} split={split} />
+            </div>
+          );
+          return easy ? <Disclosure title="차트 자세히" hint="이동평균선 닿음 · 지지선과 저항선" testId="price-map-fold">{pmap}</Disclosure> : pmap;
+        })()}
+        <div className="divider" />
+        <div className="two">
+          <div>
+            <h3 className="t-card" style={{ marginBottom: 10 }}>계획 수준 <span className="caption" style={{ fontWeight: 500 }}>현재 주식 수 기준 · USD</span></h3>
+            <div className="kv">
+              <span className="k"><Term k="ideal_entry" /></span><span>{lv(e?.ideal_entry)}</span>
+              {!easy && <><span className="k">허용 매수 구간</span><span>{e ? `${price(e.acceptable_low)} ~ ${price(e.acceptable_high)}` : NO_DATA}</span>
+              <span className="k"><Term k="max_buy" /></span><span className="warn">{lv(e?.max_buy)}</span>
+              <span className="k"><Term k="add_zone">추가 매수 조건</Term></span><span>{e ? `보유 중일 때 ${price(e.add_zone_low)} ~ ${price(e.add_zone_high)}` : NO_DATA}</span></>}
+              {easy && <><span className="k"><Term k="max_buy">살 만한 가격</Term></span><span className="warn">{e ? `${price(e.ideal_entry)} ~ ${price(e.max_buy)}` : NO_DATA}</span></>}
+              <span className="k"><Term k="stop">{easy ? "이 아래로 마감하면 정리" : "손절 기준가(종가)"}</Term></span><span className="danger">{e ? `${price(e.stop)} (${pct(e.downside_pct)})` : NO_DATA}</span>
+              <span className="k"><Term k="target">1차 목표</Term></span><span>{e ? `${price(e.target1)} (${pct(e.upside_t1_pct)})` : NO_DATA}</span>
+              {!easy && <><span className="k">2차 목표</span><span>{lv(e?.target2)}</span></>}
+              <span className="k"><Term k="rr">손익비(R/R)</Term></span><span>{e ? <>{num(e.rr_at_current)} <span className="caption">{easy ? "2 이상이 기준" : `현재가 기준 · 이상적 진입가 기준 ${num(e.rr_at_ideal)}`}</span></> : NO_DATA}</span>
+            </div>
+            {!e && <div className="explain" style={{ marginTop: 10 }}>현재가·가격 이력이 부족하거나, 손절가 &lt; 현재가 &lt; 목표가 순서를 만족하는 계획을 만들 수 없어 가격 계획을 제시하지 않습니다.</div>}
+            {!easy && brief && (brief.valuation.plan.length > 0 || brief.valuation.assumptions.length > 0) && (
+              <div className="stack" style={{ gap: 8, marginTop: 14 }}>
+                <div className="t-kicker">이 수준을 정한 방법</div>
+                {brief.valuation.plan.map((it, i) => <div key={i} className="formula">{it.text}{it.why ? <div className="caption">{it.why}</div> : null}</div>)}
+                {brief.valuation.assumptions.map((t, i) => <div key={i} className="assume"><span className="kind k-ASSUME">가정</span><span>{t}</span></div>)}
+              </div>
+            )}
+            <PositionPlanView p={d.data.position_plan} shown={quantityShown(recStatus, lj ? lj.actionable_now : stored.actionable_now)} why={lj?.current_status_reason || rec.current_status_reason} live={{ ticker: a.ticker, recId: rec.id, stop: e?.stop }} />
+          </div>
+          <div>
+            {easy ? <Disclosure title="가격은 어떻게 평가했나" hint="밸류에이션 배수와 계산 방법" testId="valuation-fold">{valuation}</Disclosure> : <>
+            <h3 className="t-card" style={{ marginBottom: 10 }}>가격은 어떻게 평가했나</h3>
+            {valuation}</>}
+          </div>
+        </div>
+        <div className="caption" style={{ marginTop: 14 }}><Term k="close_exit">종가 기준 이탈</Term>: 종가가 손절 기준가 아래로 마감하면 매도(보유 중)·매수 중단으로 판단합니다. 장중에만 내려간 경우는 신규 매수만 멈춥니다. <Term k="paper_stop">모의투자</Term>도 같은 규칙으로 계산합니다. 손익비는 목표 도달 확률이 아닙니다.</div>
+      </div>
+    </>
+  );
   return (
     <div className="grid">
       {/* a thin bar that keeps the answer in sight once the hero has scrolled away (the page is long) */}
@@ -362,10 +430,12 @@ function StockDetail({ ticker }: { ticker: string }) {
         </Card>
       )}
 
+      {/* 쉽게 보기: how much and when to get out comes right after the answer; the reasons follow */}
+      {easy && pricePlan}
       {/* ② 판단 이유: what changed and why it matters, then what supports / argues against the call */}
       {easy ? <Disclosure title="단기 매매 전략 규칙으로 본 이 종목" hint="연구용 · 위 판단과 별개" testId="stock-strategies-fold"><StockStrategies ticker={a.ticker} /></Disclosure>
         : <StockStrategies ticker={a.ticker} />}
-      <Section no={2} title="판단 이유" sub={lj
+      <Section no={easy ? 3 : 2} title="판단 이유" sub={lj
         ? `분석 시점(${stamp(a.as_of)})의 이유입니다 — 위 결론과 가격 계획은 지금 가격으로 다시 계산한 것`  // review F06
         : easy ? "무엇이 달라졌고, 무엇이 판단을 지지하거나 반대하나" : "무엇이 달라졌고, 무엇이 판단을 지지하거나 반대하나 — 문장마다 사실·계산·해석을 표시"} />
       <div className="card">
@@ -376,72 +446,26 @@ function StockDetail({ ticker }: { ticker: string }) {
       </div>
       <div className="split">
         <div className="card">
-          <div className="col-head pos"><span className="mark">▲</span>지지하는 근거<span className="n">{(brief?.support ?? positives).length}</span></div>
-          {brief ? <StmtList items={brief.support} index={evIndex} empty="판단을 지지하는 근거가 따로 없습니다." />
+          <div className="col-head pos"><span className="mark">▲</span>{easy ? "좋은 이유" : "지지하는 근거"}<span className="n">{(brief?.support ?? positives).length}</span></div>
+          {brief ? <StmtList items={brief.support} index={evIndex} fold={easy} empty="판단을 지지하는 근거가 따로 없습니다." />
             : positives.length ? <div className="reading">{positives.map((r, i) => <div key={i} className="stmt tone-pos"><span className="kind k-CALC">계산</span><div className="body">{r.text}<EvidenceChips ids={a.reason_evidence[r.text]} index={evIndex} /></div></div>)}</div>
             : <Empty>뚜렷한 긍정 요인이 없습니다.</Empty>}
         </div>
         <div className="card">
-          <div className="col-head neg"><span className="mark">▼</span>반대하는 근거<span className="n">{(brief?.against ?? negatives).length}</span></div>
-          {brief ? <StmtList items={brief.against} index={evIndex} empty="점수 모델이 찾은 뚜렷한 반대 근거가 없습니다 — 모델이 다루지 않는 위험(소송·경영진·규제)은 뉴스와 공시로 확인하세요." />
+          <div className="col-head neg"><span className="mark">▼</span>{easy ? "조심할 이유" : "반대하는 근거"}<span className="n">{(brief?.against ?? negatives).length}</span></div>
+          {brief ? <StmtList items={brief.against} index={evIndex} fold={easy} empty="점수 모델이 찾은 뚜렷한 반대 근거가 없습니다 — 모델이 다루지 않는 위험(소송·경영진·규제)은 뉴스와 공시로 확인하세요." />
             : negatives.length ? <div className="reading">{negatives.map((r, i) => <div key={i} className="stmt tone-neg"><span className="kind k-CALC">계산</span><div className="body">{r.text}</div></div>)}</div>
             : <Empty>뚜렷한 부정 요인이 없습니다.</Empty>}
         </div>
       </div>
-      <Disclosure title="규칙이 이 판단을 내린 과정" hint="점수 구간·가격 조건·거부권을 차례로 확인한 기록">
+      {!easy && <Disclosure title="규칙이 이 판단을 내린 과정" hint="점수 구간·가격 조건·거부권을 차례로 확인한 기록">
         <ul className="list">{a.decision.reasons.map((r, i) => <li key={i}><span className="dot info">{i + 1}</span><span>{r}</span></li>)}</ul>
         {a.decision.notes.length > 0 && <ul className="list" style={{ marginTop: 10 }}>{a.decision.notes.map((n, i) => <li key={i}><span className="dot warn">!</span><span>{n}</span></li>)}</ul>}
-      </Disclosure>
+      </Disclosure>}
       {/* the return signals only stand here once they count in the score; until then they are reference, folded in ⑧ */}
       {(retSig?.weight ?? 0) > 0 && <ReturnSignalsCard c={retSig} />}
 
-      {/* ③ 가격 계획: the chart is the centre; below it the levels, how they were computed and the buy amount */}
-      <Section no={3} title="가격 계획" sub={zone.text} />
-      <HoldingPlans ticker={a.ticker} preview={{ price: priceNow, appStop: e?.stop ?? null, appTarget: e?.target1 ?? null }} />
-      <div className="card" data-testid="price-plan">
-        {hist.length > 1 && e ? (
-          <PlanChart data={hist} levels={{ stop: e.stop, maxBuy: e.max_buy, zoneLow: e.acceptable_low, ideal: e.ideal_entry, t1: e.target1, t2: e.target2 }} height={320} />
-        ) : hist.length > 1 ? <PlanChart data={hist} levels={{}} height={260} /> : <Empty>가격 이력이 부족해 차트를 그리지 않습니다.</Empty>}
-        <div className="pmap" data-testid="price-map">
-          <MaTouch technicals={a.technicals} price={priceNow} split={split} alert={d.data?.ma_alert} />
-          <SupportResistance technicals={a.technicals as Record<string, unknown>} price={priceNow} split={split} />
-        </div>
-        <div className="divider" />
-        <div className="two">
-          <div>
-            <h3 className="t-card" style={{ marginBottom: 10 }}>계획 수준 <span className="caption" style={{ fontWeight: 500 }}>현재 주식 수 기준 · USD</span></h3>
-            <div className="kv">
-              <span className="k"><Term k="ideal_entry" /></span><span>{lv(e?.ideal_entry)}</span>
-              <span className="k">허용 매수 구간</span><span>{e ? `${price(e.acceptable_low)} ~ ${price(e.acceptable_high)}` : NO_DATA}</span>
-              <span className="k"><Term k="max_buy" /></span><span className="warn">{lv(e?.max_buy)}</span>
-              <span className="k"><Term k="add_zone">추가 매수 조건</Term></span><span>{e ? `보유 중일 때 ${price(e.add_zone_low)} ~ ${price(e.add_zone_high)}` : NO_DATA}</span>
-              <span className="k"><Term k="stop">손절 기준가(종가)</Term></span><span className="danger">{e ? `${price(e.stop)} (${pct(e.downside_pct)})` : NO_DATA}</span>
-              <span className="k"><Term k="target">1차 목표</Term></span><span>{e ? `${price(e.target1)} (${pct(e.upside_t1_pct)})` : NO_DATA}</span>
-              <span className="k">2차 목표</span><span>{lv(e?.target2)}</span>
-              <span className="k"><Term k="rr">손익비(R/R)</Term></span><span>{e ? <>{num(e.rr_at_current)} <span className="caption">현재가 기준 · 이상적 진입가 기준 {num(e.rr_at_ideal)}</span></> : NO_DATA}</span>
-            </div>
-            {!e && <div className="explain" style={{ marginTop: 10 }}>현재가·가격 이력이 부족하거나, 손절가 &lt; 현재가 &lt; 목표가 순서를 만족하는 계획을 만들 수 없어 가격 계획을 제시하지 않습니다.</div>}
-            {brief && (brief.valuation.plan.length > 0 || brief.valuation.assumptions.length > 0) && (
-              <div className="stack" style={{ gap: 8, marginTop: 14 }}>
-                <div className="t-kicker">이 수준을 정한 방법</div>
-                {brief.valuation.plan.map((it, i) => <div key={i} className="formula">{it.text}{it.why ? <div className="caption">{it.why}</div> : null}</div>)}
-                {brief.valuation.assumptions.map((t, i) => <div key={i} className="assume"><span className="kind k-ASSUME">가정</span><span>{t}</span></div>)}
-              </div>
-            )}
-            <PositionPlanView p={d.data.position_plan} shown={quantityShown(recStatus, lj ? lj.actionable_now : stored.actionable_now)} why={lj?.current_status_reason || rec.current_status_reason} live={{ ticker: a.ticker, recId: rec.id, stop: e?.stop }} />
-          </div>
-          <div>
-            <h3 className="t-card" style={{ marginBottom: 10 }}>가격은 어떻게 평가했나</h3>
-            {brief ? (
-              <div className="stack">
-                {brief.valuation.items.length ? <div className="reading">{brief.valuation.items.map((it, i) => <Stmt key={i} it={it} index={evIndex} />)}</div> : <div className="caption">밸류에이션 배수를 계산할 자료가 없습니다.</div>}
-                {brief.valuation.limits.map((t, i) => <Notice key={i} tone="warn">{t}</Notice>)}
-              </div>
-            ) : <div className="caption">{e?.rationale.join(" · ") ?? "가격 계획 없음"}</div>}
-          </div>
-        </div>
-        <div className="caption" style={{ marginTop: 14 }}><Term k="close_exit">종가 기준 이탈</Term>: 종가가 손절 기준가 아래로 마감하면 매도(보유 중)·매수 중단으로 판단합니다. 장중에만 내려간 경우는 신규 매수만 멈춥니다. <Term k="paper_stop">모의투자</Term>도 같은 규칙으로 계산합니다. 손익비는 목표 도달 확률이 아닙니다.</div>
-      </div>
+      {!easy && pricePlan}
 
       {/* ④ 위험 */}
       <Section no={4} title="위험" sub="반대 근거와, 모르는 채로 판단한 것" />

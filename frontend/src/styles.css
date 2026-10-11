@@ -1544,3 +1544,19 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(164, 148,
 .issue-card .meta { color: var(--muted); font-size: 12px; }
 .issue-card .title { color: var(--text); font-size: 15px; line-height: 1.45; }
 .issue-card .who { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+
+/* 쉽게 보기: an empty portfolio's single welcome */
+.pf-welcome { display: flex; flex-direction: column; gap: 12px; padding: 24px 26px; }
+.pf-welcome p { margin: 0; color: var(--text-2); line-height: 1.6; max-width: 720px; }
+.pf-welcome .btn-link { align-self: center; font-weight: 650; }
+
+/* phone width: bottom tab bar */
+.tabbar { display: none; }
+@media (max-width: 640px) {
+  .nav > a:not(.util) { display: none; }
+  .tabbar { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); background: rgba(8, 11, 20, 0.94); border-top: 1px solid var(--line); backdrop-filter: blur(10px); }
+  .tabbar a { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 0; color: var(--muted); font-size: 11px; font-weight: 600; white-space: nowrap; text-decoration: none; }
+  .tabbar a svg { width: 20px; height: 20px; }
+  .tabbar a.active { color: var(--text); }
+  .main { padding-bottom: 96px; }
+}

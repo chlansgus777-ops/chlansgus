@@ -14,6 +14,7 @@ import { ITrash } from "../components/icons";
 import { refreshQuoteSubscriptions } from "../quotes";
 import { useApi, usePoll } from "../components/useApi";
 import { day, num, parseAmount, pct, price, shares, usdWithKo } from "../format";
+import { useEasy } from "../viewMode";
 
 
 interface HoldingV { ticker: string; quantity: number; cost_basis: number; price: number | null; price_day: string | null; market_value: number | null; unrealized_pnl: number | null; unrealized_pct: number | null; weight: number | null; sector: string; split_adjusted?: number; source?: "manual" | "ledger" | "toss"; realized_pnl?: number; dividends?: number; outside_broker?: boolean }
@@ -70,6 +71,7 @@ export default function Portfolio() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [sellFor, setSellFor] = useState<string | null>(null);
+  const easy = useEasy();
   if (p.state === "loading") return <Loading what="포트폴리오 재계산" steps={["보유 종목 종가 확인", "평가금액·손익 계산", "쏠림·상관관계 점검"]} />;
   if (!p.data) return <Err error={p.error} retry={p.reload} />;
   const save = async (body: unknown): Promise<boolean> => {
@@ -110,6 +112,13 @@ export default function Portfolio() {
   const unvalued = x.valuation_status === "UNAVAILABLE";
   const empty = !x.holdings.length;  // no holdings: nothing to diversify and no P&L — never "좋음" or a green ▲ $0  // holdings exist but none could be valued (review 2026-09-28 F10)
   const weights: [string, number][] = [...x.holdings.filter((h) => (h.market_value ?? 0) > 0).map((h) => [h.ticker, h.market_value ?? 0] as [string, number]), ["현금", x.cash]];
+  // 쉽게 보기 with nothing entered yet: one welcome with the two ways in, instead of six cards of dashes
+  const welcome = easy && empty && !toss && !unvalued;
+  const startEntry = () => {
+    const el = document.querySelector<HTMLInputElement>('input[aria-label="보유 종목 코드"]');
+    el?.scrollIntoView?.({ block: "center" });
+    el?.focus();
+  };
   const pnlPct = x.invested_value - x.unrealized_pnl > 0 ? x.unrealized_pnl / (x.invested_value - x.unrealized_pnl) : null;
   return (
     <div className="grid">
@@ -131,7 +140,18 @@ export default function Portfolio() {
       )}
       {x.notes.filter((n) => !(x.missing_prices.length && n.startsWith("가격 데이터 없는 보유 종목")) && !unused.some((u) => n.startsWith(`${u.ticker}: 수동 입력 줄(`) || n.startsWith(`${u.ticker}: 토스증권 계좌 기준`))).map((n, i) => <Notice key={i} tone={/: 토스증권 계좌 기준 /.test(n) ? "info" : "warn"}>{n}</Notice>)}
       <Err error={err} />
-      <div className="g4">
+      {welcome && (
+        <section className="card pf-welcome" data-testid="portfolio-welcome">
+          <h2 className="t-card">아직 내 계좌가 비어 있습니다</h2>
+          <p>가진 주식과 현금을 넣으면 손익, 한 종목에 쏠렸는지, 새 종목을 몇 주 살 수 있는지를 계산해 드립니다. MarketLens는 주문을 넣지 않습니다.</p>
+          <div className="row tight">
+            <button type="button" className="primary" onClick={startEntry} data-testid="welcome-manual">직접 입력하기</button>
+            {!x.broker?.enabled && <Link to="/settings" className="btn-link" data-testid="welcome-toss">토스증권 계좌 연결하기 →</Link>}
+          </div>
+          {assumed && <div className="caption">현금을 넣기 전에는 매수 수량을 가정 금액 {price(x.cash)} 기준으로 계산합니다.</div>}
+        </section>
+      )}
+      {!welcome && <div className="g4">
         {unvalued ? (
           <Card title="총 평가금액" testId="nav-unavailable"><div className="t-key muted">평가 불가</div><div className="caption">보유 종목의 공통 거래일 종가가 없어 합계를 계산하지 않았습니다(현금 {price(x.cash)}만으로 표시하지 않음).</div></Card>
         ) : assumed && empty ? (
@@ -142,8 +162,8 @@ export default function Portfolio() {
         {tossCash ? <Card title="현금" testId="cash-toss"><div className="t-key">{price(x.cash)}</div><div className="caption">토스증권 {x.cash_source === "toss_usd_krw" ? "달러+원화(환산)" : "달러"} 예수금{unvalued || empty ? "" : ` · 전체의 ${pct(x.nav > 0 ? x.cash / x.nav : null, 0, false)}`}</div></Card>
           : assumed ? <Card title="현금" testId="cash-not-entered"><div className="t-key muted">미입력</div><div className="caption">매수 수량은 가정 금액 {price(x.cash)} 기준으로 계산합니다 — 아래에서 실제 현금을 입력하세요</div></Card> : <Card title="현금"><div className="t-key">{price(x.cash)}</div><div className="caption">{unvalued ? "전체 대비 비중 계산 불가" : empty ? "전부 현금" : `전체의 ${pct(x.nav > 0 ? x.cash / x.nav : null, 0, false)}`}</div></Card>}
         <Card title="분산 정도">{unvalued ? <><div className="t-key muted">판단 불가</div><div className="caption">평가금액이 없어 집중도를 계산할 수 없습니다</div></> : empty ? <><div className="t-key muted">해당 없음</div><div className="caption">보유 종목이 생기면 집중도·베타를 계산합니다</div></>
-          : <><div className="t-key">{x.hhi < 0.15 ? "좋음" : x.hhi < 0.3 ? "보통" : "쏠림"}</div><div className="caption"><Term k="hhi">집중도(HHI)</Term> {num(x.hhi, 2)} · <Term k="beta">베타</Term> {num(x.beta, 2)}</div></>}</Card>
-      </div>
+          : <><div className="t-key">{x.hhi < 0.15 ? "좋음" : x.hhi < 0.3 ? "보통" : "쏠림"}</div><div className="caption">{easy ? (x.hhi < 0.15 ? "여러 종목에 잘 나눠져 있습니다" : x.hhi < 0.3 ? "몇 종목 비중이 큽니다" : "한두 종목에 많이 몰려 있습니다") : <><Term k="hhi">집중도(HHI)</Term> {num(x.hhi, 2)} · <Term k="beta">베타</Term> {num(x.beta, 2)}</>}</div></>}</Card>
+      </div>}
       {!empty && (
         <Card title="보유 종목" explain="‘지금 손익’과 ‘오늘’은 1초마다 최신 가격으로 계산합니다(토스증권 계좌 종목은 토스증권 계산 기준). 종가 기준 평가액·비중은 모든 종목을 같은 거래일 종가로 계산한 값으로, 쏠림·베타 계산에 씁니다." testId="holdings">
 <div className="scroll"><table><thead><tr><th>종목</th><th className="num">수량</th><th className="num">매입 단가</th><th className="num">종가(기준일)</th><th>현재가</th><th className="num" title="지금 가격 기준 — 토스증권 계좌 종목은 토스증권이 계산한 손익에 그 뒤 가격 변화만 더한 값">지금 손익</th><th className="num" title="오늘 손익 — 오늘 산 주식은 산 가격부터 계산(토스 앱과 같은 기준)">오늘</th><th className="num" title="같은 거래일 종가로 계산한 평가액 · 평가손익 — 쏠림·베타 계산에 씁니다">평가액·손익(종가)</th><th className="num">비중</th><th className="row-actions"><span className="sr-only">정리</span></th></tr></thead>
@@ -165,7 +185,7 @@ export default function Portfolio() {
       <HoldingPlans />
       {!empty && <KrwReturn k={x.krw} />}
       {toss && <DomesticHoldings items={toss.domestic ?? []} syncedAt={toss.synced_at} />}
-      <div className="g2">
+      {!welcome && <div className="g2">
         <Card title="한 줄 해석" icon="✎">
           {reading.length ? <ul className="list">{reading.map((r, i) => <li key={i}><span className={`dot ${r.tone === "warn" ? "warn" : "info"}`}>{r.tone === "warn" ? "!" : "i"}</span><span>{r.text}</span></li>)}</ul> : <Empty hint="아래에서 종목 코드·수량·매입 단가를 입력하세요.">아직 보유 종목이 없습니다.</Empty>}
         </Card>
@@ -180,7 +200,7 @@ export default function Portfolio() {
             </div>
           )}
         </Card>
-      </div>
+      </div>}
       {toss && <TossFills />}
       {/* with the Toss account connected the account is the source: hand entry and the ledger are for holdings outside it,
           folded until needed (opens by itself for an edit or a prefilled trade) */}
@@ -236,7 +256,12 @@ export default function Portfolio() {
               <button>현금 저장</button>
             </form>}
           </Card>
-          <Ledger today={nyToday()} prefill={sellFor ?? params.get("trade")} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
+          {/* 쉽게 보기: the trade ledger is the more exact way in — folded until wanted (opens by itself for a prefilled trade) */}
+          {easy ? (
+            <Disclosure title="거래 기록으로 더 정확하게" hint="매수·매도를 하나씩 적으면 평단·실현 손익까지 계산합니다" open={!!(sellFor ?? params.get("trade"))} testId="ledger-fold">
+              <Ledger today={nyToday()} prefill={sellFor ?? params.get("trade")} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
+            </Disclosure>
+          ) : <Ledger today={nyToday()} prefill={sellFor ?? params.get("trade")} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />}
         </>
       )}
 
