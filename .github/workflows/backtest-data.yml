@@ -96,7 +96,7 @@ jobs:
           gunzip -f backtest.db.gz
           sha256sum -c backtest.db.sha256
           cd backend && python -m marketlens.backtest.benchmarks --db ../backtest.db --out ../benchmarks.json ${{ inputs.run_args }}
-          cd .. && python3 -c "import json;d=json.load(open('benchmarks.json'));[d[k].pop('monthly',None) for k in ('routine','spy','deposit')];d['random'].pop('runs');d['random']['median_run'].pop('monthly');print(json.dumps(d,ensure_ascii=False,separators=(',',':'),default=str))"
+          cd .. && python3 -c "import json;print(json.dumps(json.load(open('benchmarks.json')),ensure_ascii=False,separators=(',',':'),default=str))"
       - uses: actions/upload-artifact@v4
         if: always() && inputs.task == 'benchmarks'
         with:

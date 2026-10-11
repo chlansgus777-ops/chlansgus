@@ -654,6 +654,45 @@ def backtest_results() -> dict[str, Any]:
     return _json.loads(p.read_text(encoding="utf-8"))
 
 
+@router.get("/routine/evidence")
+def routine_evidence() -> dict[str, Any]:
+    """왜 이 루틴인가: the routine's past record next to its yardsticks (S&P 500, a dollar deposit, random buying under
+    the same rules) — the committed summary of the backtest-data ``benchmarks`` run (config/routine_evidence.json)."""
+    import json as _json
+
+    from marketlens.config import CONFIG_DIR
+
+    p = CONFIG_DIR / "routine_evidence.json"
+    if not p.exists():
+        return {"available": False, "reason": "비교 기준(예금·무작위 매수)을 계산하는 중입니다. 결과가 나오면 이 자리에 표시됩니다."}
+    return {"available": True} | _json.loads(p.read_text(encoding="utf-8"))
+
+
+class GoalIn(BaseModel):
+    amount: float | None = Field(default=None, gt=0, le=1e12, allow_inf_nan=False)
+
+
+@router.get("/goal")
+def get_goal(req: Request) -> dict[str, Any]:
+    """The owner's target account size (USD) for the home screen's progress bar; None until it is set."""
+    s = svc(req)
+    with s.sf() as ss:
+        v = repo.get_setting(ss, "goal_amount")
+    return {"amount": float(v) if v else None}
+
+
+@router.put("/goal")
+def set_goal(req: Request, body: GoalIn) -> dict[str, Any]:
+    s = svc(req)
+    with s.sf() as ss:
+        if body.amount is None:
+            repo.delete_setting(ss, "goal_amount")
+        else:
+            repo.set_setting(ss, "goal_amount", str(body.amount))
+        ss.commit()
+    return {"amount": body.amount}
+
+
 @router.get("/strategies")
 def strategies(req: Request) -> dict[str, Any]:
     """The strategies (rules, version, verification status) and their signals now: confirmed at the last close,

@@ -299,5 +299,9 @@ class MomentumBook:
                 "measured_from": eq[0][0].isoformat() if eq else None, "first_rankings": [r["day"] for r in good[:3]],
                 "return": eq[-1][1] / eq[0][1] - 1 if eq else None, "spy_price_return": spy_ret,
                 "max_drawdown": P.series_stats(eq).get("max_drawdown") if len(eq) > 1 else None,
-                "closed_trades": len(res["trades"]), "open": [k for k, _s, _d, _st in res["open"]],
+                "closed_trades": len(res["trades"]),
+                # every finished trade, the losers as much as the winners (owner spec 2026-10-11: 틀린 것도 공개)
+                "trades": [{"ticker": t.ticker, "entry_day": t.entry_day.isoformat(), "exit_day": t.exit_day.isoformat(), "ret": t.ret}
+                           for t in sorted(res["trades"], key=lambda t: t.exit_day, reverse=True)],
+                "open": [k for k, _s, _d, _st in res["open"]],
                 "invested": res["invested"][-1] if res["invested"] else 0.0} | counts
