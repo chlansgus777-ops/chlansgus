@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { setKoreaTimeOnly } from "./format";
 
 /** 쉽게 보기 / 자세히 보기 (docs/UI_UX_GUIDELINES.md §4). Easy is the app's default: plain Korean words, the
  * answer and its plan. Detail adds the English codes, evidence ids, research numbers and rule formulas.
@@ -25,6 +26,9 @@ export function ViewModeProvider({ children, initial }: { children: ReactNode; i
     set(m);
     try { window.localStorage.setItem(KEY, m); } catch { /* the choice just isn't remembered */ }
   }, []);
+  // Times read before the children render (format.stamp is a plain function); the app shell re-renders on a switch.
+  setKoreaTimeOnly(mode === "easy");
+  useEffect(() => () => setKoreaTimeOnly(false), []);
   return <ViewModeCtx.Provider value={{ mode, setMode }}>{children}</ViewModeCtx.Provider>;
 }
 

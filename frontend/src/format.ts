@@ -85,18 +85,27 @@ function parts(d: Date, timeZone: string): string {
   return `${p.year}-${p.month}-${p.day} ${hour}:${p.minute}`;
 }
 
-/** "2026-09-25 11:00 ET (2026-09-26 00:00 KST)" — US market time first, Korea time alongside. */
+/** 쉽게 보기 shows times in Korea time only, in words a beginner reads (viewMode.tsx sets this while it renders;
+ * outside the app shell it stays off, so every time keeps both clocks as before). */
+let koreaOnly = false;
+export function setKoreaTimeOnly(on: boolean): void { koreaOnly = on; }
+
+/** "2026-09-25 11:00 ET (2026-09-26 00:00 KST)" — US market time first, Korea time alongside.
+ * 쉽게 보기: "2026-09-26 00:00 (한국 시간)". */
 export function stamp(iso: string | null | undefined): string {
   if (!iso) return dash;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return dash;
+  if (koreaOnly) return `${parts(d, "Asia/Seoul")} (한국 시간)`;
   return `${parts(d, "America/New_York")} ET (${parts(d, "Asia/Seoul")} KST)`;
 }
 
 /** Date only ("YYYY-MM-DD"); ISO dates pass through unchanged. */
 export function day(iso: string | null | undefined): string {
   if (!iso) return dash;
-  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : stamp(iso).slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? dash : parts(d, "America/New_York").slice(0, 10);
 }
 
 export function actionClass(a: string | null | undefined): string {
@@ -119,10 +128,10 @@ export function clockPair(iso: string | null | undefined): { et: string; kst: st
   return { et: short(d, "America/New_York"), kst: short(d, "Asia/Seoul") };
 }
 
-/** "09-25(금) 16:00 ET" — a short US-market timestamp. */
+/** "09-25(금) 16:00 ET" — a short US-market timestamp. 쉽게 보기: "09-26(토) 05:00 한국 시간". */
 export function stampEt(iso: string | null | undefined): string {
   const c = clockPair(iso);
-  return c ? `${c.et} ET` : dash;
+  return c ? (koreaOnly ? `${c.kst} 한국 시간` : `${c.et} ET`) : dash;
 }
 
 /** How long ago, from the server's clock: "방금" · "12분 전" · "3시간 전" · "2일 전". */

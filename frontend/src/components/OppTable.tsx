@@ -107,7 +107,8 @@ export function OppTable({ rows, compact = false, commonStale = false }: { rows:
   useViewQuotes(sorted.slice(0, 40).map((r) => r.ticker));
   return (
     <div className="scroll">
-      <table>
+      {/* on a phone (≤640px, styles.css) each row is a card: the name on top, then label · value lines */}
+      <table className="opp-table">
         <thead>
           <tr>
             {cols.map(([k, l, help, numeric]) => (
@@ -122,7 +123,7 @@ export function OppTable({ rows, compact = false, commonStale = false }: { rows:
         <tbody>
           {sorted.map((r) => (
             <tr key={r.id} className={r.actionable_now === false ? "row-expired" : ""} onDoubleClick={() => nav(`/stocks/${r.ticker}`)}>
-              {cols.map(([k, , , numeric]) => <td key={k} data-col={k} className={numeric ? "num" : undefined}>{cell(r, k, commonStale, easy)}</td>)}
+              {cols.map(([k, l, , numeric]) => <td key={k} data-col={k} data-label={(easy && EASY_LABEL[k]) || l} className={numeric ? "num" : undefined}>{cell(r, k, commonStale, easy)}</td>)}
             </tr>
           ))}
         </tbody>
