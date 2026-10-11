@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, type ReactElement, type ReactNode } from "react";
+import { Component, createElement, lazy, Suspense, useEffect, type ComponentType, type ReactElement, type ReactNode } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Loading, ModeBanner, StatePanel } from "./components/ui";
 import { QuickSearch } from "./components/QuickSearch";
@@ -10,14 +10,36 @@ import type { SystemInfo } from "./types";
 import Dashboard from "./pages/Dashboard";
 import Glance from "./glance/Glance";
 import { openGlance } from "./glance/desktop";
-const Stocks = lazy(() => import("./pages/Stocks"));
-const Strategies = lazy(() => import("./pages/Strategies"));
-const StockDetail = lazy(() => import("./pages/StockDetail"));
-const Portfolio = lazy(() => import("./pages/Portfolio"));
-const Market = lazy(() => import("./pages/Market"));
-const Performance = lazy(() => import("./pages/Performance"));
-const Settings = lazy(() => import("./pages/Settings"));
-const Guide = lazy(() => import("./pages/Guide"));
+/** A page loaded on demand that, once its file is here, renders like any other component. React.lazy alone suspends on
+ * its first render even when the file is already loaded, and React then holds the loading screen for at least 300 ms:
+ * every menu's first visit waited that long before it even asked for its data (diagnosis 2026-10-11). */
+type Page = (() => ReactElement) & { preload: () => Promise<unknown> };
+function lazyPage(load: () => Promise<{ default: ComponentType }>): Page {
+  let loaded: ComponentType | null = null;
+  const preload = () => load().then((m) => { loaded = m.default; });
+  const Lazy = lazy(() => load().then((m) => { loaded = m.default; return m; }));
+  return Object.assign(() => createElement(loaded ?? Lazy), { preload });
+}
+const Stocks = lazyPage(() => import("./pages/Stocks"));
+const Strategies = lazyPage(() => import("./pages/Strategies"));
+const StockDetail = lazyPage(() => import("./pages/StockDetail"));
+const Portfolio = lazyPage(() => import("./pages/Portfolio"));
+const Market = lazyPage(() => import("./pages/Market"));
+const Performance = lazyPage(() => import("./pages/Performance"));
+const Settings = lazyPage(() => import("./pages/Settings"));
+const Guide = lazyPage(() => import("./pages/Guide"));
+const PAGES = [Stocks, StockDetail, Portfolio, Market, Performance, Strategies, Settings, Guide];
+
+/** A few seconds after the app opens, fetch the other pages' files in the background (one at a time, when the browser is
+ * idle) so opening a menu shows it at once. A failed fetch is left to the page's own load on the visit. */
+let preloading = false;
+function preloadPages(): void {
+  if (preloading || typeof window === "undefined") return;
+  preloading = true;
+  const idle = (f: () => void) => (typeof window.requestIdleCallback === "function" ? window.requestIdleCallback(() => f(), { timeout: 2000 }) : window.setTimeout(f, 200));
+  const next = (i: number) => { if (i < PAGES.length) idle(() => { void PAGES[i]!.preload().catch(() => undefined).finally(() => next(i + 1)); }); };
+  window.setTimeout(() => next(0), 3000); // after the first screen and its data: never competing with them
+}
 
 /** A replaced build or a failed page must leave navigation and a recovery action visible. */
 export class PageBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -61,6 +83,7 @@ function GlanceButton() {
 }
 
 function Shell() {
+  useEffect(preloadPages, []);
   const st = useStatus()!;
   const sys = st.system;
   const loc = useLocation();
