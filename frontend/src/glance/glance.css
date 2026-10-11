@@ -291,3 +291,23 @@ body:has(.glance):not(:has(.glance.desk)) { background: #07070b; }
 .gl-alpha input[type="range"]:focus-visible { outline: 1.5px solid var(--g-accent); outline-offset: 4px; }
 .gl-alpha b { width: 34px; color: var(--g-1); font-size: 12px; font-weight: 600; text-align: right; }
 .glance { transition: opacity 120ms linear; }
+
+/* ---- watch view: the owner's names, price and today's move only */
+.gl-watch { display: flex; flex-direction: column; flex: 1; min-height: 0; padding-top: 14px; }
+.gl-watch ul { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; overflow-y: auto; scrollbar-width: thin; }
+.gl-whead, .glance .gl-watch li button { display: grid; grid-template-columns: 1fr 96px 64px; align-items: baseline; gap: 6px; }
+.gl-whead span:not(:first-child), .gl-watch li b, .gl-watch li span:last-child { text-align: right; }
+.glance .gl-watch li button { width: 100%; padding: 9px 10px; border-radius: 10px; font-size: 13.5px; }
+.glance .gl-watch li button:hover:not(:disabled) { background: var(--g-s2); }
+.gl-watch li b { color: var(--g-1); font-weight: 600; font-variant-numeric: tabular-nums; }
+.gl-watch li span:last-child { font-variant-numeric: tabular-nums; }
+.gl-watch .pos { color: var(--g-pos); } .gl-watch .neg { color: var(--g-neg); } .gl-watch .muted { color: var(--g-3); }
+.gl-watch.empty .gl-quiet { margin: 8px 0 12px; }
+.gl-wedit { display: grid; gap: 8px; }
+.gl-wchips { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.gl-wchips li { display: inline-flex; align-items: center; gap: 2px; padding: 3px 4px 3px 9px; border-radius: 999px; border: 1px solid var(--g-line); background: var(--g-s1); color: var(--g-1); font-size: 12px; font-weight: 600; }
+.glance .gl-wchips button { width: 18px; height: 18px; border-radius: 50%; color: var(--g-3); font-size: 13px; line-height: 1; }
+.glance .gl-wchips button:hover { background: var(--g-s2); color: var(--g-1); }
+.gl-viewopt > div { display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--g-s1); border: 1px solid var(--g-line); }
+.glance .gl-viewopt button { padding: 4px 9px; border-radius: 7px; color: var(--g-2); font-size: 12px; font-weight: 600; }
+.glance .gl-viewopt button.on { background: var(--g-acc-soft); color: var(--g-1); }

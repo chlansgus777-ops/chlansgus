@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { resetApiCache } from "../components/useApi";
+import { _resetQuotes, applyRows, type QuoteRow } from "../quotes";
 import Glance from "./Glance";
 
 let fail = new Set<string>();
@@ -42,7 +43,7 @@ beforeEach(() => {
     return new Response("{}");
   }));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); _resetQuotes(); });
 
 const fireClick = (el: HTMLElement) => el.click();
 const show = () => render(<MemoryRouter><Glance /></MemoryRouter>);
@@ -216,4 +217,40 @@ it("the menu's window transparency applies to the whole widget, is remembered, a
   expect(localStorage.getItem("ml.glance.opacity")).toBe("60");
   act(() => { fireEvent.change(slider, { target: { value: "90" } }); });
   expect(localStorage.getItem("ml.glance.opacity")).toBe("30");
+});
+
+const quote = (ticker: string, price: number, change_pct: number, v = 1): QuoteRow => ({ ticker, state: "LIVE", session: "REGULAR", subscribed: true, version: v,
+  price, trade_time: null, received_time: null, source: "finnhub", feed: "stream", previous_close: null, change_pct, error: null, judge: null });
+
+it("the watch view shows the owner's names with only their price and today's move, in the owner's order", async () => {
+  localStorage.setItem("ml.glance.view", "watch");
+  localStorage.setItem("ml.glance.watch", "MSFT,005930,AAPL");
+  show();
+  const box = await screen.findByTestId("glance-watch");
+  expect(screen.queryByTestId("glance-focus")).toBeNull();  // the one-symbol view is replaced, not stacked
+  expect([...box.querySelectorAll("li b")].every((b) => b.textContent === "—")).toBe(true);  // no quote yet: never a made-up number
+  act(() => applyRows([quote("MSFT", 512.3, 0.0123), quote("005930", 71200, -0.0081), quote("AAPL", 230, 0)]));
+  const rows = [...box.querySelectorAll("li")].map((li) => li.textContent);
+  expect(rows).toEqual(["MSFT$512.30+1.23%", "005930₩71,200−0.81%", "AAPL$230.000.00%"]);
+  expect(calls.some((c) => c.startsWith("/stocks/"))).toBe(false);  // no per-name analysis is fetched for this view
+});
+
+it("the menu switches to the watch view, adds and removes names, and an empty list says how to start", async () => {
+  show();
+  await screen.findByTestId("glance-action");
+  act(() => { screen.getByRole("button", { name: "Glance 설정" }).click(); });
+  act(() => { screen.getByRole("radio", { name: "관심종목" }).click(); });
+  expect(localStorage.getItem("ml.glance.view")).toBe("watch");
+  expect(screen.getByTestId("glance-watch").textContent).toContain("현재가와 오늘 등락률");
+  const input = screen.getAllByRole("textbox", { name: "관심종목 추가" })[0] as HTMLInputElement;
+  for (const t of ["nvda", "tsla", "nvda"]) {
+    act(() => { fireEvent.change(input, { target: { value: t } }); });
+    act(() => { fireEvent.submit(input.form!); });
+  }
+  expect(localStorage.getItem("ml.glance.watch")).toBe("TSLA,NVDA");  // a name added again moves to the end, never twice
+  expect(screen.getByTestId("glance-watch").textContent).toContain("관심종목 2");
+  act(() => { screen.getByRole("button", { name: "TSLA 빼기" }).click(); });
+  expect(localStorage.getItem("ml.glance.watch")).toBe("NVDA");
+  act(() => { screen.getByRole("radio", { name: "한 종목" }).click(); });
+  expect(await screen.findByTestId("glance-focus")).toBeTruthy();
 });
