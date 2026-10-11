@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions | whymacro | swing | portfolio | portfolio20"
+        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions | whymacro | swing | portfolio | portfolio20 | benchmarks"
         required: true
         default: "probe"
       resume_run_id:
@@ -40,7 +40,7 @@ jobs:
       # §19 strategies A-1.0 / C-1.0, daily portfolio (marketlens/backtest/portfolio.py); resume_run_id = the §16 run
       # whose rows.db gives the fundamental filter (point in time: the last weekly analysis before each day)
       - name: Backtest database (portfolio)
-        if: inputs.task == 'portfolio' || inputs.task == 'portfolio20'
+        if: inputs.task == 'portfolio' || inputs.task == 'portfolio20' || inputs.task == 'benchmarks'
         uses: actions/download-artifact@v4
         with:
           name: backtest-db
@@ -87,6 +87,21 @@ jobs:
           path: |
             portfolio.json
             portfolio_trades.csv
+      # yardsticks of the monthly routine (M-NF): SPY, a dollar deposit (FRED DTB3) and random buying under the same rules
+      - name: Routine yardsticks (benchmarks)
+        if: inputs.task == 'benchmarks'
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: |
+          gunzip -f backtest.db.gz
+          sha256sum -c backtest.db.sha256
+          cd backend && python -m marketlens.backtest.benchmarks --db ../backtest.db --out ../benchmarks.json ${{ inputs.run_args }}
+          cd .. && python3 -c "import json;print(json.dumps(json.load(open('benchmarks.json')),ensure_ascii=False,separators=(',',':'),default=str))"
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.task == 'benchmarks'
+        with:
+          name: backtest-benchmarks
+          path: benchmarks.json
       # §17 short-term strategies (marketlens/backtest/swing.py): offline on the backtest database, nothing else
       - name: Backtest database (swing)
         if: inputs.task == 'swing'
@@ -482,3 +497,31 @@ jobs:
           print("results_sha256", a["results_sha256"], ha, "reproduction", b["results_sha256"], hb)
           assert a["results_sha256"] == ha == hb == b["results_sha256"], "the reproduction gave a different results.json"
           PY
+  publish-benchmarks:
+    # benchmarks: commit the app's copy (config/routine_evidence.json) to the branch the run was started on — never the
+    # default branch directly; the change reaches the app through a reviewed PR like any other
+    if: inputs.task == 'benchmarks' && github.ref_name != github.event.repository.default_branch
+    needs: [run]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-benchmarks
+      - name: Commit the app's copy
+        run: |
+          python3 - <<'PY'
+          import json
+          d = json.load(open("benchmarks.json"))
+          for r in d["random"]["runs"]:
+              r.pop("equity", None)
+          json.dump(d, open("config/routine_evidence.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add config/routine_evidence.json
+          git diff --cached --quiet || git commit -m "Routine evidence from backtest-data run ${GITHUB_RUN_ID} (benchmarks)"
+          git push
