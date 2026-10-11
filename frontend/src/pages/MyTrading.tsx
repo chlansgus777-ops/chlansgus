@@ -209,7 +209,11 @@ function RulesCard({ x, onSaved }: { x: Report; onSaved: () => void }) {
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setT(x.trade_rules); setPat(x.rules); }, [x.trade_rules, x.rules]);
+  // Reset the form only when the saved rules actually change: a background refresh returning the same rules must not
+  // wipe what is being typed (it did, and the clash check then never showed).
+  const savedKey = JSON.stringify([x.trade_rules, x.rules]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setT(x.trade_rules); setPat(x.rules); }, [savedKey]);
   const sug = x.diagnosis.suggested;
   const dirty = JSON.stringify({ ...t, saved_at: null }) !== JSON.stringify({ ...x.trade_rules, saved_at: null });
   const save = async (trade: TradeRules | null, pattern: PatternRules | null) => {
