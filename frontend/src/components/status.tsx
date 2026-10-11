@@ -7,6 +7,7 @@ import { QuoteFeedStatus } from "./LivePrice";
 import { AlertCenter } from "./LiveZone";
 import type { ReadinessInfo, SyncJob } from "./Readiness";
 import { type ApiState, invalidateAfterSync, invalidateApi, useApi, usePoll } from "./useApi";
+import { useEasy } from "../viewMode";
 
 /** /scan/status — the last scan's progress and how much of the list it judged. */
 export interface ScanStatus {
@@ -116,6 +117,7 @@ function measureBar(el: HTMLDivElement | null) {
 
 export function StatusBar() {
   const st = useStatus();
+  const easy = useEasy();  // 쉽게 보기: one line — mode, the US session with Korean time, alerts. Price/analysis stamps live on each page.
   if (!st) return null;
   const sys = st.system.data;
   const now = new Date(st.nowMs).toISOString();
@@ -144,17 +146,17 @@ export function StatusBar() {
       {clock && (
         <Item tone={session ? SESSION_TONE[session] : undefined} icon="◷" testId="sb-session" title="미국 주식시장 세션은 서버의 거래소 달력(휴장일·조기 마감 포함) 기준입니다.">
           <span className="k">미국장</span><b>{session ? (SESSION_KO[session] ?? session) : "확인 전"}</b>
-          <span className="k">· 뉴욕</span>{clock.et}<span className="k">· 한국</span>{clock.kst}
+          {!easy && <><span className="k">· 뉴욕</span>{clock.et}</>}<span className="k">· 한국</span>{clock.kst}
         </Item>
       )}
-      {p && p.priceTs && (
+      {!easy && p && p.priceTs && (
         <Item tone={p.quality && !["FRESH", "DELAYED"].includes(p.quality) ? "warn" : undefined} icon="$" testId="sb-price-time"
               title={`화면에 보이는 가격이 언제 가격인지입니다(화면을 불러온 시각이 아닙니다). ${ago(p.priceTs, st.nowMs)}${p.priceSession ? ` · ${SESSION_KO[p.priceSession] ?? p.priceSession}` : ""}${p.quality ? ` · ${QUALITY_INFO[p.quality]?.label ?? p.quality}` : ""}`}>
           <span className="k">{p.label} 가격</span><b>{stampEt(p.priceTs)}</b>
           <span className="k opt">· {ago(p.priceTs, st.nowMs)}{p.priceSession ? ` · ${SESSION_KO[p.priceSession] ?? p.priceSession}` : ""}{p.quality ? ` · ${QUALITY_INFO[p.quality]?.label ?? p.quality}` : ""}</span>
         </Item>
       )}
-      {p && p.analysedAt && (
+      {!easy && p && p.analysedAt && (
         <Item icon="⌖" testId="sb-analysed"><span className="k">분석</span><b>{stampEt(p.analysedAt)}</b><span className="k opt">· {ago(p.analysedAt, st.nowMs)}</span></Item>
       )}
       {sys?.mode === "LIVE" && (job?.status === "RUNNING" ? (

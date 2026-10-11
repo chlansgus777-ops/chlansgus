@@ -10,6 +10,7 @@ import type { SystemInfo } from "./types";
 import Dashboard from "./pages/Dashboard";
 import Glance from "./glance/Glance";
 import { openGlance } from "./glance/desktop";
+import { ViewModeProvider, ViewModeSwitch } from "./viewMode";
 /** A page loaded on demand that, once its file is here, renders like any other component. React.lazy alone suspends on
  * its first render even when the file is already loaded, and React then holds the loading screen for at least 300 ms:
  * every menu's first visit waited that long before it even asked for its data (diagnosis 2026-10-11). */
@@ -71,7 +72,9 @@ export default function App() {
   return (
     <PhoneGate>
       <StatusProvider>
-        <Shell />
+        <ViewModeProvider>
+          <Shell />
+        </ViewModeProvider>
       </StatusProvider>
     </PhoneGate>
   );
@@ -99,6 +102,7 @@ function Shell() {
           </NavLink>
         ))}
         <div className="grow" />
+        <ViewModeSwitch />
         <GlanceButton />
         <NavLink to="/settings" title="설정" className={({ isActive }) => `util${isActive ? " active" : ""}`}><ISettings />설정</NavLink>
         <NavLink to="/guide" title="용어·도움말" className={({ isActive }) => `util${isActive ? " active" : ""}`}><IHelp />용어·도움말</NavLink>
@@ -114,6 +118,14 @@ function Shell() {
             <StatePanel kind="disconnected" what={`백엔드 연결 실패: ${sys.error}`} actions={<button onClick={st.refresh}>다시 시도</button>} />
           </div>
         )}
+        {/* phone width: the six destinations as a bottom tab bar (the top row keeps search, the view switch and settings) */}
+        <nav className="tabbar" aria-label="주 메뉴(하단)" data-testid="tabbar">
+          {NAV.map(([to, Icon, label]) => (
+            <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => (isActive || (to === "/stocks" && inStocks) ? "active" : "")}>
+              <Icon /><span>{label}</span>
+            </NavLink>
+          ))}
+        </nav>
         <main className="main" key={loc.pathname.split("/").slice(0, 2).join("/")}>
           <PageBoundary key={loc.pathname}><Suspense fallback={<Loading what="화면" rows={2} />}><Routes>
             <Route path="/" element={<Dashboard />} />

@@ -1,5 +1,6 @@
 import { useSearchParams } from "react-router-dom";
-import { Err, Loading, Quality, Tabs } from "../components/ui";
+import { Err, Loading, Quality, Tabs, Term } from "../components/ui";
+import { plainKo, useEasy } from "../viewMode";
 import { SectorStrength } from "../components/SectorStrength";
 import { ago, num, pct, stamp, errKo } from "../format";
 import { REGIME_KO, ko } from "../i18n";
@@ -16,6 +17,9 @@ const REGIME_HELP: Record<string, string> = {
   "Multiple Expansion": "금리 하락 등으로 주가 배수가 높아지는 환경", Neutral: "뚜렷한 방향 없이 종목별로 움직이는 환경", Unknown: "거시 지표를 받지 못해 시장 국면을 판단하지 않았습니다",
 };
 const KEY = ["SPX", "NASDAQ_COMP", "VIX", "US10Y", "USD_INDEX", "WTI"];
+const KEY_TERM: Record<string, string> = { VIX: "vix", US10Y: "us10y", USD_INDEX: "dxy", WTI: "wti" };
+/** 쉽게 보기: which way the indicator usually pushes stocks when it rises — the arrow a beginner can read at a glance. */
+const RISE_MEANS: Record<string, string> = { VIX: "오르면 주식에 불리", US10Y: "오르면 성장주에 불리", USD_INDEX: "오르면 수출 기업에 불리", WTI: "오르면 에너지주에 유리" };
 
 /** The market in one place (product overhaul 2026-09-28: 이슈·캘린더 and 시장·거시 were separate menus): the mood
  * first, then the issues, the calendar and the indicator tables as tabs kept in the URL. */
@@ -25,6 +29,8 @@ export default function Market() {
   const tab: Tab = t === "calendar" || t === "macro" || t === "indices" ? t : "issues";
   const m = useMacro();
   const d = m.data;
+  const easy = useEasy();
+  const regime = (k: string) => (easy ? plainKo(ko(REGIME_KO, k)) : ko(REGIME_KO, k));
   return (
     <div className="grid">
       <div className="page-head enter">
@@ -35,17 +41,18 @@ export default function Market() {
       ) : (
         <section className="today enter" aria-label="시장 분위기">
           <div className="t-kicker">시장 분위기{d.as_of ? ` · ${stamp(d.as_of)} 기준${Date.now() - Date.parse(d.as_of) > 30 * 60_000 ? ` (${ago(d.as_of, Date.now())})` : ""}` : ""}{d.refreshing ? " · 새로 받는 중" : d.refresh_error ? " · 새로 받기 실패(이전 값)" : ""}</div>
-          <div className="big" style={{ marginTop: 6 }}><span className="count-l" style={{ fontSize: 30, letterSpacing: "-0.03em" }}>{ko(REGIME_KO, d.primary_regime)}</span></div>
-          <p className="lead">{REGIME_HELP[d.primary_regime] ?? "거시 지표로 판단한 현재 환경"}{d.regimes.filter((r) => r.active && r.regime !== d.primary_regime).length ? ` · 함께 나타난 국면: ${d.regimes.filter((r) => r.active && r.regime !== d.primary_regime).map((r) => ko(REGIME_KO, r.regime)).join(", ")}` : ""}</p>
+          <div className="big" style={{ marginTop: 6 }}><span className="count-l" style={{ fontSize: 30, letterSpacing: "-0.03em" }}><Term k="regime">{regime(d.primary_regime)}</Term></span></div>
+          <p className="lead">{REGIME_HELP[d.primary_regime] ?? "거시 지표로 판단한 현재 환경"}{d.regimes.filter((r) => r.active && r.regime !== d.primary_regime).length ? ` · 함께 나타난 국면: ${d.regimes.filter((r) => r.active && r.regime !== d.primary_regime).map((r) => regime(r.regime)).join(", ")}` : ""}</p>
           <div className="facts" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
             {KEY.map((id) => {
               const s = d.series[id];
               const ch = s ? (s.pct_change_20d !== null ? s.pct_change_20d : null) : null;
               return (
                 <div key={id}>
-                  <div className="t">{SERIES_KO[id] ?? id}</div>
+                  <div className="t">{KEY_TERM[id] ? <Term k={KEY_TERM[id]}>{SERIES_KO[id] ?? id}</Term> : SERIES_KO[id] ?? id}</div>
                   <div className="v">{s ? num(s.latest.value) : <span className="danger">없음</span>}</div>
                   <div className="s">{s ? (ch !== null ? <span className={ch >= 0 ? "pos" : "neg"}>20일 {pct(ch)}</span> : s.change_20d !== null ? `20일 ${num(s.change_20d)}` : "변화 없음") : "MISSING"}{s && s.latest.quality !== "FRESH" ? <> · <Quality q={s.latest.quality} /></> : null}</div>
+                  {easy && RISE_MEANS[id] && <div className="s muted" data-testid={`rise-${id}`}>{RISE_MEANS[id]}</div>}
                 </div>
               );
             })}

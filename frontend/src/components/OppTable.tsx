@@ -7,7 +7,8 @@ import type { OppRow } from "../types";
 import { useQuote, useViewQuotes } from "../quotes";
 import { LivePrice } from "./LivePrice";
 import { LiveZone } from "./LiveZone";
-import { Action, Quality, StatusBadge, Vetoes } from "./ui";
+import { Action, Quality, StatusBadge, Term, Vetoes } from "./ui";
+import { useEasy } from "../viewMode";
 import { BUY_SCORE, SMALL_SCORE } from "../thresholds";
 
 type Key = "rank" | "ticker" | "action" | "score" | "price" | "max_buy" | "rr" | "current_status" | "risk";
@@ -21,6 +22,12 @@ const COLS: [Key, string, string, boolean][] = [
   ["rr", "손익비", "(목표가−현재가)÷(현재가−손절가) — 도달 확률이 아님", true], ["current_status", "현재 유효성", "추천 이후 거래일 경과·현재가로 다시 판정", false],
   ["risk", "이벤트 위험", "가까운 실적·일정의 위험 수준", false],
 ];
+
+/** 쉽게 보기 keeps the five columns a beginner decides with: name, verdict (with its live zone), price, how far to the
+ * highest price worth paying, and the nearest event risk. Rank, score, R/R and the stored status wait in 자세히 보기. */
+const EASY_COLS = new Set<Key>(["ticker", "action", "price", "max_buy", "risk"]);
+const EASY_LABEL: Partial<Record<Key, string>> = { action: "판정", max_buy: "살 만한 최고가", risk: "가까운 일정 위험" };
+const COL_TERM: Partial<Record<Key, string>> = { score: "score", max_buy: "max_buy", rr: "rr" };
 
 /** The latest quote when the app has one for this name; otherwise the analysis-time price, labelled as such — never
  * a bare dash above it. */
@@ -81,6 +88,7 @@ export function OppTable({ rows, compact = false, commonStale = false }: { rows:
   const [sort, setSort] = useState<Key>("rank");
   const [asc, setAsc] = useState(true);
   const nav = useNavigate();
+  const easy = useEasy();
   const sorted = useMemo(() => {
     const r = [...rows];
     r.sort((a, b) => {
@@ -93,7 +101,7 @@ export function OppTable({ rows, compact = false, commonStale = false }: { rows:
     });
     return r;
   }, [rows, sort, asc]);
-  const cols = compact ? COLS.filter(([k]) => k !== "risk") : COLS;
+  const cols = (compact ? COLS.filter(([k]) => k !== "risk") : COLS).filter(([k]) => !easy || EASY_COLS.has(k));
   // the names in the list join the live quote stream (first 40): their verdicts are re-checked with a current price
   // every second instead of reading "현재가 재확인 필요", and a stale analysis among them is redone in the background
   useViewQuotes(sorted.slice(0, 40).map((r) => r.ticker));
@@ -106,7 +114,7 @@ export function OppTable({ rows, compact = false, commonStale = false }: { rows:
               <th key={k} data-col={k} title={help} className={`sortable${numeric ? " num" : ""}`} aria-sort={sort === k ? (asc ? "ascending" : "descending") : "none"}
                   tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (sort === k) setAsc(!asc); else { setSort(k); setAsc(true); } } }}
                   onClick={() => { if (sort === k) setAsc(!asc); else { setSort(k); setAsc(true); } }}>
-                {l}{sort === k ? <span className="dir">{asc ? "▲" : "▼"}</span> : null}
+                {COL_TERM[k] ? <Term k={COL_TERM[k]!}>{(easy && EASY_LABEL[k]) || l}</Term> : (easy && EASY_LABEL[k]) || l}{sort === k ? <span className="dir">{asc ? "▲" : "▼"}</span> : null}
               </th>
             ))}
           </tr>
@@ -114,7 +122,7 @@ export function OppTable({ rows, compact = false, commonStale = false }: { rows:
         <tbody>
           {sorted.map((r) => (
             <tr key={r.id} className={r.actionable_now === false ? "row-expired" : ""} onDoubleClick={() => nav(`/stocks/${r.ticker}`)}>
-              {cols.map(([k, , , numeric]) => <td key={k} data-col={k} className={numeric ? "num" : undefined}>{cell(r, k, commonStale)}</td>)}
+              {cols.map(([k, , , numeric]) => <td key={k} data-col={k} className={numeric ? "num" : undefined}>{cell(r, k, commonStale, easy)}</td>)}
             </tr>
           ))}
         </tbody>
@@ -123,7 +131,7 @@ export function OppTable({ rows, compact = false, commonStale = false }: { rows:
   );
 }
 
-function cell(r: OppRow, k: Key, commonStale = false) {
+function cell(r: OppRow, k: Key, commonStale = false, easy = false) {
   switch (k) {
     case "rank":
       return <span className="muted">{r.rank ?? "—"}</span>;
@@ -139,6 +147,7 @@ function cell(r: OppRow, k: Key, commonStale = false) {
       // the scan-wide "price not current" reason is explained above the table: only what differs stays on the row
       const vetoes = commonStale ? r.vetoes.filter((v) => v !== "STALE_PRICE") : r.vetoes;
       const priceOnly = commonStale && r.vetoes.includes("STALE_PRICE") && r.price_quality !== "FRESH" && r.price_quality !== "DELAYED";
+      if (easy) return <span className="stack-tight"><Action a={r.action} status={r.current_status} quality={r.execution_quality ?? r.data_quality} /><LiveZone ticker={r.ticker} recId={r.id} compact /></span>;
       return <div className="row tight"><Action a={r.action} status={r.current_status} quality={r.execution_quality ?? r.data_quality} /><Vetoes v={vetoes} />{r.data_quality !== "FRESH" && r.data_quality !== "DELAYED" && !priceOnly && !r.vetoes.some((v) => DATA_VETOES.has(v)) ? <Quality q={r.data_quality} /> : null}</div>;
     }
     case "score":

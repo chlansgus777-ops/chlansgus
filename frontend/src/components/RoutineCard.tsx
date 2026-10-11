@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Buddy } from "./icons";
 import { Err } from "./ui";
 import { usePoll, useSettling } from "./useApi";
 import { pct, price } from "../format";
+import { useEasy } from "../viewMode";
 
 /** 이번 달 할 일 (owner 2026-10-06: "쉽고 직관적이게") — the one routine on top of home: sell these, buy these (shares and
  * about how much), leave the rest, next change on this date. The app never orders; the risk line is always there. */
@@ -51,7 +53,13 @@ function FundingLine({ f }: { f: Funding }) {
   );
 }
 
+/** 쉽게 보기 folds a long list to its first rows (20 buys at the start of a month fill the whole home screen). */
+const FOLD_AT = 8;
+const FOLD_SHOW = 6;
+
 export function RoutineCard() {
+  const easy = useEasy();
+  const [unfolded, setUnfolded] = useState(false);
   const r = useSettling<Routine>("/routine");
   const x = r.data;
   // the shares follow the price: an open routine asks again every minute (a held price, a fill at the broker)
@@ -107,7 +115,7 @@ export function RoutineCard() {
             <li>
               <div className="step-h"><span className="step-n" aria-hidden>{x.sell?.length ? 2 : 1}</span>사기 — 종목당 계좌의 5%{x.account?.slot != null ? ` (약 ${price(x.account.slot)})` : ""}</div>
               <ul className="routine-list">
-                {x.buy.map((b) => (
+                {(easy && !unfolded && x.buy.length > FOLD_AT ? x.buy.slice(0, FOLD_SHOW) : x.buy).map((b) => (
                   <li key={b.ticker} className={b.status && b.status !== "OK" ? `cut s-${b.status.toLowerCase()}` : undefined} data-testid={`routine-buy-${b.ticker}`}>
                     <Link to={`/stocks/${b.ticker}`}>{b.ticker}</Link>
                     <span>{buyText(b, x.account?.slot != null)}</span>
@@ -116,6 +124,11 @@ export function RoutineCard() {
                   </li>
                 ))}
               </ul>
+              {easy && x.buy.length > FOLD_AT && (
+                <button type="button" className="sm ghost routine-more" data-testid="routine-more" aria-expanded={unfolded} onClick={() => setUnfolded((u) => !u)}>
+                  {unfolded ? "접기" : `나머지 ${x.buy.length - FOLD_SHOW}종목 더 보기`}
+                </button>
+              )}
               {x.funding && x.account?.total != null && <FundingLine f={x.funding} />}
             </li>
           )}
