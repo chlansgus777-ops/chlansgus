@@ -10,7 +10,7 @@ import type { SystemInfo } from "./types";
 import Dashboard from "./pages/Dashboard";
 import Glance from "./glance/Glance";
 import { openGlance } from "./glance/desktop";
-import { ViewModeProvider, ViewModeSwitch } from "./viewMode";
+import { ViewModeProvider, ViewModeSwitch, useViewMode } from "./viewMode";
 /** A page loaded on demand that, once its file is here, renders like any other component. React.lazy alone suspends on
  * its first render even when the file is already loaded, and React then holds the loading screen for at least 300 ms:
  * every menu's first visit waited that long before it even asked for its data (diagnosis 2026-10-11). */
@@ -87,6 +87,7 @@ function GlanceButton() {
 
 function Shell() {
   useEffect(preloadPages, []);
+  useViewMode(); // a 쉽게/자세히 switch re-renders every page, so plain times (format.stamp) follow it at once
   const st = useStatus()!;
   const sys = st.system;
   const loc = useLocation();

@@ -1565,3 +1565,18 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(164, 148,
   .tabbar a.active { color: var(--text); }
   .main { padding-bottom: 96px; }
 }
+
+/* 종목 목록 on a phone: each row becomes a card (name on top, then label · value lines) instead of a table scrolled
+ * sideways. Sorting stays on wider screens; the phone keeps the list's own order. */
+@media (max-width: 640px) {
+  .opp-table, .opp-table tbody { display: block; width: 100%; }
+  .opp-table thead { display: none; }
+  .opp-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 6px; margin: 0 0 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--s1); }
+  .opp-table tr.row-expired { opacity: 0.75; }
+  .opp-table td { display: contents; }
+  .opp-table td::before { content: attr(data-label); color: var(--muted); font-size: 12.5px; align-self: center; justify-self: start; text-align: left; }
+  .opp-table td > * { justify-self: end; text-align: right; min-width: 0; }
+  .opp-table td[data-col="ticker"]::before, .opp-table td[data-col="rank"] { display: none; }
+  .opp-table td[data-col="ticker"] > * { grid-column: 1 / -1; justify-self: stretch; text-align: left; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+  .opp-table td[data-col="ticker"] a { font-size: 16px; font-weight: 700; }
+}
