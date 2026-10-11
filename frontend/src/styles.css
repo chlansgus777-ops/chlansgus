@@ -1647,3 +1647,34 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(164, 148,
   .ev-cagr, .ev-mdd { font-size: 15px; }
   .ev-name { font-size: 13.5px; }
 }
+/* 추천 근거 page */
+.ev-chart { width: 100%; height: auto; display: block; }
+.ev-chart .grid { stroke: var(--line-2); stroke-width: 1; }
+.ev-chart .ax { fill: var(--muted); font-size: 11px; }
+.ev-chart .lbl { font-size: 12.5px; font-weight: 700; }
+.ev-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 12.5px; color: var(--sub); }
+.ev-legend i { display: inline-block; width: 12px; height: 4px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.ev-years td, .ev-years th { text-align: right; font-variant-numeric: tabular-nums; }
+.ev-years td:first-child, .ev-years th:first-child { text-align: left; }
+.ev-years .pos, .ev-fwd .pos, .ev-reasons .pos, .card .kv .pos { color: var(--up); }
+.ev-years .neg, .ev-fwd .neg, .card .kv .neg, table td.neg { color: var(--down); }
+table td.pos { color: var(--up); }
+.ev-fwd { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.ev-fwd b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.ev-reasons { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; columns: 2; }
+@media (max-width: 760px) { .ev-fwd { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ev-reasons { columns: 1; } }
+/* 첫 사용 안내 */
+.onb-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(3, 5, 10, 0.72); display: grid; place-items: center; padding: 16px; }
+.onb { width: min(480px, 100%); background: var(--s2); border: 1px solid var(--line-3); border-radius: var(--r-xl); padding: 26px 26px 20px; box-shadow: var(--shadow-2); display: grid; gap: 10px; }
+.onb h2 { margin: 0; font-size: 22px; line-height: 1.3; }
+.onb p { margin: 0; font-size: 15.5px; line-height: 1.65; color: var(--text-2); }
+.onb-steps { display: flex; gap: 6px; }
+.onb-steps span { flex: 1; height: 4px; border-radius: 2px; background: var(--s4); }
+.onb-steps span.on, .onb-steps span.done { background: var(--accent); }
+.onb-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.onb-foot .ghost { margin-right: auto; }
+.home-top { align-items: start; }
+@media (max-width: 640px) { .home-head .t-sub { display: none; } .home-head h1 { font-size: 22px; } }
+.todo-clash { color: var(--warn); font-weight: 600; }
+@media (max-width: 640px) { .todo-next { display: none; } .todo-foot { gap: 8px; font-size: 12px; } }
+@media (max-width: 640px) { .todo-card { padding-top: 14px; padding-bottom: 12px; } .todo-why { font-size: 13px; } }

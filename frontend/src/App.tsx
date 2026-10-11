@@ -4,6 +4,7 @@ import { Loading, ModeBanner, StatePanel } from "./components/ui";
 import { QuickSearch } from "./components/QuickSearch";
 import { PhoneGate } from "./components/Phone";
 import { VisitCounter } from "./components/Diagnostics";
+import { Onboarding } from "./components/Onboarding";
 import { StatusBar, StatusProvider, useStatus } from "./components/status";
 import { BrandMark, IFlag, IHelp, IHome, IMarket, IPerf, IPortfolio, ISettings, IStocks } from "./components/icons";
 import type { SystemInfo } from "./types";
@@ -29,6 +30,7 @@ const Market = lazyPage(() => import("./pages/Market"));
 const Performance = lazyPage(() => import("./pages/Performance"));
 const Settings = lazyPage(() => import("./pages/Settings"));
 const Guide = lazyPage(() => import("./pages/Guide"));
+const Evidence = lazyPage(() => import("./pages/Evidence"));
 const PAGES = [Stocks, StockDetail, Portfolio, Market, Performance, Strategies, Settings, Guide];
 
 /** A few seconds after the app opens, fetch the other pages' files in the background (one at a time, when the browser is
@@ -114,6 +116,7 @@ function Shell() {
         {sys.data && sys.data.mode === "MOCK" && <ModeBanner mode="MOCK" />}
         <StatusBar />
         <VisitCounter />
+        <Onboarding />
         {sys.error && (
           <div style={{ padding: "14px 34px 0" }}>
             <StatePanel kind="disconnected" what={`백엔드 연결 실패: ${sys.error}`} actions={<button onClick={st.refresh}>다시 시도</button>} />
@@ -138,6 +141,7 @@ function Shell() {
             <Route path="/performance" element={<Performance />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/guide" element={<Guide />} />
+            <Route path="/evidence" element={<Evidence />} />
             {/* earlier addresses (bookmarks, old links) land on the screen that now holds the same thing */}
             <Route path="/opportunities" element={<Navigate to="/stocks?tab=candidates" replace />} />
             <Route path="/watchlist" element={<Navigate to="/stocks?tab=watch" replace />} />

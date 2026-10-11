@@ -226,7 +226,7 @@ export default function Dashboard() {
   const headline = !x.scan ? choosing ? "후보를 고르는 중입니다" : "아직 후보 선정 결과가 없습니다" : shown.length ? "개 종목이 지금 매수 조건을 통과했습니다" : notReady ? "데이터 준비가 끝나지 않아 후보를 계산하지 못했습니다" : "지금은 매수 조건을 통과한 종목이 없습니다";
   return (
     <div className="grid">
-      <div className="page-head enter">
+      <div className="page-head home-head enter">
         <div>
           <h1>오늘</h1>
           <div className="t-sub">{x.scan ? <>{lv.at ? <><span className="live-dot" aria-hidden />실시간 판정 · 1초 · </> : null}후보 선정 {easy ? ago(x.scan.as_of, nowMs) : `${stampEt(x.scan.as_of)} (${ago(x.scan.as_of, nowMs)})`}{scope ? ` · ${scope}` : ""}</> : choosing ? "시장 분석을 실행 중입니다. 준비된 결과부터 표시합니다." : "데이터 준비와 자동 분석 상태는 설정에서 확인할 수 있습니다."}</div>
@@ -246,8 +246,8 @@ export default function Dashboard() {
         <RoutineSummary />
       </div>
       <EvidenceCard />
+      <div className="home-more-h" aria-hidden><span>더 알아보기 · 내 보유 종목, 오늘 시장과 후보</span></div>
       <HoldingPlans actionsOnly />
-      <div className="home-more-h" aria-hidden><span>더 알아보기 · 오늘 시장과 후보</span></div>
       <MorningBriefing />
       {x.readiness && x.readiness.recommendation_readiness !== "PAPER ONLY" && <ReadinessBanner r={x.readiness} />}
       <div className="home-grid">
@@ -275,7 +275,7 @@ export default function Dashboard() {
 
           {sysMode === "LIVE" && notReady && !shown.length && <span id="data-prep" />}
           <Card title="지금 검토할 후보" right={<Link to="/stocks?tab=candidates" className="row tight">전체 후보 보기 <IArrow width={15} height={15} /></Link>}
-                explain={<>종합 점수 분석의 매수 판정 중 지금도 유효한 종목(최대 5개)입니다. 점수는 상승 확률이 아닙니다.{scoreRecord ? <> <span data-testid="score-record">이 점수 방식을 과거({scoreRecord.start.slice(0, 4)}~{scoreRecord.end.slice(0, 4)})에 그대로 따랐다면 <Term k="cagr">연평균</Term> {pct(scoreRecord.cagr, 1)}로 S&amp;P 500({pct(scoreRecord.spy_cagr, 1)})보다 낮았고, <Term k="worst_fall">최대 하락</Term>은 {pct(scoreRecord.max_drawdown, 0)}였습니다. 참고용으로만 보세요.</span></> : null}</>}>
+                explain={<>종합 점수 분석의 매수 판정 중 지금도 유효한 종목(최대 5개)입니다. 점수는 상승 확률이 아닙니다.{scoreRecord ? <> <span data-testid="score-record">이 점수 방식을 과거({scoreRecord.start.slice(0, 4)}~{scoreRecord.end.slice(0, 4)})에 그대로 따랐다면 <Term k="cagr">연평균</Term> {Math.abs(scoreRecord.cagr) < 0.0005 ? "0.0%" : pct(scoreRecord.cagr, 1)}로 S&amp;P 500({pct(scoreRecord.spy_cagr, 1)})보다 낮았고, <Term k="worst_fall">최대 하락</Term>은 {pct(scoreRecord.max_drawdown, 0)}였습니다. 참고용으로만 보세요.</span></> : null}</>}>
             {shown.length ? <div className="cands">{shown.map((r, i) => <CandidateCard key={r.id} r={r} lead={i === 0 && shown.length !== 2 && shown.length !== 4} />)}</div>
               : notReady && x.readiness ? <NotReady r={x.readiness} onChange={d.reload} />
               : !x.scan ? <StatePanel kind={choosing ? "analyzing" : "not_scanned"} actions={choosing ? undefined : <Link to="/settings?tab=status">데이터·자동 분석 상태 확인 →</Link>} />

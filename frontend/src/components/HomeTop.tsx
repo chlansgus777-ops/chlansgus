@@ -12,6 +12,7 @@ import { invalidateApi, useApi, useSettling } from "./useApi";
  * the same card). Every number carries its unit and what it is measured against; nothing promises a return. */
 
 const tone = (v: number | null | undefined) => (v == null || Math.abs(v) < 1e-9 ? "" : v > 0 ? "pos" : "neg");
+const usd0 = (v: number) => `$${Math.round(v).toLocaleString("en-US")}`;
 const signed = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${price(Math.abs(v))}`;
 /** "2021년 2월" from an ISO day. */
 export const ym = (iso: string | null | undefined) => (iso ? `${iso.slice(0, 4)}년 ${Number(iso.slice(5, 7))}월` : "—");
@@ -93,7 +94,7 @@ export function MyStatus({ cash, cashEntered }: { cash: number | null; cashEnter
 export function routineAction(x: Routine): { what: string; how: string | null } {
   const buys = (x.buy ?? []).filter((b) => b.status === "OK" || b.status === "CASH" || b.status === undefined).filter((b) => b.shares);
   const sells = x.sell ?? [];
-  if (x.state !== "ACT" || (!buys.length && !sells.length)) return { what: x.headline.replace(/^이번 달 할 일:\s*/, ""), how: x.when ?? null };
+  if (x.state !== "ACT" || (!buys.length && !sells.length)) return { what: (x.headline ?? "").replace(/^이번 달 할 일:\s*/, "") || "이번 달 목록을 준비하고 있습니다", how: x.when ?? null };
   const parts = [sells.length ? `${sells.length}종목 팔기` : null, buys.length ? `${buys.length}종목 사기` : null].filter(Boolean);
   const slot = x.account?.slot;
   const how = buys.length ? `${slot != null ? `종목마다 약 ${price(slot)}씩` : "종목마다 같은 금액씩"}${x.funding ? ` · 합계 약 ${price(x.funding.planned)}` : ""}` : null;
@@ -105,6 +106,7 @@ export function RoutineSummary() {
   const r = useSettling<Routine>("/routine");
   const x = r.data;
   const act = x ? routineAction(x) : null;
+  const clash = new Set((x?.conflicts ?? []).map((c) => c.ticker)).size;  // a stop or a take-profit of my own rules must not hide behind the fold
   return (
     <>
       <section className="hero-card todo-card enter" data-testid="routine-summary" aria-labelledby="todo-h">
@@ -112,11 +114,13 @@ export function RoutineSummary() {
         <div className="todo-what" data-testid="todo-what">{act ? act.what : r.error ? "이번 달 목록을 불러오지 못했습니다" : "불러오는 중…"}</div>
         {act?.how && <div className="todo-how">{act.how}</div>}
         <div className="todo-why">
-          <Term k="routine_rule">왜 이 종목들?</Term> 큰 회사 500곳 중 지난 1년 가장 많이 오른 20곳{x?.next_rebalance ? ` · 다음 목록 ${Number(x.next_rebalance.slice(5, 7))}월 ${Number(x.next_rebalance.slice(8, 10))}일` : ""}
+          <Term k="routine_rule">왜 이 종목들?</Term> 지난 1년 가장 많이 오른 큰 회사 20곳<span className="todo-next">{x?.next_rebalance ? ` · 다음 목록 ${Number(x.next_rebalance.slice(5, 7))}월 ${Number(x.next_rebalance.slice(8, 10))}일` : ""}</span>
         </div>
         <div className="todo-foot">
-          <button type="button" className="sm" data-testid="routine-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>{open ? "목록 접기 ▴" : "종목 목록 펼치기 ▾"}</button>
-          <span className="muted">주문은 증권사 앱에서 직접 하세요</span>
+          <button type="button" className="sm" data-testid="routine-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>{open ? "목록 접기 ▴" : "목록 펼치기 ▾"}</button>
+          {clash > 0
+            ? <span className="todo-clash" data-testid="todo-clash">⚠ {clash}종목은 내 규칙과 엇갈림</span>
+            : <span className="muted">주문은 증권사 앱에서 직접 하세요</span>}
         </div>
       </section>
       {open && <div className="routine-unfold" data-testid="routine-unfold"><RoutineCard /></div>}
@@ -169,7 +173,7 @@ export function EvidenceTable({ e }: { e: Evidence }) {
 export function worstLine(e: Evidence): string {
   const dd = e.routine!.drawdown!;
   const back = dd.recovered ? `, 원래 금액을 되찾기까지 ${span(dd.peak, dd.recovered)} 걸렸어요` : ", 아직 원래 금액을 되찾지 못했어요";
-  return `가장 나빴을 때 ${ym(dd.peak)}부터 ${ym(dd.bottom)}까지 계좌가 ${pct(dd.max_drawdown, 0)} 줄었고${back}. 같은 기간 S&P 500의 최대 하락은 ${pct(e.spy!.max_drawdown, 0)}였습니다.`;
+  return `가장 나빴을 때 ${ym(dd.peak)}부터 ${ym(dd.bottom)}까지 계좌가 ${pct(dd.max_drawdown, 0)} 줄었고${back}. S&P 500이 같은 10년 동안 가장 많이 떨어졌을 때는 ${pct(e.spy!.max_drawdown, 0)}(${ym(e.spy!.drawdown?.peak)}~${ym(e.spy!.drawdown?.bottom)})였습니다.`;
 }
 
 /** How the routine stood against the 50 coin-picked runs — said plainly whether it beat all, most or few of them. */
@@ -201,7 +205,7 @@ export function EvidenceCard() {
             <EvidenceTable e={e} />
             <div className="ev-points">
               <div data-testid="ev-random-note">{randomLine(e)}</div>
-              <div>✓ $1,000을 넣었다면 약 {price(1000 * (1 + e.routine!.total_return))}이 됐어요 (S&P 500은 약 {price(1000 * (1 + e.spy!.total_return))}). 거래 수수료는 뺐고, 세금과 환전 비용은 반영하지 않은 값입니다.</div>
+              <div>✓ 처음에 $1,000을 넣었다면 지금 약 {usd0(1000 * (1 + e.routine!.total_return))}입니다 (S&P 500은 약 {usd0(1000 * (1 + e.spy!.total_return))}). 거래 수수료는 뺐고, 세금과 환전 비용은 반영하지 않은 값입니다.</div>
             </div>
             <div className="ev-risk" role="note" data-testid="ev-risk">
               <b>⚠ 최악의 경우도 꼭 보세요.</b> {worstLine(e)} 1년 사이 가장 크게 잃은 때는 {pct(e.routine!.worst_12m?.return, 0)}였습니다. <Term k="swing">출렁임 크기</Term>는 S&P 500의 약 {(e.routine!.volatility / e.spy!.volatility).toFixed(1)}배입니다.
