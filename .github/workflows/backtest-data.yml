@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions | whymacro | swing | portfolio | portfolio20"
+        description: "probe | collect | alpaca | run | diagnose | freeprobe | summary | diff | actions | whymacro | swing | portfolio | portfolio20 | benchmarks"
         required: true
         default: "probe"
       resume_run_id:
@@ -40,7 +40,7 @@ jobs:
       # §19 strategies A-1.0 / C-1.0, daily portfolio (marketlens/backtest/portfolio.py); resume_run_id = the §16 run
       # whose rows.db gives the fundamental filter (point in time: the last weekly analysis before each day)
       - name: Backtest database (portfolio)
-        if: inputs.task == 'portfolio' || inputs.task == 'portfolio20'
+        if: inputs.task == 'portfolio' || inputs.task == 'portfolio20' || inputs.task == 'benchmarks'
         uses: actions/download-artifact@v4
         with:
           name: backtest-db
@@ -87,6 +87,21 @@ jobs:
           path: |
             portfolio.json
             portfolio_trades.csv
+      # yardsticks of the monthly routine (M-NF): SPY, a dollar deposit (FRED DTB3) and random buying under the same rules
+      - name: Routine yardsticks (benchmarks)
+        if: inputs.task == 'benchmarks'
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: |
+          gunzip -f backtest.db.gz
+          sha256sum -c backtest.db.sha256
+          cd backend && python -m marketlens.backtest.benchmarks --db ../backtest.db --out ../benchmarks.json ${{ inputs.run_args }}
+          cd .. && python3 -c "import json;d=json.load(open('benchmarks.json'));[d[k].pop('monthly',None) for k in ('routine','spy','deposit')];d['random'].pop('runs');d['random']['median_run'].pop('monthly');print(json.dumps(d,ensure_ascii=False,separators=(',',':'),default=str))"
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.task == 'benchmarks'
+        with:
+          name: backtest-benchmarks
+          path: benchmarks.json
       # §17 short-term strategies (marketlens/backtest/swing.py): offline on the backtest database, nothing else
       - name: Backtest database (swing)
         if: inputs.task == 'swing'
