@@ -497,3 +497,31 @@ jobs:
           print("results_sha256", a["results_sha256"], ha, "reproduction", b["results_sha256"], hb)
           assert a["results_sha256"] == ha == hb == b["results_sha256"], "the reproduction gave a different results.json"
           PY
+  publish-benchmarks:
+    # benchmarks: commit the app's copy (config/routine_evidence.json) to the branch the run was started on — never the
+    # default branch directly; the change reaches the app through a reviewed PR like any other
+    if: inputs.task == 'benchmarks' && github.ref_name != github.event.repository.default_branch
+    needs: [run]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-benchmarks
+      - name: Commit the app's copy
+        run: |
+          python3 - <<'PY'
+          import json
+          d = json.load(open("benchmarks.json"))
+          for r in d["random"]["runs"]:
+              r.pop("equity", None)
+          json.dump(d, open("config/routine_evidence.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add config/routine_evidence.json
+          git diff --cached --quiet || git commit -m "Routine evidence from backtest-data run ${GITHUB_RUN_ID} (benchmarks)"
+          git push
