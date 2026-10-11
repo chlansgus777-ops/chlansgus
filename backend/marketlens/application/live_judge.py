@@ -34,8 +34,11 @@ REANALYZE_MOVE = 0.05  # a move this large since the analysis asks for a fresh a
 ALERTS_KEPT = 200
 # owner 2026-10-05 + independent review F04: a price wobbling at the max buy re-entered the buy zone again and again,
 # one "매수 구간 진입" each time — the buy-zone alerts of a name (entering and leaving) say it at most once in this
-# window. Stop and target alerts are never held back.
+# window. Stop alerts are never held back.
 BUY_ALERT_COOLDOWN = timedelta(minutes=5)
+# owner 2026-10-11: a price wobbling at the target re-crossed it again and again, one "목표가 위로" each time — the
+# target alerts of a name say it at most once in this window too (their own clock, apart from the buy-zone one).
+TARGET_ALERT_COOLDOWN = timedelta(minutes=5)
 
 
 @dataclass(frozen=True)
@@ -138,6 +141,7 @@ class LiveJudge:
         self._plans: dict[str, LivePlan] = {}
         self._zone: dict[str, tuple[int, str]] = {}  # ticker → (rec_id, zone) last announced
         self._buy_said: dict[str, datetime] = {}  # ticker → when a buy-zone alert (in or out) was last recorded
+        self._target_said: dict[str, datetime] = {}  # ticker → when a target alert was last recorded
         self._move_asked: set[tuple[str, int]] = set()  # (ticker, rec_id) whose big move already asked for a re-analysis
         self._alerts: deque[Alert] = deque(maxlen=ALERTS_KEPT)
         self._next_id = 1
@@ -200,12 +204,19 @@ class LiveJudge:
 
     def _buy_alert_due(self, ticker: str) -> bool:
         """Whether a buy-zone alert of ``ticker`` may be recorded now (BUY_ALERT_COOLDOWN); records it if so."""
+        return self._due(self._buy_said, ticker, BUY_ALERT_COOLDOWN)
+
+    def _target_alert_due(self, ticker: str) -> bool:
+        """Whether a target alert of ``ticker`` may be recorded now (TARGET_ALERT_COOLDOWN); records it if so."""
+        return self._due(self._target_said, ticker, TARGET_ALERT_COOLDOWN)
+
+    def _due(self, said: dict[str, datetime], ticker: str, window: timedelta) -> bool:
         now = self._now()
         with self._lock:
-            last = self._buy_said.get(ticker)
-            if last is not None and now - last < BUY_ALERT_COOLDOWN:
+            last = said.get(ticker)
+            if last is not None and now - last < window:
                 return False
-            self._buy_said[ticker] = now
+            said[ticker] = now
             return True
 
     def _event(self, p: LivePlan, j: dict[str, Any], zone: str, price: float, prev: str | None = None) -> None:
@@ -221,7 +232,9 @@ class LiveJudge:
             else:
                 self.add(t, "STOP_HIT", "warning", f"{t} 계획 손절선 아래 — ${price:,.2f} ≤ ${p.stop:,.2f} ({who}: 이 매수 계획은 무효)", price, p.rec_id)
         elif zone == TARGET_HIT:
-            if p.held:
+            if not self._target_alert_due(t):
+                pass  # said within TARGET_ALERT_COOLDOWN: the re-analysis below is still asked (the service throttles it)
+            elif p.held:
                 self.add(t, "TARGET_HIT", "positive", f"{t} 1차 목표가 도달 — ${price:,.2f} ≥ ${p.target1:,.2f} · 보유 중: 일부 차익 검토", price, p.rec_id)
             else:
                 self.add(t, "TARGET_HIT", "info", f"{t} 계획 목표가 위로 — ${price:,.2f} ≥ ${p.target1:,.2f} ({who}: 지금 사기엔 늦음)", price, p.rec_id)

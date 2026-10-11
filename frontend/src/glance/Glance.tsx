@@ -22,9 +22,12 @@ export default function Glance() {
   usePoll(dash.reload, 60_000);
   usePoll(dash.reload, 3_000, !!dash.data?.regime_status?.pending);  // the regime still loading on the server
   usePoll(macro.reload, 300_000);
+  const [view] = useView();
+  const [watch] = useWatchList();
+  const watching = view === "watch";
   const focus = useFocus(dash.data);
-  const others = candidates(dash.data, focus);
-  useViewQuotes(["SPY", "QQQ", focus, ...others]);
+  const others = watching ? [] : candidates(dash.data, focus);
+  useViewQuotes(["SPY", "QQQ", ...(watching ? watch : [focus, ...others])]);
   const [showAcct] = usePref(ACCT_KEY);
   const acct = useApi<AccountLive>(showAcct ? "/portfolio/live" : null);
   usePoll(acct.reload, 10_000, showAcct);  // the widget needs the account every few seconds, not every second
@@ -45,7 +48,8 @@ export default function Glance() {
     <Shell session={sys.data?.market?.session ?? null} delayed={delayed} wave={waveTone}>
       <Market d={dash.data} m={macro.data} />
       {acctTotals && <Account t={acctTotals} rows={acct.data?.rows ?? []} live={!!acct.data?.live && !acct.error} />}
-      {focus ? <Focus ticker={focus} others={others} /> : <div className="gl-quiet">종목 화면을 열면 그 종목을 여기서 따라갑니다</div>}
+      {watching ? <Watch list={watch} />
+        : focus ? <Focus ticker={focus} others={others} /> : <div className="gl-quiet">종목 화면을 열면 그 종목을 여기서 따라갑니다</div>}
     </Shell>
   );
 }
@@ -110,8 +114,17 @@ function Menu({ onClose }: { onClose: () => void }) {
   const [acct, setAcct] = usePref(ACCT_KEY);
   const [bg, setBg] = useBgPattern();
   const [alpha, setAlpha] = useOpacity();
+  const [view, setView] = useView();
   return (
     <div className="gl-menu" role="dialog" aria-label="Glance 설정">
+      <div className="gl-opt gl-viewopt"><span>보기</span>
+        <div role="radiogroup" aria-label="보기">
+          {VIEWS.map(([k, label]) => (
+            <button key={k} type="button" role="radio" aria-checked={view === k} className={view === k ? "on" : ""} onClick={() => setView(k)}>{label}</button>
+          ))}
+        </div>
+      </div>
+      {view === "watch" && <WatchEditor />}
       {isDesktop() && (
         <div className="gl-opt"><span>항상 위에 표시</span>
           <button type="button" role="switch" aria-checked={top} aria-label="항상 위에 표시" className={top ? "on" : ""}
@@ -137,10 +150,10 @@ function Menu({ onClose }: { onClose: () => void }) {
       <div className="gl-opt"><span>내 계좌 수익률</span>
         <button type="button" role="switch" aria-checked={acct} aria-label="내 계좌 수익률 표시" className={acct ? "on" : ""} onClick={() => setAcct(!acct)}><i /></button>
       </div>
-      <form className="gl-opt" onSubmit={(e) => { e.preventDefault(); if (sym.trim()) followSymbol(sym.trim()); onClose(); }}>
+      {view !== "watch" && <form className="gl-opt" onSubmit={(e) => { e.preventDefault(); if (sym.trim()) followSymbol(sym.trim()); onClose(); }}>
         <span>따라갈 종목</span><input aria-label="따라갈 종목" value={sym} onChange={(e) => setSym(e.target.value.toUpperCase())} placeholder="NVDA" maxLength={12} />
-      </form>
-      {focusSymbol() && (
+      </form>}
+      {view !== "watch" && focusSymbol() && (
         <button type="button" className="gl-link" onClick={() => { clearFocusSymbol(); window.dispatchEvent(new Event("ml-focus")); onClose(); }}>
           자동으로 (추천 1순위 따라가기)
         </button>
@@ -533,6 +546,111 @@ function Other({ t }: { t: string }) {
     <button type="button" onClick={() => followSymbol(t)} title={`${t}를 따라가기`}>
       {t}{c !== null && <span className={tone(c)}>{signed(c, 1)}</span>}
     </button>
+  );
+}
+
+// ------------------------------------------------------------------ watch list (the other view)
+/** Which view the widget shows (this computer only): one followed symbol in depth, or the owner's own list of names
+ * at a glance — each as its current price and today's move, nothing else. */
+type View = "focus" | "watch";
+const VIEW_KEY = "ml.glance.view";
+const VIEWS: [View, string][] = [["focus", "한 종목"], ["watch", "관심종목"]];
+function useView(): [View, (v: View) => void] {
+  const read = (): View => { try { return localStorage.getItem(VIEW_KEY) === "watch" ? "watch" : "focus"; } catch { return "focus"; } };
+  const [v, setV] = useState(read);
+  useEffect(() => {
+    const on = () => setV(read());
+    window.addEventListener("ml-glance-pref", on);
+    window.addEventListener("storage", on);
+    return () => { window.removeEventListener("ml-glance-pref", on); window.removeEventListener("storage", on); };
+  }, []);
+  return [v, (nv: View) => {
+    try { localStorage.setItem(VIEW_KEY, nv); } catch { /* this session only */ }
+    setV(nv);
+    window.dispatchEvent(new Event("ml-glance-pref"));
+  }];
+}
+
+/** The names of the watch view, in the owner's order (this computer only). */
+const WATCH_KEY = "ml.glance.watch", WATCH_MAX = 8;
+const TICKER = /^[A-Z0-9.\-]{1,12}$/;
+function useWatchList(): [string[], (v: string[]) => void] {
+  const read = (): string[] => {
+    try { return [...new Set((localStorage.getItem(WATCH_KEY) ?? "").split(",").filter((t) => TICKER.test(t)))].slice(0, WATCH_MAX); } catch { return []; }
+  };
+  const [v, setV] = useState(read);
+  useEffect(() => {
+    const on = () => setV(read());
+    window.addEventListener("ml-glance-pref", on);
+    window.addEventListener("storage", on);
+    return () => { window.removeEventListener("ml-glance-pref", on); window.removeEventListener("storage", on); };
+  }, []);
+  return [v, (nv: string[]) => {
+    const c = [...new Set(nv)].slice(0, WATCH_MAX);
+    try { localStorage.setItem(WATCH_KEY, c.join(",")); } catch { /* this session only */ }
+    setV(c);
+    window.dispatchEvent(new Event("ml-glance-pref"));
+  }];
+}
+
+/** Add a name (Enter) and remove one (×) — in the menu, and in the watch view while its list is empty. */
+function WatchEditor() {
+  const [list, setList] = useWatchList();
+  const [sym, setSym] = useState("");
+  const full = list.length >= WATCH_MAX;
+  const add = () => {
+    const t = sym.trim().toUpperCase();
+    if (TICKER.test(t) && !full) setList([...list.filter((x) => x !== t), t]);
+    setSym("");
+  };
+  return (
+    <div className="gl-wedit" data-testid="glance-watch-edit">
+      <form className="gl-opt" onSubmit={(e) => { e.preventDefault(); add(); }}>
+        <span>종목 추가</span>
+        <input aria-label="관심종목 추가" value={sym} onChange={(e) => setSym(e.target.value.toUpperCase())} placeholder={full ? `최대 ${WATCH_MAX}개` : "AAPL"}
+          maxLength={12} disabled={full} />
+      </form>
+      {list.length > 0 && (
+        <ul className="gl-wchips" aria-label="관심종목">
+          {list.map((t) => (
+            <li key={t}>{t}<button type="button" aria-label={`${t} 빼기`} onClick={() => setList(list.filter((x) => x !== t))}>×</button></li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function Watch({ list }: { list: string[] }) {
+  if (!list.length) {
+    return (
+      <section className="gl-watch empty" data-testid="glance-watch">
+        <p className="gl-quiet">보고 싶은 종목을 추가하면 현재가와 오늘 등락률만 한눈에 보여 드립니다</p>
+        <WatchEditor />
+      </section>
+    );
+  }
+  return (
+    <section className="gl-watch" data-testid="glance-watch">
+      <div className="gl-hhead gl-whead"><span>관심종목 {list.length}</span><span>현재가</span><span>오늘</span></div>
+      <ul>{list.map((t) => <WatchRow key={t} t={t} />)}</ul>
+    </section>
+  );
+}
+
+function WatchRow({ t }: { t: string }) {
+  const { row: q, link } = useQuote(t);
+  const st = effectiveState(q, link);
+  const stale = !!q && (st === "DELAYED" || st === "RECONNECTING");
+  const c = q?.change_pct ?? null;
+  return (
+    <li>
+      <button type="button" onClick={() => void openAnalyze(`/stocks/${t}`)} title={`${t} 종목 화면 열기`}>
+        <span className="gl-htk">{t}{stale && <i title="실시간 가격 아님" aria-label="실시간 가격 아님" />}</span>
+        <b className={q?.price != null ? undefined : "muted"}>{q?.price != null ? money(q.price, currency(t)) : "—"}</b>
+        <span className={c !== null ? tone(c) : "muted"}>{c !== null ? signed(c) : "—"}</span>
+      </button>
+    </li>
   );
 }
 
