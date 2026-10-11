@@ -101,20 +101,42 @@ export function routineAction(x: Routine): { what: string; how: string | null } 
   return { what: parts.join(" · "), how };
 }
 
+/** "접기" (owner 2026-10-11: between two changes the card has nothing to act on and only takes room): folded per month — the
+ * month's list date is stored, so the next month's new list opens by itself. Per device (browser storage). */
+const FOLD_KEY = "ml.todoFolded";
+function readFold(): string | null { try { return localStorage.getItem(FOLD_KEY); } catch { return null; } }
+function writeFold(v: string | null): void { try { if (v) localStorage.setItem(FOLD_KEY, v); else localStorage.removeItem(FOLD_KEY); } catch { /* not stored: folds for this visit only */ } }
+
 export function RoutineSummary() {
   const [open, setOpen] = useState(false);
+  const [foldedFor, setFoldedFor] = useState<string | null>(readFold);
   const r = useSettling<Routine>("/routine");
   const x = r.data;
   const act = x ? routineAction(x) : null;
   const clash = new Set((x?.conflicts ?? []).map((c) => c.ticker)).size;  // a stop or a take-profit of my own rules must not hide behind the fold
+  const month = x?.rebalance_day ?? x?.next_rebalance ?? "-";
+  const folded = !!x && foldedFor === month;
+  const next = x?.next_rebalance ? `${Number(x.next_rebalance.slice(5, 7))}월 ${Number(x.next_rebalance.slice(8, 10))}일` : null;
+  const fold = (on: boolean) => { const v = on ? month : null; writeFold(v); setFoldedFor(v); if (on) setOpen(false); };
+  if (folded) return (
+    <section className="todo-folded enter" data-testid="routine-folded" aria-label="이번 달 할 일 (접힘)">
+      <span className="t">이번 달 할 일</span>
+      <span className="muted">{next ? `다음 목록 ${next}${x?.days_to_next != null ? ` (${x.days_to_next}일 남음)` : ""}` : "접어 두었습니다"}</span>
+      {clash > 0 && <span className="todo-clash" data-testid="todo-clash">⚠ {clash}종목은 내 규칙과 엇갈림</span>}
+      <button type="button" className="sm ghost" data-testid="routine-unfold-card" onClick={() => fold(false)}>펼치기 ▾</button>
+    </section>
+  );
   return (
     <>
       <section className="hero-card todo-card enter" data-testid="routine-summary" aria-labelledby="todo-h">
-        <div className="hero-kicker" id="todo-h">이번 달 할 일{x?.days_to_next != null ? <span className="dday">다음 교체까지 {x.days_to_next}일</span> : null}</div>
+        <div className="hero-kicker" id="todo-h">이번 달 할 일
+          <span className="row tight">{x?.days_to_next != null ? <span className="dday">다음 교체까지 {x.days_to_next}일</span> : null}
+            <button type="button" className="sm ghost todo-fold" data-testid="routine-fold" title="다음 달 목록이 나올 때까지 한 줄로 접어 둡니다" onClick={() => fold(true)}>접기 ▴</button></span>
+        </div>
         <div className="todo-what" data-testid="todo-what">{act ? act.what : r.error ? "이번 달 목록을 불러오지 못했습니다" : "불러오는 중…"}</div>
         {act?.how && <div className="todo-how">{act.how}</div>}
         <div className="todo-why">
-          <Term k="routine_rule">왜 이 종목들?</Term> 지난 1년 가장 많이 오른 큰 회사 20곳<span className="todo-next">{x?.next_rebalance ? ` · 다음 목록 ${Number(x.next_rebalance.slice(5, 7))}월 ${Number(x.next_rebalance.slice(8, 10))}일` : ""}</span>
+          <Term k="routine_rule">왜 이 종목들?</Term> 지난 1년 가장 많이 오른 큰 회사 20곳<span className="todo-next">{next ? ` · 다음 목록 ${next}` : ""}</span>
         </div>
         <div className="todo-foot">
           <button type="button" className="sm" data-testid="routine-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>{open ? "목록 접기 ▴" : "목록 펼치기 ▾"}</button>

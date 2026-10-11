@@ -79,3 +79,24 @@ it("a clash with my own stop or take-profit rule is said on the folded card", as
   render(<MemoryRouter><RoutineSummary /></MemoryRouter>);
   expect((await screen.findByTestId("todo-clash")).textContent).toContain("1종목은 내 규칙과 엇갈림");
 });
+
+it("the to-do folds to one line for this month, keeps a rule clash visible, and opens again", async () => {
+  localStorage.clear();
+  serve({ "/routine": { ...ACT, rebalance_day: "2026-09-30", conflicts: [{ ticker: "AAA", strategy: "유지", rule: "손절", basis: "" }] } });
+  render(<MemoryRouter><RoutineSummary /></MemoryRouter>);
+  fireEvent.click(await screen.findByTestId("routine-fold"));
+  const bar = await screen.findByTestId("routine-folded");
+  expect(bar.textContent).toContain("다음 목록 10월 30일 (19일 남음)");
+  expect(bar.textContent).toContain("1종목은 내 규칙과 엇갈림");
+  expect(screen.queryByTestId("routine-summary")).toBeNull();
+  expect(localStorage.getItem("ml.todoFolded")).toBe("2026-09-30");
+  fireEvent.click(screen.getByTestId("routine-unfold-card"));
+  expect(await screen.findByTestId("routine-summary")).toBeTruthy();
+});
+
+it("a new month's list opens by itself even when the last one was folded", async () => {
+  localStorage.setItem("ml.todoFolded", "2026-08-29");
+  serve({ "/routine": { ...ACT, rebalance_day: "2026-09-30" } });
+  render(<MemoryRouter><RoutineSummary /></MemoryRouter>);
+  expect(await screen.findByTestId("routine-summary")).toBeTruthy();
+});

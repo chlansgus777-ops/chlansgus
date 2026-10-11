@@ -1678,3 +1678,9 @@ table td.pos { color: var(--up); }
 .todo-clash { color: var(--warn); font-weight: 600; }
 @media (max-width: 640px) { .todo-next { display: none; } .todo-foot { gap: 8px; font-size: 12px; } }
 @media (max-width: 640px) { .todo-card { padding-top: 14px; padding-bottom: 12px; } .todo-why { font-size: 13px; } }
+/* 이번 달 할 일 folded to one line (owner 2026-10-11 "접을수있게") — the status card then takes the whole row */
+.home-top:has(.todo-folded) { grid-template-columns: minmax(0, 1fr); }
+.todo-folded { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 10px 16px; border-radius: var(--r-md); border: 1px solid rgba(95, 224, 189, 0.3); background: var(--s1); font-size: 13.5px; }
+.todo-folded .t { font-weight: 700; }
+.todo-folded button { margin-left: auto; }
+.todo-fold { height: 26px; padding: 0 8px; }
