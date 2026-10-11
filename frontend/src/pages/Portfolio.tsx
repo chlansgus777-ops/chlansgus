@@ -256,8 +256,8 @@ export default function Portfolio() {
               <button>현금 저장</button>
             </form>}
           </Card>
-          {/* 쉽게 보기: the trade ledger is the more exact way in — folded until wanted (opens by itself for a prefilled trade) */}
-          {easy ? (
+          {/* 쉽게 보기, nothing entered yet: the trade ledger is the more exact way in — folded until wanted (opens by itself for a prefilled trade) */}
+          {welcome ? (
             <Disclosure title="거래 기록으로 더 정확하게" hint="매수·매도를 하나씩 적으면 평단·실현 손익까지 계산합니다" open={!!(sellFor ?? params.get("trade"))} testId="ledger-fold">
               <Ledger today={nyToday()} prefill={sellFor ?? params.get("trade")} onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />
             </Disclosure>

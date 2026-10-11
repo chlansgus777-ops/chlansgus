@@ -246,6 +246,10 @@ def test_a_trade_record_becomes_the_holding(page, server):
     """Round 10 feature a): a BUY recorded on the screen is the holding, marked as computed from the records."""
     t = _rows(page, server)[1]["ticker"]
     page.goto(f"{server}/#/portfolio")
+    page.get_by_role("heading", name="내 포트폴리오").wait_for()
+    fold = page.get_by_test_id("ledger-fold")  # 쉽게 보기 with an empty account folds the ledger under one line
+    if fold.count():
+        fold.locator("summary").click()
     page.get_by_role("heading", name="거래 기록").wait_for()
     page.get_by_label("체결일").fill("2026-09-01")
     page.get_by_label("거래 종목 코드").fill(t)
