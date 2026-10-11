@@ -5,6 +5,7 @@ import MyTrading from "./MyTrading";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { Card, Disclosure, Empty, Err, LineChart, Loading, Ribbon, StaleData, Tabs } from "../components/ui";
+import { useEasy } from "../viewMode";
 import { useStatus } from "../components/status";
 import { useApi } from "../components/useApi";
 import { day, num, pct, price } from "../format";
@@ -86,6 +87,7 @@ function RecommendationPerformance() {
   const st = useStatus();
   const mode = st?.system.data?.mode;
   const c = useApi<Cal>("/calibration");
+  const easy = useEasy();
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const act = async (path: string) => {
@@ -101,6 +103,21 @@ function RecommendationPerformance() {
   const settled = x.recommendation_hit_rate["20"]?.n_independent ?? 0;
   const hasResults = x.mature_20d > 0 || settled > 0;
   const progress = Math.min(1, settled / SAMPLE_GOAL);
+  const basis = (
+    <>
+      <Card title="이 성과를 읽기 전에" icon="ℹ" testId="perf-basis">
+        <div className="kv">
+          <span className="k">기간 · 기준일</span><span>{PERIOD_KO[period] ?? period} · {day(x.as_of)}</span>
+          <span className="k">추천 표본</span><span>전체 {x.samples.toLocaleString("ko-KR")}개 · 독립 표본 {x.independent_samples.toLocaleString("ko-KR")}개(같은 날 반복 추천은 1개로 계산)</span>
+          <span className="k">결과 확정(20거래일 경과)</span><span>{x.mature_20d.toLocaleString("ko-KR")}개</span>
+          <span className="k">아직 결과 대기(미성숙)</span><span>{Math.max(0, x.samples - x.mature_20d).toLocaleString("ko-KR")}개 — 성과 계산에서 빠집니다</span>
+          <span className="k">모의투자에서 평가하지 못한 신호</span><span>{x.paper_skipped}개(가격 없음 등)</span>
+          <span className="k">비교 기준(벤치마크)</span><span>SPY(S&P 500 ETF)</span>
+        </div>
+      </Card>
+      <BacktestSection />
+    </>
+  );
   return (
     <div className="grid">
       <div className="row" style={{ justifyContent: "flex-end", marginTop: -8 }}>
@@ -127,17 +144,9 @@ function RecommendationPerformance() {
       <div className="row spread">
         <Tabs<Period> label="기간" value={period} onChange={setPeriod} items={[["30d", "30일"], ["90d", "90일"], ["1y", "1년"], ["all", "전체"]]} />
       </div>
-      <Card title="이 성과를 읽기 전에" icon="ℹ" testId="perf-basis">
-        <div className="kv">
-          <span className="k">기간 · 기준일</span><span>{PERIOD_KO[period] ?? period} · {day(x.as_of)}</span>
-          <span className="k">추천 표본</span><span>전체 {x.samples.toLocaleString("ko-KR")}개 · 독립 표본 {x.independent_samples.toLocaleString("ko-KR")}개(같은 날 반복 추천은 1개로 계산)</span>
-          <span className="k">결과 확정(20거래일 경과)</span><span>{x.mature_20d.toLocaleString("ko-KR")}개</span>
-          <span className="k">아직 결과 대기(미성숙)</span><span>{Math.max(0, x.samples - x.mature_20d).toLocaleString("ko-KR")}개 — 성과 계산에서 빠집니다</span>
-          <span className="k">모의투자에서 평가하지 못한 신호</span><span>{x.paper_skipped}개(가격 없음 등)</span>
-          <span className="k">비교 기준(벤치마크)</span><span>SPY(S&P 500 ETF)</span>
-        </div>
-      </Card>
-      <BacktestSection />
+      {/* 쉽게 보기: the counting rules and the 2017~2026 research check fold into one line under the answer */}
+      {/* 쉽게 보기: the counting rules and the 2017~2026 research check fold into one line under the answer */}
+      {easy ? <Disclosure title="계산 기준과 과거 검증 (연구용)" hint="표본 수·벤치마크·2017~2026 과거 시뮬레이션" testId="perf-research">{basis}</Disclosure> : basis}
       {hasResults ? (
         <>
           <div className="grid g4">

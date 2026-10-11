@@ -17,6 +17,7 @@ import { useAnalysisJob } from "../components/useAnalysisJob";
 import { rememberStock } from "../components/QuickSearch";
 import { PlanChart } from "../components/PlanChart";
 import { HoldingPlans } from "../components/HoldingPlans";
+import { useEasy } from "../viewMode";
 import { Action, Bar, Card, Disclosure, Empty, Err, EvidenceChips, FreshnessTable, Loading, Metric, Notice, Quality, Ribbon, ScoreMeter, Section, StaleData, StatePanel, StatusBadge, Stmt, Term, isExpired } from "../components/ui";
 import { usePageTime, useStatus } from "../components/status";
 import { usePoll, useApi } from "../components/useApi";
@@ -175,6 +176,7 @@ function StockDetail({ ticker }: { ticker: string }) {
   // stock never needs a button). Reading still never writes: this is the page's own command (POST), and a phone,
   // which may only look, waits for the PC instead.
   const onPhone = useContext(OnPhone);
+  const easy = useEasy();
   const noAnalysis = !d.data && d.errorStatus === 404;
   const startRef = useRef(analysisJob.start);
   startRef.current = analysisJob.start;
@@ -268,7 +270,7 @@ function StockDetail({ ticker }: { ticker: string }) {
         <div className="eyebrow">
           <span><Link to="/stocks">종목</Link> / {a.security.exchange} · {a.sector_known === false ? <span className="warn">업종 분류 불명확</span> : a.security.industry}{a.security.is_adr ? ` · 해외 발행사(${a.security.country_of_incorporation})` : ""}</span>
           <span className="right">
-            {a.mode === "MOCK" && <span className="pill tone-danger">모의 데이터</span>}
+            {a.mode === "MOCK" && !easy && <span className="pill tone-danger">모의 데이터</span>}
             <LiveZone ticker={a.ticker} />
             <UnlessLive ticker={a.ticker} recId={rec.id}><StatusBadge s={rec.current_status} reason={rec.current_status_reason} action={finalAction} /></UnlessLive>
           </span>
@@ -278,9 +280,10 @@ function StockDetail({ ticker }: { ticker: string }) {
         </div>
         <div className="verdict-row">
           <span className="verdict" data-testid="verdict">{expired ? "지금은 유효하지 않은 매수 신호" : VERDICT_KO[finalAction] ?? finalAction}</span>
-          <Action a={finalAction} status={recStatus} quality={lj ? lj.data_quality : rec.execution_quality ?? rec.data_quality} lg />
+          {/* 쉽게 보기: the big verdict already names the call — one badge, not two words for the same thing */}
+          {!easy && <Action a={finalAction} status={recStatus} quality={lj ? lj.data_quality : rec.execution_quality ?? rec.data_quality} lg />}
         </div>
-        {lj && <div className="live-line" data-testid="live-judgement"><span className="live-dot" aria-hidden />실시간 판정 {liveTime(lj.at)} · 점수 {lj.score.toFixed(1)} · 저장된 분석({stamp(lj.analysed_at)})에 현재가 {price(lj.price)}를 넣어 1초마다 다시 계산</div>}
+        {lj && !easy && <div className="live-line" data-testid="live-judgement"><span className="live-dot" aria-hidden />실시간 판정 {liveTime(lj.at)} · 점수 {lj.score.toFixed(1)} · 저장된 분석({stamp(lj.analysed_at)})에 현재가 {price(lj.price)}를 넣어 1초마다 다시 계산</div>}
         <p className="headline">{adv.headline}</p>
         {adv.details.length > 0 && <div className="details">{adv.details.map((t, i) => <div key={i}>· {t}</div>)}</div>}
         <div className="metrics">
@@ -360,10 +363,11 @@ function StockDetail({ ticker }: { ticker: string }) {
       )}
 
       {/* ② 판단 이유: what changed and why it matters, then what supports / argues against the call */}
-      <StockStrategies ticker={a.ticker} />
+      {easy ? <Disclosure title="단기 매매 전략 규칙으로 본 이 종목" hint="연구용 · 위 판단과 별개" testId="stock-strategies-fold"><StockStrategies ticker={a.ticker} /></Disclosure>
+        : <StockStrategies ticker={a.ticker} />}
       <Section no={2} title="판단 이유" sub={lj
         ? `분석 시점(${stamp(a.as_of)})의 이유입니다 — 위 결론과 가격 계획은 지금 가격으로 다시 계산한 것`  // review F06
-        : "무엇이 달라졌고, 무엇이 판단을 지지하거나 반대하나 — 문장마다 사실·계산·해석을 표시"} />
+        : easy ? "무엇이 달라졌고, 무엇이 판단을 지지하거나 반대하나" : "무엇이 달라졌고, 무엇이 판단을 지지하거나 반대하나 — 문장마다 사실·계산·해석을 표시"} />
       <div className="card">
         <div className="card-head"><h3 className="t-card">최근 무엇이 달라졌나</h3><span className="caption">분석 {stampEt(rec.as_of)} 기준</span></div>
         {brief ? <StmtList items={brief.changed} index={evIndex} empty="지난 분석 이후 달라진 점이 없습니다." />

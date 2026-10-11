@@ -5,6 +5,7 @@ import { ACTION_INFO, BULLISH, DATA_TYPE_KO, QUALITY_INFO, STANCE_KO, STATUS_INF
 import type { Evidence, FreshnessCheck } from "../types";
 import { Buddy, IAlert, IInfo } from "./icons";
 import { BUY_SCORE, SMALL_SCORE } from "../thresholds";
+import { useEasy } from "../viewMode";
 
 export type Tone = "ok" | "warn" | "danger" | "info" | "neutral";
 
@@ -16,20 +17,22 @@ export function isExpired(a: string | null | undefined, status?: string | null, 
 /** Action badge. An expired bullish action must never look like a normal, actionable BUY. */
 export function Action({ a, status, quality, lg }: { a: string | null | undefined; status?: string | null; quality?: string | null; lg?: boolean }) {
   const info = a ? ACTION_INFO[a] : undefined;
+  const label = useEasy() && info ? info.label : actionLabel(a);  // 쉽게 보기: "매수", 자세히 보기: "매수(BUY)"
   if (isExpired(a, status, quality)) {
     return (
       <span className={`badge a-EXPIRED${lg ? " lg" : ""}`} title={`${info?.help ?? ""}\n\n⚠ ${STATUS_INFO[status ?? "EXPIRED"]?.help ?? "현재 유효하지 않은 추천"}`} data-testid="action-expired">
-        <s>{actionLabel(a)}</s> · {STATUS_INFO[status ?? "EXPIRED"]?.label ?? "만료"}
+        <s>{label}</s> · {STATUS_INFO[status ?? "EXPIRED"]?.label ?? "만료"}
       </span>
     );
   }
-  return <span className={`${actionClass(a)}${lg ? " lg" : ""}`} title={info?.help ?? ""}>{actionLabel(a)}</span>;
+  return <span className={`${actionClass(a)}${lg ? " lg" : ""}`} title={info?.help ?? ""}>{label}</span>;
 }
 
 export function Quality({ q }: { q: string | null | undefined }) {
   const k = q ?? "MISSING";
   const info = QUALITY_INFO[k];
-  return <span className={`q-${k}`} title={info?.help ?? ""}>{info ? `${info.label}(${k})` : k}</span>;
+  const easy = useEasy();
+  return <span className={`q-${k}`} title={info?.help ?? ""}>{info ? (easy ? info.label : `${info.label}(${k})`) : k}</span>;
 }
 
 const STATUS_ICON: Record<string, string> = { CURRENT: "✓", NEEDS_REVALIDATION: "!", PLAN_INVALIDATED: "✕", AGING: "◷", UNVERIFIED: "?", SUPERSEDED: "↻", EXPIRED: "◷" };
@@ -317,15 +320,16 @@ export interface BriefItem { kind: string; text: string; why?: string | null; to
 
 /** One typed statement of the analysis brief: kind tag, the sentence, why it matters, where it comes from. */
 export function Stmt({ it, index }: { it: BriefItem; index?: Map<string, Evidence> }) {
+  const easy = useEasy();  // 쉽게 보기: the sentence and why it matters; the kind tag, evidence ids and source wait in 자세히 보기
   return (
-    <div className={`stmt${it.tone && it.tone !== "neutral" ? ` tone-${it.tone}` : ""}`}>
-      <KindTag k={it.kind} />
+    <div className={`stmt${it.tone && it.tone !== "neutral" ? ` tone-${it.tone}` : ""}${easy ? " plain" : ""}`}>
+      {!easy && <KindTag k={it.kind} />}
       <div className="body">
         {it.label ? <span className="lab">{it.label}</span> : null}{it.text}
-        {index && it.evidence?.length ? <EvidenceChips ids={it.evidence} index={index} /> : null}
+        {!easy && index && it.evidence?.length ? <EvidenceChips ids={it.evidence} index={index} /> : null}
       </div>
       {it.why ? <div className="why">{it.why}</div> : null}
-      {(it.source || it.when) ? <div className="meta">{it.source ? <span>출처 {it.source}</span> : null}{it.when ? <span>기준 {it.when.includes("T") ? stamp(it.when) : it.when}</span> : null}</div> : null}
+      {!easy && (it.source || it.when) ? <div className="meta">{it.source ? <span>출처 {it.source}</span> : null}{it.when ? <span>기준 {it.when.includes("T") ? stamp(it.when) : it.when}</span> : null}</div> : null}
     </div>
   );
 }

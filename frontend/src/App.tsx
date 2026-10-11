@@ -10,6 +10,7 @@ import type { SystemInfo } from "./types";
 import Dashboard from "./pages/Dashboard";
 import Glance from "./glance/Glance";
 import { openGlance } from "./glance/desktop";
+import { ViewModeProvider, ViewModeSwitch } from "./viewMode";
 const Stocks = lazy(() => import("./pages/Stocks"));
 const Strategies = lazy(() => import("./pages/Strategies"));
 const StockDetail = lazy(() => import("./pages/StockDetail"));
@@ -49,7 +50,9 @@ export default function App() {
   return (
     <PhoneGate>
       <StatusProvider>
-        <Shell />
+        <ViewModeProvider>
+          <Shell />
+        </ViewModeProvider>
       </StatusProvider>
     </PhoneGate>
   );
@@ -76,6 +79,7 @@ function Shell() {
           </NavLink>
         ))}
         <div className="grow" />
+        <ViewModeSwitch />
         <GlanceButton />
         <NavLink to="/settings" title="설정" className={({ isActive }) => `util${isActive ? " active" : ""}`}><ISettings />설정</NavLink>
         <NavLink to="/guide" title="용어·도움말" className={({ isActive }) => `util${isActive ? " active" : ""}`}><IHelp />용어·도움말</NavLink>

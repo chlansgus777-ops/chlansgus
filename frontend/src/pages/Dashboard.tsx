@@ -2,7 +2,8 @@ import { sectorKo } from "../i18n";
 import { Fragment, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { IArrow, IEvent, IPortfolio, IStar } from "../components/icons";
-import { Action, Card, Empty, Err, Loading, Notice, ScoreMeter, StaleData, StatePanel } from "../components/ui";
+import { Action, Card, Empty, Err, Loading, Notice, ScoreMeter, StaleData, StatePanel, Term } from "../components/ui";
+import { plainKo, useEasy } from "../viewMode";
 import { NotReady, ReadinessBanner, SyncControl, type ReadinessInfo } from "../components/Readiness";
 import { type ScanStatus, usePageTime, useStatus } from "../components/status";
 import { useApi, usePoll } from "../components/useApi";
@@ -84,6 +85,7 @@ function groupBy<T>(xs: T[], key: (x: T) => string): [string, T[]][] {
 }
 
 function CandidateCard({ r, lead }: { r: OppRow; lead?: boolean }) {
+  const easy = useEasy();
   const plain = ACTION_PLAIN[r.action] ?? "";
   const zone = r.ideal_entry != null && r.max_buy != null ? `${price(r.ideal_entry)}–${num(r.max_buy, 2)}` : "자료 부족";  // one line in the tile
   const toMax = r.price != null && r.max_buy != null ? r.max_buy / r.price - 1 : null;
@@ -96,16 +98,21 @@ function CandidateCard({ r, lead }: { r: OppRow; lead?: boolean }) {
       {r.key_reason ? <div className="why"><b>핵심 이유 · </b>{r.key_reason}</div> : null}
       <div className="facts">
         <div title="최신 시세(앱 공용 스트림) — 아래 ‘분석 가격’과 다를 수 있습니다"><div className="t">현재가</div><div className="v"><CardPrice r={r} /></div></div>
-        <div title="이상적 진입가 ~ 최대 매수가 (백엔드 가격 계획)"><div className="t">검토 가격대</div><div className="v" style={{ fontSize: 13, whiteSpace: "nowrap" }}>{zone}</div></div>
-        <div title="종가가 이 가격 아래로 마감하면 매수 근거가 깨졌다고 봅니다"><div className="t">손절 기준</div><div className="v">{r.stop == null ? "자료 부족" : price(r.stop)}</div></div>
+        <div title="이상적 진입가 ~ 최대 매수가 (백엔드 가격 계획)"><div className="t"><Term k="max_buy">{easy ? "살 만한 가격" : "검토 가격대"}</Term></div><div className="v" style={{ fontSize: 13, whiteSpace: "nowrap" }}>{zone}</div></div>
+        <div title="종가가 이 가격 아래로 마감하면 매수 근거가 깨졌다고 봅니다"><div className="t"><Term k="stop">{easy ? "이 아래면 정리" : "손절 기준"}</Term></div><div className="v">{r.stop == null ? "자료 부족" : price(r.stop)}</div></div>
       </div>
-      <div className="when">분석 가격 {price(r.price)} · {stampEt(r.price_timestamp)}{r.session ? ` · ${ko(SESSION_KO, r.session)}` : ""} · 손절까지 {r.downside == null ? "자료 부족" : pct(r.downside)}{toMax != null ? ` · 최대 매수가까지 ${pct(toMax)}` : ""}</div>
+      {!easy && <div className="when">분석 가격 {price(r.price)} · {stampEt(r.price_timestamp)}{r.session ? ` · ${ko(SESSION_KO, r.session)}` : ""} · 손절까지 {r.downside == null ? "자료 부족" : pct(r.downside)}{toMax != null ? ` · 최대 매수가까지 ${pct(toMax)}` : ""}</div>}
       <div className="risk"><span aria-hidden>⚠</span><span><b>가장 큰 위험 · </b>{riskLine(r)}</span></div>
-      <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 10, alignItems: "center" }}>
-        <span className="when" style={{ whiteSpace: "nowrap" }}>점수 <b style={{ color: "var(--text)" }}>{num(r.score, 1)}</b></span>
-        <ScoreMeter score={r.score} />
-      </div>
-      <div className="when">분석 신뢰도 {num(r.confidence, 0)}/100 · 손익비 {num(r.rr, 2)} — 모두 상승 확률이 아닙니다</div>
+      {easy ? (
+        /* 쉽게 보기: the two numbers that matter, each with its yardstick; the meter and the analysis stamp wait in 자세히 보기 */
+        <div className="when" data-testid="cand-easy-nums"><Term k="score">점수</Term> <b style={{ color: "var(--text)" }}>{num(r.score, 0)}</b>/100 · <Term k="rr">손익비</Term> <b style={{ color: "var(--text)" }}>{num(r.rr, 1)}</b> (2 이상이 기준)</div>
+      ) : <>
+        <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 10, alignItems: "center" }}>
+          <span className="when" style={{ whiteSpace: "nowrap" }}><Term k="score">점수</Term> <b style={{ color: "var(--text)" }}>{num(r.score, 1)}</b></span>
+          <ScoreMeter score={r.score} />
+        </div>
+        <div className="when"><Term k="confidence">분석 신뢰도</Term> {num(r.confidence, 0)}/100 · <Term k="rr">손익비</Term> {num(r.rr, 2)} — 모두 상승 확률이 아닙니다</div>
+      </>}
     </Link>
   );
 }
@@ -186,6 +193,8 @@ function SectionAge({ s, nowMs, what }: { s?: SectionStatus; nowMs: number; what
 }
 
 export default function Dashboard() {
+  const easy = useEasy();
+  const regime = (k: string | null | undefined) => { const v = ko(REGIME_KO, k, "판단 불가"); return easy ? plainKo(v) : v; };
   const d = useApi<Dash>("/dashboard");
   useEffect(() => { if (d.data) recordHomeShown(); }, [d.data]);
   const st = useStatus();
@@ -209,7 +218,8 @@ export default function Dashboard() {
   const next = x.upcoming_catalysts[0];
   const notReady = x.readiness?.scanner_status === "SCANNER_NOT_READY";
   const nowMs = st?.nowMs ?? Date.now();
-  const scope = scopeLine(ss, sysMode);
+  const cov = ss?.coverage;
+  const scope = easy ? (cov ? `${cov.universe.toLocaleString("ko-KR")}개 종목 중 ${cov.analysed}개를 골랐습니다` : null) : scopeLine(ss, sysMode);
   const choosing = ss?.state?.status === "RUNNING";
   const headline = !x.scan ? choosing ? "후보를 고르는 중입니다" : "아직 후보 선정 결과가 없습니다" : shown.length ? "개 종목이 지금 매수 조건을 통과했습니다" : notReady ? "데이터 준비가 끝나지 않아 후보를 계산하지 못했습니다" : "지금은 매수 조건을 통과한 종목이 없습니다";
   return (
@@ -217,7 +227,7 @@ export default function Dashboard() {
       <div className="page-head enter">
         <div>
           <h1>오늘</h1>
-          <div className="t-sub">{x.scan ? <>{lv.at ? <><span className="live-dot" aria-hidden />실시간 판정 · 1초 · </> : null}후보 선정 {stampEt(x.scan.as_of)} ({ago(x.scan.as_of, nowMs)}){scope ? ` · ${scope}` : ""}</> : choosing ? "시장 분석을 실행 중입니다. 준비된 결과부터 표시합니다." : "데이터 준비와 자동 분석 상태는 설정에서 확인할 수 있습니다."}</div>
+          <div className="t-sub">{x.scan ? <>{lv.at ? <><span className="live-dot" aria-hidden />실시간 판정 · 1초 · </> : null}후보 선정 {easy ? ago(x.scan.as_of, nowMs) : `${stampEt(x.scan.as_of)} (${ago(x.scan.as_of, nowMs)})`}{scope ? ` · ${scope}` : ""}</> : choosing ? "시장 분석을 실행 중입니다. 준비된 결과부터 표시합니다." : "데이터 준비와 자동 분석 상태는 설정에서 확인할 수 있습니다."}</div>
         </div>
       </div>
 
@@ -242,13 +252,13 @@ export default function Dashboard() {
               <span className="count-l">{headline}</span>
             </div>
             <p className="lead">
-              {x.scan && !x.regime_status?.pending ? <>시장 분위기는 <b>{ko(REGIME_KO, x.regime.primary, "판단 불가")}</b> — {REGIME_HELP[x.regime.primary] ?? "거시 지표로 판단한 현재 환경"}.</> : x.scan ? null : "종목 목록을 거래대금·시가총액으로 거른 뒤 업종별 재무·밸류에이션·실적·가격 계획을 차례로 계산해 후보를 고릅니다."}
+              {x.scan && !x.regime_status?.pending ? <>시장 분위기는 <b><Term k="regime">{regime(x.regime.primary)}</Term></b> — {REGIME_HELP[x.regime.primary] ?? "거시 지표로 판단한 현재 환경"}.</> : x.scan ? null : "종목 목록을 거래대금·시가총액으로 거른 뒤 업종별 재무·밸류에이션·실적·가격 계획을 차례로 계산해 후보를 고릅니다."}
               {notValid.length > 0 ? <> 매수 계열 추천 중 {notValid.length}개는 시간 경과·가격 조건 이탈·자료 오래됨으로 지금은 유효하지 않아 따로 표시했습니다.</> : null}
             </p>
             <div className="facts">
-              <div><div className="t">시장 분위기</div><div className="v">{x.regime_status?.pending ? <span className="muted" data-testid="regime-loading">거시 지표 불러오는 중…</span> : ko(REGIME_KO, x.regime.primary, "판단 불가")}</div>
+              <div><div className="t">시장 분위기</div><div className="v">{x.regime_status?.pending ? <span className="muted" data-testid="regime-loading">거시 지표 불러오는 중…</span> : regime(x.regime.primary)}</div>
                 <SectionAge s={x.regime_status} nowMs={nowMs} what="거시 지표" />
-                {x.regime.readings.length > 1 && <div className="s" title={x.regime.readings.map((r) => `${ko(REGIME_KO, r.regime)}: ${r.evidence.join(", ")}`).join("\n")}>함께 나타난 국면: {x.regime.readings.filter((r) => r.regime !== x.regime.primary).slice(0, 2).map((r) => ko(REGIME_KO, r.regime)).join(", ")}</div>}</div>
+                {x.regime.readings.length > 1 && <div className="s" title={x.regime.readings.map((r) => `${ko(REGIME_KO, r.regime)}: ${r.evidence.join(", ")}`).join("\n")}>함께 나타난 국면: {x.regime.readings.filter((r) => r.regime !== x.regime.primary).slice(0, 2).map((r) => regime(r.regime)).join(", ")}</div>}</div>
               <div className={risk0 || notValid.length ? "warn" : ""}><div className="t">가장 큰 위험</div><div className="v">{risk0 ? `${risk0.ticker} — ${risk0.text.split(", ").map((v) => VETO_KO[v] ?? v).join(", ")}` : notValid.length ? `유효하지 않은 추천 ${notValid.length}개` : !x.scan ? <span className="muted">후보 선정 후 표시</span> : "상위 후보에 유동성·이벤트·투자 논리 위험 신호 없음"}</div>
                 <div className="s">{risk0 ? "상위 후보 중 위험 거부권이나 큰 이벤트가 걸린 종목" : !x.scan ? "후보를 고르면 그중 가장 큰 위험을 보여줍니다" : "종목별 가장 큰 위험은 후보 카드에 있습니다"}</div></div>
               <div><div className="t">다음 핵심 일정</div><div className="v">{next ? next.title : x.catalysts_status?.pending ? <span className="muted">일정 불러오는 중…</span> : "일정 자료 없음"}</div>

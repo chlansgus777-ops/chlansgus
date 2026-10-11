@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { Card, Empty } from "./ui";
+import { Card, Disclosure, Empty } from "./ui";
+import { useEasy } from "../viewMode";
 import { useApi, useSettling } from "./useApi";
 import { pct, price } from "../format";
 
@@ -93,6 +94,7 @@ function SignalRow({ s }: { s: Signal }) {
 }
 
 export function StrategyBoard() {
+  const easy = useEasy();
   const r = useSettling<StrategiesResp>("/strategies");
   const f = useApi<Forward>("/strategies/forward");
   const s = r.data?.scan && Array.isArray(r.data.scan.strategies) ? r.data.scan : null;
@@ -100,8 +102,8 @@ export function StrategyBoard() {
   if (!s) return <Card title="전략 신호"><Empty>{r.data.refreshing ? "전체 종목의 일봉으로 전략을 계산하는 중입니다." : r.data.error ?? "아직 계산 결과가 없습니다."}</Empty></Card>;
   const adopted = s.confirmed.filter((x) => x.validation.status !== "NOT_ADOPTED");
   const recordOnly = s.confirmed.filter((x) => x.validation.status === "NOT_ADOPTED");
-  return (
-    <div className="grid">
+  const allResearch = s.strategies.length > 0 && s.strategies.every((st) => st.status === "NOT_ADOPTED");
+  const rules = (
       <div className="st-strats">
         {s.strategies.map((st) => (
           <Card key={st.id} title={`${st.name} · ${st.version}`} right={<StatusBadge v={st} />} testId={`strategy-${st.id}`}>
@@ -115,6 +117,11 @@ export function StrategyBoard() {
           </Card>
         ))}
       </div>
+  );
+  return (
+    <div className="grid">
+      {/* 쉽게 보기: strategies that failed verification are research material — their rules and checks fold away */}
+      {easy && allResearch ? <Disclosure title="검증을 통과하지 못한 단기 전략 (연구용)" hint="알림을 보내지 않고 기록만 합니다" testId="research-strategies">{rules}</Disclosure> : rules}
       <Card title={`확정 신호 · ${s.session} 종가`} explain={`${s.names}종목 계산 · 마지막 일봉이 없는 종목 ${s.names_without_last_bar}개 제외 · SPY 200일선 ${s.spy_up == null ? "판단 불가" : s.spy_up ? "위" : "아래"} · 계산 ${new Date(s.computed_at).toLocaleString("ko-KR")}`}>
         {adopted.length ? adopted.map((x) => <SignalRow key={`${x.strategy}${x.ticker}`} s={x} />)
           : <Empty>{recordOnly.length ? "알릴 신호가 없습니다(아래는 미채택 전략의 기록)." : "오늘 종가 기준 조건을 모두 충족한 종목이 없습니다."}</Empty>}
