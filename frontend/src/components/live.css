@@ -39,13 +39,17 @@
 .lz i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
 .lz em { font-style: normal; font-weight: 500; opacity: .85; }
 .lz-buy { color: var(--up); background: var(--up-soft); border-color: rgba(95, 224, 189, .3); }
-.lz-buy i { box-shadow: 0 0 0 3px var(--up-soft); animation: lz-pulse 1.6s ease-in-out infinite; }
+/* the pulse is a ring scaled and faded on its own layer (transform + opacity): an animated box-shadow repainted every
+   frame — 12 dots on the home screen were most of the app's idle CPU (diagnosis 2026-10-11) */
+.lz-buy i { position: relative; box-shadow: 0 0 0 3px var(--up-soft); }
+.lz-buy i::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; background: var(--up-soft);
+  animation: lz-pulse 1.6s ease-in-out infinite; will-change: transform, opacity; }
 .lz-warn { color: var(--warn); background: var(--warn-soft); border-color: rgba(243, 201, 106, .28); }
 .lz-danger { color: var(--danger); background: var(--danger-soft); border-color: rgba(255, 127, 142, .3); }
 .lz-info { color: var(--buy); background: var(--buy-soft); border-color: rgba(114, 184, 255, .28); }
 .lz-muted { color: var(--muted); background: rgba(143, 148, 168, .1); }
-@keyframes lz-pulse { 50% { box-shadow: 0 0 0 5px transparent; } }
-@media (prefers-reduced-motion: reduce) { .lz-buy i { animation: none; } }
+@keyframes lz-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.6); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .lz-buy i::after { animation: none; } }
 
 /* Alert bell + toasts */
 .alert-bell { position: relative; display: inline-flex; }
