@@ -51,6 +51,7 @@ export function MyStatus({ cash, cashEntered }: { cash: number | null; cashEnter
         <>
           <div className="hero-label">총 자산 <span className="muted">(주식 {price(invested)}{cashEntered ? ` + 현금 ${price(cash)}` : ""})</span></div>
           <div className="hero-num" data-testid="status-total">{price(total)}</div>
+          {held && (t?.valued ?? 0) < (t?.count ?? 0) && <div className="hero-sub warn" data-testid="status-unpriced">보유 {(t?.count ?? 0) - (t?.valued ?? 0)}종목은 가격을 아직 못 받아 총 자산에서 빠져 있습니다</div>}
           {held && t?.pnl != null ? (
             <div className={`hero-change ${tone(t.pnl)}`} data-testid="status-pnl">
               {t.pnl > 0 ? "▲" : t.pnl < 0 ? "▼" : ""} {signed(t.pnl)} ({pct(t.pnl_rate, 1)})
