@@ -9,7 +9,7 @@ import { useEasy } from "../viewMode";
 /** 이번 달 할 일 (owner 2026-10-06: "쉽고 직관적이게") — the one routine on top of home: sell these, buy these (shares and
  * about how much), leave the rest, next change on this date. The app never orders; the risk line is always there. */
 type BuyStatus = "OK" | "CASH" | "SECTOR" | "TOO_PRICEY" | "WAIT";
-type Buy = { ticker: string; rank: number | null; price: number | null; shares: number | null; amount: number | null; target_amount: number | null;
+export type Buy = { ticker: string; rank: number | null; price: number | null; shares: number | null; amount: number | null; target_amount: number | null;
   sector?: string; status?: BuyStatus; reason?: string | null };
 type Sell = { ticker: string; shares: number; price: number | null; proceeds?: number | null };
 type Conflict = { ticker: string; strategy: string; rule: string; basis: string };
@@ -25,10 +25,13 @@ export type Routine = {
   warning?: string | null; pending?: boolean; refreshing?: boolean; error?: string | null;
 };
 
-const shares = (n: number) => `${n.toLocaleString("en-US", { maximumFractionDigits: 4 })}주`;
+/** The buys this account will actually make (shares known and not cut by a limit): what home counts and the list shows. */
+export const actionableBuys = (x: Routine): Buy[] => (x.buy ?? []).filter((b) => (b.status === "OK" || b.status === "CASH" || b.status === undefined) && !!b.shares);
+
+export const shares = (n: number) => `${n.toLocaleString("en-US", { maximumFractionDigits: 4 })}주`;
 
 /** What one buy line says: its shares, or why it is cut or not made (cash, sector limit, price, account total). */
-function buyText(b: Buy, slotKnown: boolean): string {
+export function buyText(b: Buy, slotKnown: boolean): string {
   if (b.status === "SECTOR") return "업종 한도로 사지 않음";
   if (b.status === "CASH") return b.shares ? `${shares(b.shares)}만` : "현금 부족";
   if (b.status === "TOO_PRICEY") return "1주 가격이 5%보다 큼";

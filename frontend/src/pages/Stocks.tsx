@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { recentStocks } from "../components/QuickSearch";
+import { recentStocks } from "../components/recentStocks";
 import { IArrow, IStocks } from "../components/icons";
 import { Err, Tabs } from "../components/ui";
 import { useApi } from "../components/useApi";

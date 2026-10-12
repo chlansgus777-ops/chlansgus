@@ -67,19 +67,36 @@ def page(server):
         browser.close()
 
 
-def test_dashboard_answers_the_first_questions(page, server):
-    # product overhaul 2026-09-28: the home screen answers "what now" first (today hero, candidates) with the
-    # account, the calendar and the watchlist in a side rail. Trimmed 2026-10-05 (owner: "쓸데없는 기능 없애거나 숨겨"):
-    # the paper account lives on 성과, the scan's reach under 설정 → 연결 상태, and a healthy data connection says
-    # nothing (a broken one still shows its banner on top)
+def test_home_is_only_this_months_routine(page, server):
+    # owner spec 2026-10-12 "미니멀 개편": home = my two numbers, this month's to-do, the method's record in one line;
+    # three menu items; one warning line only when something is wrong (MOCK data here); one disclaimer line
     page.goto(f"{server}/#/")
+    page.get_by_test_id("todo-what").wait_for()
+    for title in ("내 현황", "이번 달 할 일", "이 방법의 성적"):
+        assert page.get_by_role("heading", name=title, exact=True).is_visible(), title
+    for gone in ("지금 검토할 후보", "다가오는 일정", "관심 종목", "실시간 신호", "오늘의 브리핑"):
+        assert page.get_by_role("heading", name=gone, exact=True).count() == 0, gone
+    assert "모의 데이터" in page.get_by_test_id("problem-line").inner_text()
+    assert "과거 성적은 미래를 보장하지 않습니다" in page.get_by_test_id("disclaimer").inner_text()
+    nav = page.get_by_role("navigation", name="주 메뉴", exact=True)
+    assert [a.inner_text().strip() for a in nav.get_by_role("link").all()] == ["홈", "내 계좌", "설정"]
+    assert page.evaluate("document.documentElement.scrollHeight <= window.innerHeight")  # no scrolling at 1400x1000
+    page.get_by_test_id("routine-list-open").click()
+    page.get_by_role("heading", name="이번 달 목록", exact=True).wait_for()
+    assert page.errors == []  # type: ignore[attr-defined]
+
+
+def test_moved_screens_open_from_advanced(page, server):
+    # what left home and the menu is one tap away under 설정 → 고급 기능, unchanged
+    page.goto(f"{server}/#/settings")
+    page.get_by_test_id("advanced").wait_for()
+    page.get_by_role("link", name="오늘의 시장·후보").click()
     page.get_by_role("heading", name="지금 검토할 후보", exact=True).wait_for()
-    assert "모의 데이터(MOCK)" in page.get_by_test_id("banner-mock").inner_text()
-    for title in ("오늘", "지금 검토할 후보", "다가오는 일정", "관심 종목", "내 포트폴리오"):
+    for title in ("다가오는 일정", "관심 종목"):
         assert page.get_by_role("heading", name=title, exact=True).is_visible(), title
     for gone in ("모의투자", "데이터 연결", "분석 범위"):
         assert page.get_by_role("heading", name=gone, exact=True).count() == 0, gone
-    assert page.get_by_role("navigation", name="주 메뉴").get_by_role("link", name="종목", exact=True).is_visible()
+    assert "active" in (page.get_by_role("navigation", name="주 메뉴", exact=True).get_by_role("link", name="설정").get_attribute("class") or "")
     assert page.errors == []  # type: ignore[attr-defined]
 
 
@@ -118,7 +135,7 @@ def test_state_changing_call_from_the_ui_passes_the_csrf_guard(page, server):
 
 def test_narrow_window_stacks_cards(page, server):
     page.set_viewport_size({"width": 760, "height": 1000})
-    page.goto(f"{server}/#/")
+    page.goto(f"{server}/#/today")
     page.get_by_role("heading", name="지금 검토할 후보", exact=True).wait_for()
     boxes = [page.get_by_role("heading", name=t, exact=True).bounding_box() for t in ("지금 검토할 후보", "관심 종목")]  # main column, then the rail
     assert boxes[0] and boxes[1] and boxes[1]["y"] > boxes[0]["y"]  # one column on narrow windows
@@ -136,16 +153,6 @@ def _rows(page, server):
 def _open_stock(page, server, ticker):
     page.goto(f"{server}/#/stocks/{ticker}")
     page.get_by_role("heading", name="가격 계획", exact=True).wait_for()
-
-
-def test_navigation_is_simple_and_readiness_is_visible(page, server):
-    page.goto(f"{server}/#/")
-    page.get_by_role("heading", name="지금 검토할 후보", exact=True).wait_for()
-    nav = page.get_by_role("navigation", name="주 메뉴")
-    for label in ("홈", "종목", "포트폴리오", "시장", "성과"):
-        assert nav.get_by_role("link", name=label, exact=True).is_visible(), label
-    assert nav.get_by_role("link", name="AI 위원회").count() == 0  # the committee lives on the stock page (AI 검토)
-    assert "연습용(모의)" in page.get_by_test_id("readiness-badge").inner_text()
 
 
 def test_ticker_switch_never_shows_the_previous_stock(page, server):
@@ -232,7 +239,7 @@ def test_stale_intraday_recommendation_is_not_presented_as_executable(page, serv
 def test_portfolio_input_gives_a_plain_reading(page, server):
     t = _rows(page, server)[0]["ticker"]
     page.goto(f"{server}/#/portfolio")
-    page.get_by_role("heading", name="내 포트폴리오").wait_for()
+    page.get_by_role("heading", name="내 계좌", exact=True).wait_for()
     page.get_by_label("보유 종목 코드").fill(t)  # labelled fields since the 2026-09-29 form polish
     page.get_by_label("보유 수량").fill("10")
     page.get_by_label("매입 단가(USD)").fill("100")
@@ -246,7 +253,7 @@ def test_a_trade_record_becomes_the_holding(page, server):
     """Round 10 feature a): a BUY recorded on the screen is the holding, marked as computed from the records."""
     t = _rows(page, server)[1]["ticker"]
     page.goto(f"{server}/#/portfolio")
-    page.get_by_role("heading", name="내 포트폴리오").wait_for()
+    page.get_by_role("heading", name="내 계좌", exact=True).wait_for()
     fold = page.get_by_test_id("ledger-fold")  # 쉽게 보기 with an empty account folds the ledger under one line
     if fold.count():
         fold.locator("summary").click()
@@ -270,7 +277,7 @@ def test_a_trade_record_becomes_the_holding(page, server):
 def test_provider_error_is_explained_with_a_retry(page, server):
     page.route("**/api/dashboard", lambda route: route.fulfill(status=503, content_type="application/json", body='{"detail": "upstream down"}'))
     try:
-        page.goto(f"{server}/#/")
+        page.goto(f"{server}/#/today")
         page.get_by_role("button", name="다시 시도").wait_for(timeout=20000)
     finally:
         page.unroute("**/api/dashboard")
@@ -337,16 +344,3 @@ def test_record_a_trade_straight_from_the_stock_page(page, server):
     assert page.get_by_label("거래 종목 코드").input_value() == t
     assert page.get_by_label("체결일").input_value() != ""
     page.wait_for_function("document.activeElement && document.activeElement.getAttribute('aria-label') === '거래 수량'")
-
-
-def test_quick_search_opens_a_stock_from_any_screen(page, server):
-    page.goto(f"{server}/#/portfolio")
-    page.get_by_role("heading", name="내 포트폴리오").wait_for()
-    t = _rows(page, server)[0]["ticker"]
-    page.evaluate("document.activeElement && document.activeElement.blur()")  # "/" inside a text box types a slash, by design
-    page.keyboard.press("/")
-    page.keyboard.type(t.lower())
-    page.get_by_role("option", name=t).first.wait_for(timeout=5000)
-    page.keyboard.press("Enter")
-    page.get_by_role("heading", name="가격 계획", exact=True).wait_for()
-    assert t in page.locator("h1").first.inner_text()

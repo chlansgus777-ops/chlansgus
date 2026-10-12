@@ -14,9 +14,13 @@ const SETTINGS = {
   scheduler: { enabled: false, interval_minutes: 60 },
 };
 
-it("has no AI review tab; an old ?tab=ai link opens 데이터 연결 and the AI keys are not listed", async () => {
+it("has no AI review tab; an old ?tab=ai link opens the first tab (고급 기능) and the AI keys are not listed", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(SETTINGS))));
-  render(<MemoryRouter initialEntries={["/settings?tab=ai"]}><Settings /></MemoryRouter>);
+  const { unmount } = render(<MemoryRouter initialEntries={["/settings?tab=ai"]}><Settings /></MemoryRouter>);
+  await screen.findByTestId("advanced");
+  expect(screen.queryByRole("tab", { name: /AI/ })).toBeNull();
+  unmount();
+  render(<MemoryRouter initialEntries={["/settings?tab=data"]}><Settings /></MemoryRouter>);
   await screen.findByText(/초기 설정 · API 키/);
   expect(screen.queryByRole("tab", { name: /AI/ })).toBeNull();
   expect(screen.getByLabelText(/Finnhub API 키/)).toBeTruthy();

@@ -1,5 +1,4 @@
 import { Card } from "../components/ui";
-import { openOnboarding } from "../components/Onboarding";
 import { PLAIN_WORDS } from "../glossary";
 import { ACTION_INFO, QUALITY_INFO, STATUS_INFO } from "../i18n";
 import { STATE_KO, type QuoteState } from "../quotes";
@@ -20,9 +19,6 @@ export default function Guide() {
   return (
     <div className="grid">
       <div className="page-head enter"><div><h1>용어 · 도움말</h1><div className="t-sub">화면에 나오는 판단·상태·숫자 표기의 뜻입니다. 기술 용어는 화면에서 ⓘ를 눌러도 볼 수 있습니다.</div></div></div>
-      <Card title="처음 안내" right={<button type="button" className="sm" onClick={openOnboarding} data-testid="onb-again">처음 안내 다시 보기</button>}>
-        <div className="caption">앱이 하는 일, 루틴 따르는 법, 결과 보는 곳을 세 장으로 다시 보여 드립니다.</div>
-      </Card>
       <Card title="쉬운 말로 바꾼 용어" explain="화면에서는 오른쪽 표현을 씁니다. 자세히 보기에서는 원래 용어가 함께 나올 수 있습니다." testId="plain-words">
         <table><thead><tr><th>원래 용어</th><th>바뀐 표현</th><th>한 줄 뜻</th></tr></thead>
           <tbody>{PLAIN_WORDS.map(([a, b, c]) => <tr key={a}><td>{a}</td><td><b>{b}</b></td><td style={{ whiteSpace: "normal" }}>{c}</td></tr>)}</tbody></table>

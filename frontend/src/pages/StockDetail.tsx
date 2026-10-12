@@ -14,7 +14,7 @@ import { MaTouch } from "../components/MaTouch";
 import { SupportResistance } from "../components/SupportResistance";
 import { StockStrategies } from "../components/StrategyViews";
 import { useAnalysisJob } from "../components/useAnalysisJob";
-import { rememberStock } from "../components/QuickSearch";
+import { rememberStock } from "../components/recentStocks";
 import { PlanChart } from "../components/PlanChart";
 import { HoldingPlans } from "../components/HoldingPlans";
 import { useEasy } from "../viewMode";

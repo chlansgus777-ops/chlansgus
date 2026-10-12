@@ -1,5 +1,5 @@
 import { sectorKo } from "../i18n";
-import { Fragment, useEffect } from "react";
+import { Fragment } from "react";
 import { Link } from "react-router-dom";
 import { IArrow, IEvent, IPortfolio, IStar } from "../components/icons";
 import { Action, Card, Empty, Err, Loading, Notice, ScoreMeter, StaleData, StatePanel, Term } from "../components/ui";
@@ -7,13 +7,12 @@ import { plainKo, useEasy } from "../viewMode";
 import { NotReady, ReadinessBanner, SyncControl, type ReadinessInfo } from "../components/Readiness";
 import { type ScanStatus, usePageTime, useStatus } from "../components/status";
 import { useApi, usePoll } from "../components/useApi";
-import { recordHomeShown } from "../components/Diagnostics";
 import { LivePrice } from "../components/LivePrice";
 import { useJudgedRows, useQuote, useViewQuotes, type QuoteRow } from "../quotes";
 import { LiveZone } from "../components/LiveZone";
 import { useLiveRows } from "../components/liveBoard";
 import { MorningBriefing } from "../components/Briefing";
-import { EvidenceCard, MyStatus, RoutineSummary } from "../components/HomeTop";
+import { AlertCenter } from "../components/LiveZone";
 import { HoldingPlans } from "../components/HoldingPlans";
 import { ago, day, num, pct, price, stampEt, errKo } from "../format";
 import { ACTION_PLAIN, BULLISH, REGIME_KO, RISK_KO, SESSION_KO, VETO_KO, actionTone, ko } from "../i18n";
@@ -198,7 +197,6 @@ export default function Dashboard() {
   const d = useApi<Dash>("/dashboard");
   const bt = useApi<{ available?: boolean; strategy?: { start: string; end: string; cagr: number; spy_cagr: number; max_drawdown: number } }>("/performance/backtest");
   const scoreRecord = bt.data?.available ? bt.data.strategy ?? null : null;
-  useEffect(() => { if (d.data) recordHomeShown(); }, [d.data]);
   const st = useStatus();
   // the macro regime / the calendar still loading in the background: ask again shortly (cheap — stored data only)
   const sectionsLoading = !!(d.data?.regime_status?.pending || d.data?.catalysts_status?.pending || (d.data?.readiness?.stats_pending && d.data.readiness.recommendation_readiness == null));
@@ -228,9 +226,10 @@ export default function Dashboard() {
     <div className="grid">
       <div className="page-head home-head enter">
         <div>
-          <h1>오늘</h1>
+          <h1>오늘의 시장·후보</h1>
           <div className="t-sub">{x.scan ? <>{lv.at ? <><span className="live-dot" aria-hidden />실시간 판정 · 1초 · </> : null}후보 선정 {easy ? ago(x.scan.as_of, nowMs) : `${stampEt(x.scan.as_of)} (${ago(x.scan.as_of, nowMs)})`}{scope ? ` · ${scope}` : ""}</> : choosing ? "시장 분석을 실행 중입니다. 준비된 결과부터 표시합니다." : "데이터 준비와 자동 분석 상태는 설정에서 확인할 수 있습니다."}</div>
         </div>
+        <div className="actions"><AlertCenter /></div>
       </div>
 
       <StaleData error={d.error} at={d.fetchedAt} retry={d.reload} nowMs={nowMs} />
@@ -239,16 +238,9 @@ export default function Dashboard() {
                     actions={<Link to="/settings?tab=status">원인 보기 →</Link>} />
       )}
 
-      {/* owner spec 2026-10-11 (안 A): ① 내 현황 ② 이번 달 할 일 (a summary, at most a quarter of the first screen) — both above
-          the fold — then ③ why this routine (past record, yardsticks, the worst case), then the rest */}
-      <div className="home-top" data-testid="home-top">
-        <MyStatus cash={x.portfolio.cash} cashEntered={x.portfolio.cash_entered !== false} />
-        <RoutineSummary />
-      </div>
-      <EvidenceCard />
-      <div className="home-more-h" aria-hidden><span>더 알아보기 · 내 보유 종목, 오늘 시장과 후보</span></div>
+      {/* 고급 기능 (owner spec 2026-10-12): what used to sit below the routine on home — my holdings' plans and price
+          alerts, the market's mood, score candidates, live signals, the calendar, the watchlist and the morning briefing */}
       <HoldingPlans actionsOnly />
-      <MorningBriefing />
       {x.readiness && x.readiness.recommendation_readiness !== "PAPER ONLY" && <ReadinessBanner r={x.readiness} />}
       <div className="home-grid">
         <div className="home-main">
@@ -335,6 +327,7 @@ export default function Dashboard() {
           </div>
         </aside>
       </div>
+      <MorningBriefing />
     </div>
   );
 }
