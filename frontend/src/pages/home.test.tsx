@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Evidence } from "../components/HomeTop";
 import type { Routine } from "../components/RoutineCard";
-import Home, { todoSentence } from "./Home";
+import Home, { todoSentence, todoWhy } from "./Home";
 import RoutineList from "./RoutineList";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -30,11 +30,40 @@ const LIVE = { at: "", live: false, rows: [], notes: [], totals: { count: 2, val
 it("the to-do is one sentence that counts only the buys this account will make", () => {
   expect(todoSentence(ACT)).toBe("1종목 팔고 2종목 사세요");
   expect(todoSentence({ ...ACT, sell: [] })).toBe("2종목 사세요");
-  expect(todoSentence({ ...ACT, state: "WAIT", headline: "이번 달 할 일: 다음 교체를 기다리세요" })).toBe("다음 교체를 기다리세요");
+  expect(todoSentence({ ...ACT, state: "BLOCKED", headline: "이번 달 20종목을 사야 하지만 지금 계좌로는 살 수 없습니다" })).toBe("지금 계좌로는 살 수 없습니다");
+  expect(todoSentence({ ...ACT, state: "PREPARING", headline: "이번 달 목록을 준비하는 중입니다" })).toBe("목록을 준비하는 중입니다");
+});
+
+it("outside a plain to-do home says why in one line, never a dead end", () => {
+  expect(todoWhy(ACT)).toBeNull();
+  expect(todoWhy({ ...ACT, state: "PREPARING" })).toContain("저절로");
+  expect(todoWhy({ ...ACT, state: "BLOCKED", funding: { ...ACT.funding!, shortfall: 1234 } })).toContain("$1,234.00이 모자랍니다");
+  expect(todoWhy({ ...ACT, state: "DONE", when: "다음 교체: 2026-10-30" })).toBe("다음 교체: 2026-10-30");
+});
+
+it("my own rule alerts and the data being prepared are shown on home", async () => {
+  serve({ "/routine/evidence": EV, "/routine": { ...ACT, today: [{ ticker: "AAA", kind: "CONFLICT", text: "AAA 판단이 엇갈림", source: "" }] },
+          "/portfolio/live": LIVE, "/portfolio": { cash: 40000, cash_entered: true } });
+  render(<MemoryRouter><Home /></MemoryRouter>);
+  expect((await screen.findByTestId("todo-alerts")).textContent).toContain("내 규칙 알림 1건");
+  cleanup();
+  serve({ "/routine/evidence": EV, "/routine": { state: "PREPARING", headline: "이번 달 목록을 준비하는 중입니다", reasons: ["자료 부족"] },
+          "/portfolio/live": LIVE, "/portfolio": { cash: 40000, cash_entered: true } });
+  render(<MemoryRouter><Home /></MemoryRouter>);
+  expect((await screen.findByTestId("todo-why")).textContent).toContain("저절로");
+  expect(screen.getByTestId("routine-list-open").textContent).toBe("준비 상황 보기");
+});
+
+it("holdings without a price are said to be left out of the total", async () => {
+  serve({ "/routine/evidence": EV, "/routine": { state: "PREPARING", headline: "" },
+          "/portfolio/live": { ...LIVE, totals: { ...LIVE.totals, valued: 0, value: 0, pnl: null, pnl_rate: null } }, "/portfolio": { cash: 3000, cash_entered: true } });
+  render(<MemoryRouter><Home /></MemoryRouter>);
+  expect((await screen.findByTestId("status-unpriced")).textContent).toContain("보유 2종목");
+  expect(screen.getByTestId("status-total").textContent).toBe("$3,000.00");
 });
 
 it("home shows my two numbers, the to-do with the days left, and the record in one line — nothing more", async () => {
-  serve({ "/routine/evidence": EV, "/routine": ACT, "/portfolio/live": LIVE });
+  serve({ "/routine/evidence": EV, "/routine": ACT, "/portfolio/live": LIVE, "/portfolio": { cash: 40000, cash_entered: true } });
   render(<MemoryRouter><Home /></MemoryRouter>);
   expect((await screen.findByTestId("status-total")).textContent).toBe("$100,000.00");
   expect(screen.getByTestId("status-pnl").textContent).toBe("+20.0%");
@@ -53,19 +82,25 @@ it("home shows my two numbers, the to-do with the days left, and the record in o
 
 it("with no account home says so and links to 내 계좌 (no assumed amount)", async () => {
   serve({ "/routine/evidence": EV, "/routine": { ...ACT, account: { total: null, cash: 100000, known: false, slot: null, unpriced: [] } },
-          "/portfolio/live": { ...LIVE, totals: { count: 0, value: null, pnl: null } } });
+          "/portfolio/live": { ...LIVE, totals: { count: 0, value: null, pnl: null } }, "/portfolio": { cash: 100000, cash_entered: false } });
   render(<MemoryRouter><Home /></MemoryRouter>);
   expect((await screen.findByTestId("status-setup")).getAttribute("href")).toBe("/portfolio");
   expect(screen.queryByTestId("status-total")).toBeNull();
 });
 
-it("the list screen shows what to sell and buy with the shares — no money, limits, clashes or kept names", async () => {
-  serve({ "/routine": ACT });
+it("the list screen shows the buys with shares, the ones it cannot make with why, what to keep and my rule alerts", async () => {
+  serve({ "/routine": { ...ACT, today: [{ ticker: "AAA", kind: "CONFLICT", text: "AAA 판단이 엇갈림", source: "" }] } });
   render(<MemoryRouter><RoutineList /></MemoryRouter>);
   expect((await screen.findByTestId("routine-sells")).textContent).toContain("OLD7주 전부");
-  const buys = screen.getByTestId("routine-buys").textContent!;
-  expect(buys).toContain("살 종목 2");
+  expect(screen.getByTestId("routine-buys").textContent).toContain("살 종목 2 · 못 사는 종목 1");
   expect(screen.getByTestId("routine-buy-AAA").textContent).toBe("AAA50주");
-  expect(buys).not.toContain("CCC");
-  expect(document.body.textContent).not.toMatch(/\$|쓸 수 있는 돈|엇갈|그대로 두기|ZZZ/);
+  expect(screen.getByTestId("routine-cut-CCC").textContent).toBe("CCC업종 한도로 사지 않음");
+  expect(screen.getByTestId("routine-keep").textContent).toContain("ZZZ");
+  expect(screen.getByTestId("routine-alerts").textContent).toContain("AAA 판단이 엇갈림");
+});
+
+it("a list being prepared says why instead of one bare sentence", async () => {
+  serve({ "/routine": { state: "PREPARING", headline: "이번 달 목록을 준비하는 중입니다", reasons: ["일봉 자료가 부족합니다"] } });
+  render(<MemoryRouter><RoutineList /></MemoryRouter>);
+  expect((await screen.findByTestId("routine-preparing")).textContent).toContain("일봉 자료가 부족합니다");
 });
