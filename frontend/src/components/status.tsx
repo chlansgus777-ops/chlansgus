@@ -1,13 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ago, clockPair, stampEt } from "../format";
-import { HEALTH_KO, QUALITY_INFO, READINESS_KO, SESSION_KO } from "../i18n";
 import type { SystemInfo } from "../types";
-import { QuoteFeedStatus } from "./LivePrice";
-import { AlertCenter } from "./LiveZone";
 import type { ReadinessInfo, SyncJob } from "./Readiness";
 import { type ApiState, invalidateAfterSync, invalidateApi, useApi, usePoll } from "./useApi";
-import { useEasy } from "../viewMode";
 
 /** /scan/status — the last scan's progress and how much of the list it judged. */
 export interface ScanStatus {
@@ -93,94 +88,28 @@ export function usePageTime(p: PageTime | null): void {
   }, [key, set]);
 }
 
-type SbTone = "ok" | "warn" | "danger" | "info" | undefined;
-function Item({ tone, icon, children, to, title, testId }: { tone?: SbTone; icon?: string; children: ReactNode; to?: string; title?: string; testId?: string }) {
-  const cls = `sb-item${tone ? ` tone-${tone}` : ""}`;
-  const body = <>{icon && <span className="ico" aria-hidden>{icon}</span>}{children}</>;
-  return to ? <Link to={to} className={cls} title={title} data-testid={testId}>{body}</Link> : <span className={cls} title={title} data-testid={testId}>{body}</span>;
-}
-
-const SESSION_TONE: Record<string, SbTone> = { REGULAR: "ok", PREMARKET: "info", AFTER_HOURS: "info", CLOSED: undefined };
-const JOB_SHORT: Record<string, string> = { RUNNING: "받는 중", DONE: "끝남", FAILED: "실패", PAUSED: "일시 정지", INTERRUPTED: "중단됨", NEEDS_SETUP: "설정 필요", INCOMPLETE: "아직 준비 안 됨" };
-
-/** Always-visible status: data source, US session with New York and Korea time, the page's data time and its age,
- * collection and analysis progress, provider failures and AI availability. */
-/** The status bar's height as a CSS variable, so other sticky bars sit below it whatever it wraps to. */
-function measureBar(el: HTMLDivElement | null) {
-  if (!el || typeof ResizeObserver === "undefined") return;
-  const set = () => document.documentElement.style.setProperty("--sb-h", `${el.offsetHeight}px`);
-  set();
-  const ro = new ResizeObserver(set);
-  ro.observe(el);
-  return () => ro.disconnect();
-}
-
-export function StatusBar() {
-  const st = useStatus();
-  const easy = useEasy();  // 쉽게 보기: one line — mode, the US session with Korean time, alerts. Price/analysis stamps live on each page.
-  if (!st) return null;
+/** The one line above every screen, shown only when something is wrong (owner spec 2026-10-12: no clock, session or
+ * feed indicators on a healthy app). One message, the most important first; it links to where it is fixed. */
+export function problemOf(st: Status): { text: string; to?: string } | null {
   const sys = st.system.data;
-  const now = new Date(st.nowMs).toISOString();
-  const clock = clockPair(now);
-  const session = sys?.market?.session ?? null;
-  const rd = st.readiness.data;
-  const rr = rd ? READINESS_KO[rd.recommendation_readiness] : undefined;
+  if (st.system.error) return null;  // the page shows its own "연결 실패" panel with a retry button
+  if (!sys) return null;
+  if (sys.mode === "MOCK") return { text: "모의 데이터입니다 · 실제 투자 판단에 쓰지 마세요" };
   const job = st.sync.data?.job ?? null;
-  const providers = st.health.data?.providers ?? [];
-  const down = providers.filter((p) => p.status === "DOWN");
-  const shaky = providers.filter((p) => p.status === "DEGRADED");
-  const p = st.page;
-  const disconnected = !!st.system.error;
+  if (job?.status === "RUNNING") return { text: `데이터를 받는 중입니다${job.progress ? ` (${job.progress.percent}%)` : ""}`, to: "/settings?tab=status" };
+  const down = (st.health.data?.providers ?? []).filter((p) => p.status === "DOWN");
+  if (down.length) return { text: `자료 ${down.length}곳을 받지 못하고 있습니다`, to: "/settings?tab=status" };
+  if (st.readiness.data?.recommendation_readiness === "NOT READY") return { text: "데이터 준비가 끝나지 않았습니다", to: "/settings?tab=status" };
+  return null;
+}
+
+export function ProblemLine() {
+  const st = useStatus();
+  const p = st ? problemOf(st) : null;
+  if (!p) return null;
   return (
-    <div className="statusbar" role="region" aria-label="상태 표시줄" data-testid="statusbar" ref={measureBar}>
-      {sys ? (
-        <Item tone={sys.mode === "MOCK" ? "danger" : "ok"} testId="sb-mode" title={sys.mode === "MOCK" ? "가상의 데이터입니다. 실제 투자 판단에 쓰지 마세요." : "실제 시장 데이터입니다."}>
-          <b className="sb-mode">{sys.mode === "MOCK" ? "⚠ MOCK 모의" : "● LIVE 실데이터"}</b>
-        </Item>
-      ) : !disconnected ? <Item icon="…">연결 확인 중</Item> : null}
-      {disconnected && (
-        <Item tone="danger" icon="⚡" testId="sb-disconnected" title={st.system.error ?? ""}>
-          <b>분석 서버 연결 끊김</b>{st.system.fetchedAt ? <span className="k">마지막 확인 {stampEt(new Date(st.system.fetchedAt).toISOString())}</span> : null}
-        </Item>
-      )}
-      {clock && (
-        <Item tone={session ? SESSION_TONE[session] : undefined} icon="◷" testId="sb-session" title="미국 주식시장 세션은 서버의 거래소 달력(휴장일·조기 마감 포함) 기준입니다.">
-          <span className="k">미국장</span><b>{session ? (SESSION_KO[session] ?? session) : "확인 전"}</b>
-          {!easy && <><span className="k">· 뉴욕</span>{clock.et}</>}<span className="k">· 한국</span>{clock.kst}
-        </Item>
-      )}
-      {!easy && p && p.priceTs && (
-        <Item tone={p.quality && !["FRESH", "DELAYED"].includes(p.quality) ? "warn" : undefined} icon="$" testId="sb-price-time"
-              title={`화면에 보이는 가격이 언제 가격인지입니다(화면을 불러온 시각이 아닙니다). ${ago(p.priceTs, st.nowMs)}${p.priceSession ? ` · ${SESSION_KO[p.priceSession] ?? p.priceSession}` : ""}${p.quality ? ` · ${QUALITY_INFO[p.quality]?.label ?? p.quality}` : ""}`}>
-          <span className="k">{p.label} 가격</span><b>{stampEt(p.priceTs)}</b>
-          <span className="k opt">· {ago(p.priceTs, st.nowMs)}{p.priceSession ? ` · ${SESSION_KO[p.priceSession] ?? p.priceSession}` : ""}{p.quality ? ` · ${QUALITY_INFO[p.quality]?.label ?? p.quality}` : ""}</span>
-        </Item>
-      )}
-      {!easy && p && p.analysedAt && (
-        <Item icon="⌖" testId="sb-analysed"><span className="k">분석</span><b>{stampEt(p.analysedAt)}</b><span className="k opt">· {ago(p.analysedAt, st.nowMs)}</span></Item>
-      )}
-      {sys?.mode === "LIVE" && (job?.status === "RUNNING" ? (
-        <Item tone="info" icon="⏳" to="/settings?tab=status" testId="sb-sync"><span className="k">데이터 수집</span><b>{job.progress ? `${job.progress.percent}%` : "받는 중"}</b></Item>
-      ) : rd && rd.recommendation_readiness === "NOT READY" ? (
-        <Item tone="danger" icon="!" to="/settings?tab=status" testId="sb-sync"><span className="k">데이터 준비</span><b>안 됨</b>{job ? <span className="k">· 마지막 수집 {JOB_SHORT[job.status] ?? job.status}</span> : null}</Item>
-      ) : rd ? (
-        <Item tone={rd.recommendation_readiness === "FULL" ? "ok" : "warn"} icon={rd.recommendation_readiness === "FULL" ? "✓" : "!"} to="/settings?tab=status" testId="sb-sync"><span className="k">데이터 준비</span><b>{rd.recommendation_readiness === "FULL" ? "완료" : "일부"}</b></Item>
-      ) : null)}
-      {sys && sys.mode !== "MOCK" && (down.length ? (
-        <Item tone="danger" icon="⛔" to="/settings?tab=status" testId="sb-providers" title={down.map((d) => `${d.kind}: ${d.last_error ?? ""}`).join("\n")}><span className="k">공급자</span><b>{down.length}곳 중단</b><span className="k">({down.map((d) => d.kind).join(", ")})</span></Item>
-      ) : shaky.length ? (
-        <Item tone="warn" icon="!" to="/settings?tab=status" testId="sb-providers"><span className="k">공급자</span><b>{shaky.length}곳 불안정</b></Item>
-      ) : providers.some((x) => x.status === "HEALTHY") ? (
-        <Item tone="ok" icon="✓" to="/settings?tab=status" testId="sb-providers"><span className="k">공급자</span><b>{HEALTH_KO.HEALTHY}</b></Item>
-      ) : <Item icon="○" to="/settings?tab=status" testId="sb-providers"><span className="k">공급자</span><b>호출 전</b></Item>)}
-      <span className="grow" />
-      <span className="tools">
-        {sys?.mode !== "MOCK" && <QuoteFeedStatus />}  {/* in MOCK the banner already says every price is simulated */}
-        <AlertCenter />
-        {/* only when it matters: data not ready, or practice (mock) data — never the "제한적 참고" ribbon (owner: "거슬려") */}
-        {rr && (rd?.recommendation_readiness === "NOT READY" || sys?.mode === "MOCK") && <Link to="/settings?tab=status" className={`readiness-link ${rr.tone}`} title={rr.help} data-testid="readiness-badge">추천 준비도 · {rr.label}</Link>}
-      </span>
+    <div className="m-problem" role="status" data-testid="problem-line">
+      ⚠ {p.text}{p.to && <> · <Link to={p.to}>확인</Link></>}
     </div>
   );
 }
-

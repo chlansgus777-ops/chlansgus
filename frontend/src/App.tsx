@@ -1,17 +1,15 @@
 import { Component, createElement, lazy, Suspense, useEffect, type ComponentType, type ReactElement, type ReactNode } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { Loading, ModeBanner, StatePanel } from "./components/ui";
-import { QuickSearch } from "./components/QuickSearch";
+import { Loading, StatePanel } from "./components/ui";
 import { PhoneGate } from "./components/Phone";
 import { VisitCounter } from "./components/Diagnostics";
-import { Onboarding } from "./components/Onboarding";
-import { StatusBar, StatusProvider, useStatus } from "./components/status";
-import { BrandMark, IFlag, IHelp, IHome, IMarket, IPerf, IPortfolio, ISettings, IStocks } from "./components/icons";
+import { ProblemLine, StatusProvider, useStatus } from "./components/status";
+import { BrandMark, IHome, IPortfolio, ISettings } from "./components/icons";
 import type { SystemInfo } from "./types";
-import Dashboard from "./pages/Dashboard";
+import Home from "./pages/Home";
+import RoutineList, { RoutineFull } from "./pages/RoutineList";
 import Glance from "./glance/Glance";
-import { openGlance } from "./glance/desktop";
-import { ViewModeProvider, ViewModeSwitch, useViewMode } from "./viewMode";
+import { ViewModeProvider } from "./viewMode";
 /** A page loaded on demand that, once its file is here, renders like any other component. React.lazy alone suspends on
  * its first render even when the file is already loaded, and React then holds the loading screen for at least 300 ms:
  * every menu's first visit waited that long before it even asked for its data (diagnosis 2026-10-11). */
@@ -31,7 +29,8 @@ const Performance = lazyPage(() => import("./pages/Performance"));
 const Settings = lazyPage(() => import("./pages/Settings"));
 const Guide = lazyPage(() => import("./pages/Guide"));
 const Evidence = lazyPage(() => import("./pages/Evidence"));
-const PAGES = [Stocks, StockDetail, Portfolio, Market, Performance, Strategies, Settings, Guide];
+const Dashboard = lazyPage(() => import("./pages/Dashboard"));
+const PAGES = [Portfolio, Settings, Evidence, Dashboard, Stocks, StockDetail, Market, Performance, Strategies, Guide];
 
 /** A few seconds after the app opens, fetch the other pages' files in the background (one at a time, when the browser is
  * idle) so opening a menu shows it at once. A failed fetch is left to the page's own load on the visit. */
@@ -56,11 +55,17 @@ export class PageBoundary extends Component<{ children: ReactNode }, { failed: b
   }
 }
 
-/** Five destinations named after what the user wants to do (product overhaul 2026-09-28): today's view, finding and
- * judging a stock, my account, the market, and whether the recommendations worked. Settings and help sit apart. */
+/** Three destinations (owner spec 2026-10-12 "미니멀 개편"): home, my account, settings. Everything else is reached from
+ * 설정 → 고급 기능, and the 설정 tab stays lit on those screens. */
 const NAV: [string, (p: { className?: string }) => ReactElement, string][] = [
-  ["/", IHome, "홈"], ["/strategies", IFlag, "전략"], ["/stocks", IStocks, "종목"], ["/portfolio", IPortfolio, "포트폴리오"], ["/market", IMarket, "시장"], ["/performance", IPerf, "성과"],
+  ["/", IHome, "홈"], ["/portfolio", IPortfolio, "내 계좌"], ["/settings", ISettings, "설정"],
 ];
+const ADVANCED = ["/settings", "/today", "/routine/full", "/evidence", "/strategies", "/stocks", "/market", "/performance", "/guide"];
+const navClass = (to: string, path: string) => ({ isActive }: { isActive: boolean }) =>
+  isActive || (to === "/settings" && ADVANCED.some((p) => path === p || path.startsWith(`${p}/`))) ? "active" : "";
+
+/** The one line under every screen: the app never orders, and a past record is not a promise. */
+export const DISCLAIMER = "주문은 하지 않습니다 · 과거 성적은 미래를 보장하지 않습니다";
 
 /** Which build is running (the commit it was built from): after installing a new version the owner can check it. */
 export function versionLabel(sys: SystemInfo): string {
@@ -74,74 +79,48 @@ export default function App() {
   return (
     <PhoneGate>
       <StatusProvider>
-        <ViewModeProvider>
-          <Shell />
-        </ViewModeProvider>
+        <Shell />
       </StatusProvider>
     </PhoneGate>
   );
 }
 
-/** GLANCE MODE: the quiet desktop object (its own window on the desktop app). */
-function GlanceButton() {
-  return <button type="button" className="glance-open" onClick={() => void openGlance()} data-testid="open-glance" title="시장 상태와 관심 종목 판단만 작게 띄웁니다">Glance 모드</button>;
-}
-
 function Shell() {
   useEffect(preloadPages, []);
-  useViewMode(); // a 쉽게/자세히 switch re-renders every page, so plain times (format.stamp) follow it at once
   const st = useStatus()!;
-  const sys = st.system;
   const loc = useLocation();
-  const inStocks = loc.pathname.startsWith("/stocks");
   return (
     <div className="layout">
       <nav className="nav" aria-label="주 메뉴">
-        <div className="brand"><BrandMark className="mark" /><div>MarketLens<small>미국 주식 판단 도우미</small></div></div>
-        <QuickSearch />
+        <div className="brand"><BrandMark className="mark" /><div>MarketLens</div></div>
         {NAV.map(([to, Icon, label]) => (
-          <NavLink key={to} to={to} end={to === "/"} title={label} className={({ isActive }) => (isActive || (to === "/stocks" && inStocks) ? "active" : "")}>
-            <Icon />{label}
-          </NavLink>
+          <NavLink key={to} to={to} end={to === "/"} title={label} className={navClass(to, loc.pathname)}><Icon />{label}</NavLink>
         ))}
-        <div className="grow" />
-        <ViewModeSwitch />
-        <GlanceButton />
-        <NavLink to="/settings" title="설정" className={({ isActive }) => `util${isActive ? " active" : ""}`}><ISettings />설정</NavLink>
-        <NavLink to="/guide" title="용어·도움말" className={({ isActive }) => `util${isActive ? " active" : ""}`}><IHelp />용어·도움말</NavLink>
-        <div className="foot">주문은 넣지 않습니다. 모든 매매는 직접 판단·실행하세요. 가격은 미국 달러(USD).
-          {sys.data && <div data-testid="app-version" style={{ marginTop: 6 }}>{versionLabel(sys.data)}</div>}</div>
       </nav>
       <div className="main-col">
-        {sys.data && sys.data.mode === "MOCK" && <ModeBanner mode="MOCK" />}
-        <StatusBar />
+        <ProblemLine />
         <VisitCounter />
-        <Onboarding />
-        {sys.error && (
-          <div style={{ padding: "14px 34px 0" }}>
-            <StatePanel kind="disconnected" what={`백엔드 연결 실패: ${sys.error}`} actions={<button onClick={st.refresh}>다시 시도</button>} />
+        {st.system.error && (
+          <div className="m-shell-pad">
+            <StatePanel kind="disconnected" what={`백엔드 연결 실패: ${st.system.error}`} actions={<button onClick={st.refresh}>다시 시도</button>} />
           </div>
         )}
-        {/* phone width: the six destinations as a bottom tab bar (the top row keeps search, the view switch and settings) */}
-        <nav className="tabbar" aria-label="주 메뉴(하단)" data-testid="tabbar">
-          {NAV.map(([to, Icon, label]) => (
-            <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => (isActive || (to === "/stocks" && inStocks) ? "active" : "")}>
-              <Icon /><span>{label}</span>
-            </NavLink>
-          ))}
-        </nav>
         <main className="main" key={loc.pathname.split("/").slice(0, 2).join("/")}>
           <PageBoundary key={loc.pathname}><Suspense fallback={<Loading what="화면" rows={2} />}><Routes>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<Home />} />
+            <Route path="/routine" element={<RoutineList />} />
+            <Route path="/portfolio" element={<ViewModeProvider><Portfolio /></ViewModeProvider>} />
+            <Route path="/settings" element={<Settings />} />
+            {/* 설정 → 고급 기능 */}
+            <Route path="/today" element={<Dashboard />} />
+            <Route path="/routine/full" element={<RoutineFull />} />
+            <Route path="/evidence" element={<Evidence />} />
             <Route path="/strategies" element={<Strategies />} />
             <Route path="/stocks" element={<Stocks />} />
             <Route path="/stocks/:ticker" element={<StockDetail />} />
-            <Route path="/portfolio" element={<Portfolio />} />
             <Route path="/market" element={<Market />} />
             <Route path="/performance" element={<Performance />} />
-            <Route path="/settings" element={<Settings />} />
             <Route path="/guide" element={<Guide />} />
-            <Route path="/evidence" element={<Evidence />} />
             {/* earlier addresses (bookmarks, old links) land on the screen that now holds the same thing */}
             <Route path="/opportunities" element={<Navigate to="/stocks?tab=candidates" replace />} />
             <Route path="/watchlist" element={<Navigate to="/stocks?tab=watch" replace />} />
@@ -153,6 +132,13 @@ function Shell() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes></Suspense></PageBoundary>
         </main>
+        <footer className="m-foot" data-testid="disclaimer">{DISCLAIMER}</footer>
+        {/* phone width: the three destinations as a bottom tab bar */}
+        <nav className="tabbar" aria-label="주 메뉴(하단)" data-testid="tabbar">
+          {NAV.map(([to, Icon, label]) => (
+            <NavLink key={to} to={to} end={to === "/"} className={navClass(to, loc.pathname)}><Icon /><span>{label}</span></NavLink>
+          ))}
+        </nav>
       </div>
     </div>
   );

@@ -650,8 +650,6 @@ tr.row-expired:hover td { opacity: 0.9; }
   .layout { grid-template-columns: minmax(0, 1fr); }
   .nav { position: sticky; top: 0; z-index: 30; height: auto; flex-direction: row; align-items: center; overflow-x: auto; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--line); }
   .nav .brand { flex: none; white-space: nowrap; padding: 0 10px 0 2px; } .nav .brand small { display: none; }
-  .nav .qs { flex: 0 1 200px; min-width: 140px; margin: 0 6px 0 0; }
-  .nav .qs-list { position: fixed; top: 58px; left: 12px; right: auto; width: min(420px, calc(100vw - 24px)); } /* the scrolling menu row would clip it */
   .nav a { height: 36px; flex: none; white-space: nowrap; padding: 0 10px; } .nav a.active::before { display: none; }
   .nav .grow, .nav .foot { display: none; }
   .nav { scrollbar-width: none; } .nav::-webkit-scrollbar { display: none; }
@@ -1247,15 +1245,6 @@ tr.detail-row > td { padding: 4px 12px 18px; background: var(--s2); }
   [data-testid="krw-return"] .scroll > table { min-width: 560px; }
 }
 
-/* Glance 모드 button in the menu (the Glance surface itself is styled in glance/glance.css) */
-.glance-open { height: 32px; margin: 0 4px 10px; border-radius: 10px; border: 1px solid var(--line); background: rgba(8, 11, 20, 0.7); color: var(--sub); font-size: 13px; font-weight: 650; }
-.glance-open:hover { color: var(--text); border-color: var(--accent-line); background: var(--s2); }
-/* 쉽게 보기 / 자세히 보기 */
-.view-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; margin: 0 4px 8px; padding: 3px; border-radius: 11px; border: 1px solid var(--line); background: rgba(8, 11, 20, 0.7); }
-.view-switch button { height: 28px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--sub); font-size: 12.5px; font-weight: 650; white-space: nowrap; box-shadow: none; }
-.view-switch button:hover { color: var(--text); }
-.view-switch button.on { background: var(--s2); color: var(--text); }
-@media (max-width: 980px) { .view-switch { flex: none; margin: 0 0 0 6px; } }
 
 /* 가격 지도: moving averages + supports/resistances under the price chart, drawn small (owner 2026-10-05) */
 .pmap:empty { display: none; }
@@ -1663,24 +1652,86 @@ table td.pos { color: var(--up); }
 .ev-fwd b { font-size: 20px; font-variant-numeric: tabular-nums; }
 .ev-reasons { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; columns: 2; }
 @media (max-width: 760px) { .ev-fwd { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ev-reasons { columns: 1; } }
-/* 첫 사용 안내 */
-.onb-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(3, 5, 10, 0.72); display: grid; place-items: center; padding: 16px; }
-.onb { width: min(480px, 100%); background: var(--s2); border: 1px solid var(--line-3); border-radius: var(--r-xl); padding: 26px 26px 20px; box-shadow: var(--shadow-2); display: grid; gap: 10px; }
-.onb h2 { margin: 0; font-size: 22px; line-height: 1.3; }
-.onb p { margin: 0; font-size: 15.5px; line-height: 1.65; color: var(--text-2); }
-.onb-steps { display: flex; gap: 6px; }
-.onb-steps span { flex: 1; height: 4px; border-radius: 2px; background: var(--s4); }
-.onb-steps span.on, .onb-steps span.done { background: var(--accent); }
-.onb-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-.onb-foot .ghost { margin-right: auto; }
 .home-top { align-items: start; }
 @media (max-width: 640px) { .home-head .t-sub { display: none; } .home-head h1 { font-size: 22px; } }
 .todo-clash { color: var(--warn); font-weight: 600; }
 @media (max-width: 640px) { .todo-next { display: none; } .todo-foot { gap: 8px; font-size: 12px; } }
 @media (max-width: 640px) { .todo-card { padding-top: 14px; padding-bottom: 12px; } .todo-why { font-size: 13px; } }
 /* 이번 달 할 일 folded to one line (owner 2026-10-11 "접을수있게") — the status card then takes the whole row */
-.home-top:has(.todo-folded) { grid-template-columns: minmax(0, 1fr); }
-.todo-folded { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 10px 16px; border-radius: var(--r-md); border: 1px solid rgba(95, 224, 189, 0.3); background: var(--s1); font-size: 13.5px; }
-.todo-folded .t { font-weight: 700; }
-.todo-folded button { margin-left: auto; }
-.todo-fold { height: 26px; padding: 0 8px; }
+
+/* ===================================================================== 미니멀 개편 (owner spec 2026-10-12)
+   Removal, not addition. Colours: background / text / one point colour (violet) / gain mint, loss coral — nothing else.
+   No gradients, glows, icon badges or entrance motion anywhere. Home and the routine list use three text sizes only:
+   big number (--m-big), body (--m-body), secondary (--m-sub). */
+:root { --m-big: 30px; --m-body: 16px; --m-sub: 13px; }
+body { background: var(--bg); }
+.nav { background: var(--side); }
+.brand > div { background: none; -webkit-text-fill-color: var(--text); color: var(--text); }
+.brand .mark { animation: none; }
+.nav a:hover { transform: none; }
+.nav a.active { background: var(--s2); box-shadow: none; }
+.nav a.active::before { background: var(--accent); box-shadow: none; }
+.nav a.active svg { color: var(--accent); }
+button, .btn { transition: background var(--t-fast), border-color var(--t-fast); }
+button:active:not(:disabled), .btn:active, button.primary:hover:not(:disabled), .btn.primary:hover { transform: none; }
+button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #0d0b1f; box-shadow: none; }
+button.primary:hover:not(:disabled), .btn.primary:hover { background: #b5a8fa; border-color: #b5a8fa; }
+.card, .panel, .hero, .today, .brief, .cand, .hero-card, .status-card, .todo-card, .rail-card, .pmap, .plan-card, .ev-card, .routine { background: var(--s1); box-shadow: none; }
+.card::after, .panel::after, .hero::before, .today::before, .brief::before { display: none; }
+a.card:hover, .card.link:hover, .live-signal:hover { transform: none; box-shadow: none; }
+.card-head .icon, .brief-sun { display: none; }
+.badge::before, .cand::before, .meter .fill, .stmt .body::before { box-shadow: none; }
+.enter, .enter-2, .enter-3, main > .grid > *, main > div > .grid > * { animation: none; }
+.page-title h1::after, main > h1::after, .page-head h1::after { display: none; }
+.status-card { border-color: var(--line); }
+.goal-bar span { background: var(--accent); }
+
+/* problem-only line above every screen, and the one disclaimer line under it */
+.m-problem { padding: 8px 34px; font-size: var(--m-sub); color: var(--warn); background: var(--s1); border-bottom: 1px solid var(--line); }
+.m-problem a { color: inherit; text-decoration: underline; }
+.m-foot { padding: 12px 34px 20px; font-size: var(--m-sub); color: var(--muted); text-align: center; }
+.m-shell-pad { padding: 14px 34px 0; }
+
+/* home: three plain cards in one column */
+.m-home, .m-page { display: grid; gap: 14px; max-width: 720px; margin: 0 auto; width: 100%; }
+.m-card { background: var(--s1); border: 1px solid var(--line); border-radius: var(--r-md); padding: 20px 22px; display: grid; gap: 10px; min-width: 0; }
+.m-card h2, .m-page h1 { margin: 0; }
+.m-big { font: 700 var(--m-big)/1.2 var(--font); letter-spacing: -0.02em; color: var(--text); font-variant-numeric: tabular-nums; }
+.m-body { font: 400 var(--m-body)/1.5 var(--font); color: var(--text); margin: 0; }
+.m-sub { font: 400 var(--m-sub)/1.4 var(--font); color: var(--muted); margin: 0; }
+.m-big.pos, .m-body .pos { color: var(--up); } .m-big.neg, .m-body .neg { color: var(--down); }
+.m-body b { font-weight: 700; }
+.m-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.m-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.m-btn { justify-self: start; height: 40px; padding: 0 20px; font-size: var(--m-body); }
+.m-line { grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 14px; }
+.m-link { font-size: var(--m-body); color: var(--accent); }
+.m-page > .m-link, .grid > .m-link { font-size: var(--m-sub); justify-self: start; }
+.m-warn { margin: 0; font-size: var(--m-sub); color: var(--warn); }
+/* the routine list: ticker and shares, nothing else */
+.m-lists { display: grid; gap: 14px; }
+.m-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.m-list li { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); font-size: var(--m-body); font-variant-numeric: tabular-nums; }
+.m-list li:first-child { border-top: 0; }
+.m-list li.m-dim { color: var(--muted); }
+
+/* 설정 → 고급 기능 */
+.adv-list { display: grid; gap: 8px; max-width: 760px; }
+.adv-item { all: unset; box-sizing: border-box; cursor: pointer; display: grid; gap: 3px; padding: 14px 18px; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--s1); }
+.adv-item:hover { border-color: var(--accent-line); text-decoration: none; }
+.adv-item b { color: var(--text); font-size: 15px; }
+.adv-item span { color: var(--muted); font-size: 13px; }
+.adv-item:focus-visible { box-shadow: var(--focus); }
+
+/* phone: no top menu, three tabs at the bottom */
+@media (max-width: 980px) { .m-problem, .m-foot, .m-shell-pad { padding-left: 18px; padding-right: 18px; } }
+@media (max-width: 640px) {
+  .nav { display: none; }
+  .tabbar { grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--side); backdrop-filter: none; }
+  :root { --m-big: 26px; --m-body: 15px; }
+  .main { padding: 16px 16px 8px; }
+  .m-foot { padding-bottom: 84px; }
+  .m-card { padding: 16px; gap: 8px; }
+  .m-line { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "h link" "line line"; row-gap: 8px; }
+  .m-line h2 { grid-area: h; } .m-line .m-link { grid-area: link; } .m-line .m-body { grid-area: line; white-space: nowrap; font-size: min(var(--m-body), 3.7vw); }
+}

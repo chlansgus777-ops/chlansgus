@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { EvidenceTable, randomLine, span, useEvidence, worstLine, ym, type Curve, type Evidence as Ev } from "../components/HomeTop";
+import { EvidenceTable, randomLine, span, usd0, useEvidence, worstLine, ym, type Curve, type Evidence as Ev } from "../components/HomeTop";
 import { Card, Err, Loading, Term } from "../components/ui";
 import { useApi } from "../components/useApi";
 import { pct, price } from "../format";
@@ -124,11 +124,16 @@ export default function Evidence() {
   const ok = e.available && e.routine && e.spy && e.deposit && e.random;
   return (
     <div className="grid">
-      <div className="page-head enter"><div><h1>추천 근거</h1><div className="t-sub">이번 달 루틴을 왜 보여 드리는지, 과거에 어땠는지, 가장 나빴을 때는 어땠는지 숨김없이 보여 드립니다. 앞으로의 수익을 약속하지 않습니다.</div></div></div>
+      <Link to="/" className="m-link">← 홈</Link>
+      <div className="page-head enter"><div><h1>이 방법의 성적</h1><div className="t-sub">이번 달 루틴을 왜 보여 드리는지, 과거에 어땠는지, 가장 나빴을 때는 어땠는지 숨김없이 보여 드립니다. 앞으로의 수익을 약속하지 않습니다.</div></div></div>
       {!ok ? <Card title="과거 성적"><div className="caption">{e.reason ?? "과거 성적이 아직 없습니다."}</div></Card> : <>
         <Card title="한눈에 보기" explain={<>{ym(e.period!.start)} ~ {ym(e.period!.end)}, 처음에 똑같은 돈을 넣었다고 계산했습니다 (<Term k="backtest">과거 시뮬레이션</Term>).</>}>
           <EvidenceTable e={e} />
-          <div className="ev-points"><div>{randomLine(e)}</div></div>
+          <div className="ev-points">
+            <div data-testid="ev-random-note">{randomLine(e)}</div>
+            <div>✓ 처음에 $1,000을 넣었다면 지금 약 {usd0(1000 * (1 + e.routine!.total_return))}입니다 (S&P 500은 약 {usd0(1000 * (1 + e.spy!.total_return))}). 거래 수수료는 뺐고, 세금과 환전 비용은 반영하지 않은 값입니다.</div>
+          </div>
+          <div className="caption" data-testid="ev-validation">앱 자체 검증 기준 6개 중 2개(출렁임 대비 수익, 몇몇 종목에 기댄 정도)를 통과하지 못한 규칙입니다.</div>
         </Card>
         <Card title="$1,000을 넣었다면" explain="달마다 계좌 금액이 어떻게 변했는지입니다. 선 끝의 숫자가 마지막 금액입니다.">
           <GrowthChart e={e} />

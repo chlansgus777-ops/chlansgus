@@ -15,6 +15,7 @@ import { refreshQuoteSubscriptions } from "../quotes";
 import { useApi, usePoll } from "../components/useApi";
 import { day, num, parseAmount, pct, price, shares, usdWithKo } from "../format";
 import { useEasy } from "../viewMode";
+import { MyStatus } from "../components/HomeTop";
 
 
 interface HoldingV { ticker: string; quantity: number; cost_basis: number; price: number | null; price_day: string | null; market_value: number | null; unrealized_pnl: number | null; unrealized_pct: number | null; weight: number | null; sector: string; split_adjusted?: number; source?: "manual" | "ledger" | "toss"; realized_pnl?: number; dividends?: number; outside_broker?: boolean }
@@ -122,8 +123,10 @@ export default function Portfolio() {
   const pnlPct = x.invested_value - x.unrealized_pnl > 0 ? x.unrealized_pnl / (x.invested_value - x.unrealized_pnl) : null;
   return (
     <div className="grid">
-      <div className="page-head"><div><h1>내 포트폴리오</h1><div className="t-sub">{x.note}</div></div></div>
+      <div className="page-head"><div><h1>내 계좌</h1></div></div>
       <StaleData error={p.error} at={p.fetchedAt} retry={p.reload} />
+      {/* owner spec 2026-10-12: today's P/L, the goal and its bar moved here from home */}
+      {!welcome && <MyStatus cash={x.cash} cashEntered={!assumed} />}
       {x.broker?.enabled && <TossCard view={x.broker} compact onChange={() => { p.reload(); refreshQuoteSubscriptions(); }} />}
       {!empty && <LiveAccount />}
       {(x.history_pending?.length ?? 0) > 0 && <Notice tone="info">가격 이력을 받는 중: {x.history_pending?.join(", ")} — 받는 대로 평가금액을 다시 계산합니다.</Notice>}

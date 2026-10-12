@@ -1,5 +1,8 @@
 import { Fragment, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { versionLabel } from "../App";
+import { openGlance } from "../glance/desktop";
+import type { SystemInfo } from "../types";
 import { api } from "../api";
 import { QuoteFeedStatus } from "../components/LivePrice";
 import { TossCard, type TossView } from "../components/TossConnect";
@@ -68,7 +71,7 @@ export function SetupCard({ configured, mode, onSaved }: { configured: Record<st
 interface S { mode: string; keys_configured: Record<string, boolean>; weights: Record<string, number>; decision: Record<string, number>; entry: Record<string, number>; scanner: Record<string, unknown>; calibration: Record<string, number>; sector_models: { id: string; name: string; rationale: string; primary_multiple: string; fundamental: { metric: string; label: string; weight: number; bad: number; good: number }[] }[]; note: string;
   scheduler?: { enabled: boolean; interval_minutes: number } }
 
-type Tab = "data" | "quotes" | "auto" | "phone" | "status" | "diag";
+type Tab = "advanced" | "data" | "quotes" | "auto" | "phone" | "status" | "diag";
 
 /** Saves a few non-secret values through the same setup endpoint (restart applies them). */
 function useSave(onSaved: () => void) {
@@ -133,18 +136,19 @@ export default function Settings() {
   const s = useApi<S>("/settings");
   const [params, setParams] = useSearchParams();
   const t = params.get("tab");
-  const tab: Tab = t === "model" ? "status" : t === "quotes" || t === "auto" || t === "status" || t === "phone" || t === "diag" ? t : "data";
+  const tab: Tab = t === "model" ? "status" : t === "data" || t === "quotes" || t === "auto" || t === "status" || t === "phone" || t === "diag" ? t : "advanced";
   if (s.state === "loading") return <Loading what="설정" />;
   if (!s.data) return <Err error={s.error} retry={s.reload} />;
   const d = s.data;
   const kv = (o: Record<string, unknown>) => <div className="kv">{Object.entries(o).map(([k, v]) => <Fragment key={k}><span className="k">{k}</span><span>{typeof v === "object" ? JSON.stringify(v) : String(v)}</span></Fragment>)}</div>;
   return (
     <div className="grid">
-      <div className="page-head enter"><div><h1>설정</h1><div className="t-sub">데이터 연결, 실시간 시세, 자동 갱신, 연결 상태를 한곳에서 봅니다. 저장한 키는 다시 표시하지 않습니다.</div></div></div>
+      <div className="page-head"><div><h1>설정</h1></div></div>
       <div className="row spread">
-        <Tabs<Tab> label="설정 항목" value={tab} onChange={(v) => setParams(v === "data" ? {} : { tab: v }, { replace: true })}
-              items={[["data", "데이터 연결"], ["quotes", "실시간 시세"], ["auto", "자동 갱신"], ["phone", "폰 연결"], ["status", "연결 상태·데이터 준비"], ["diag", "진단"]]} />
+        <Tabs<Tab> label="설정 항목" value={tab} onChange={(v) => setParams(v === "advanced" ? {} : { tab: v }, { replace: true })}
+              items={[["advanced", "고급 기능"], ["data", "데이터 연결"], ["quotes", "실시간 시세"], ["auto", "자동 갱신"], ["phone", "폰 연결"], ["status", "연결 상태·데이터 준비"], ["diag", "진단"]]} />
       </div>
+      {tab === "advanced" && <Advanced />}
       {tab === "data" && (
         <>
           <TossSettings />
@@ -176,6 +180,32 @@ export default function Settings() {
           </Disclosure>
         </>
       )}
+    </div>
+  );
+}
+
+/** 고급 기능 (owner spec 2026-10-12 "미니멀 개편"): every screen and tool that left home and the menu, in one list.
+ * Nothing was deleted — each row opens the screen as it was. */
+const ADVANCED: [string, string, string][] = [
+  ["/today", "오늘의 시장·후보", "점수 후보, 시장 분위기와 위험, 실시간 신호, 보유 종목 가격 알림·손절·익절선, 일정, 관심 종목, 브리핑"],
+  ["/routine/full", "이번 달 루틴 전체", "오늘 확인할 일, 현금·계좌 한도로 달라지는 거래, 전략 밖 보유 종목, 내 규칙과 엇갈리는 종목"],
+  ["/evidence", "이 방법의 성적 자세히", "4가지 방법 비교, $1,000 예시, 최악의 경우, 연도별 성적, 계산 방법"],
+  ["/strategies", "전략 연구", "전략별 모의 기록과 과거 시뮬레이션"],
+  ["/stocks", "종목", "종목 찾기, 관심 종목, 후보 전체"],
+  ["/market", "시장", "이슈, 일정, 거시 지표"],
+  ["/performance", "성과", "추천이 실제로 맞았는지"],
+  ["/guide", "용어·도움말", "화면에 나오는 말과 표시의 뜻"],
+];
+
+function Advanced() {
+  const sys = useApi<SystemInfo>("/system");
+  return (
+    <div className="adv-list" data-testid="advanced">
+      {ADVANCED.map(([to, title, what]) => (
+        <Link key={to} to={to} className="adv-item"><b>{title}</b><span>{what}</span></Link>
+      ))}
+      <button type="button" className="adv-item" data-testid="open-glance" onClick={() => void openGlance()}><b>Glance 모드</b><span>시장 상태와 관심 종목 판단만 작은 창으로 띄웁니다</span></button>
+      {sys.data && <div className="caption" data-testid="app-version">{versionLabel(sys.data)}</div>}
     </div>
   );
 }

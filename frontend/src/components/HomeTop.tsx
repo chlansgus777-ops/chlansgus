@@ -1,18 +1,16 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../api";
 import { pct, price } from "../format";
 import { useAccountLive } from "./AccountLive";
-import { RoutineCard, type Routine } from "./RoutineCard";
 import { Term } from "./ui";
-import { invalidateApi, useApi, useSettling } from "./useApi";
+import { invalidateApi, useApi } from "./useApi";
 
-/** The top of home (owner spec 2026-10-11 "UI/UX 및 추천 신뢰도 전면 개선", 안 A): ① 내 현황 ② 이번 달 할 일 (one summary
- * card, at most a quarter of the first screen) ③ 왜 이 방법인가 (past record next to its yardsticks, and the worst case on
- * the same card). Every number carries its unit and what it is measured against; nothing promises a return. */
+/** 내 현황 at the top of 내 계좌 (total, return, today, the goal and its bar — moved off home by the owner spec
+ * 2026-10-12), and the past-record pieces the 이 방법의 성적 page draws. Every number carries its unit and what it is
+ * measured against; nothing promises a return. */
 
 const tone = (v: number | null | undefined) => (v == null || Math.abs(v) < 1e-9 ? "" : v > 0 ? "pos" : "neg");
-const usd0 = (v: number) => `$${Math.round(v).toLocaleString("en-US")}`;
+export const usd0 = (v: number) => `$${Math.round(v).toLocaleString("en-US")}`;
 const signed = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${price(Math.abs(v))}`;
 /** "2021년 2월" from an ISO day. */
 export const ym = (iso: string | null | undefined) => (iso ? `${iso.slice(0, 4)}년 ${Number(iso.slice(5, 7))}월` : "—");
@@ -42,13 +40,12 @@ export function MyStatus({ cash, cashEntered }: { cash: number | null; cashEnter
     setEditing(false);
   };
   return (
-    <section className="hero-card status-card enter" data-testid="my-status" aria-labelledby="my-status-h">
+    <section className="hero-card status-card" data-testid="my-status" aria-labelledby="my-status-h">
       <div className="hero-kicker" id="my-status-h">내 현황</div>
       {total == null ? (
         <>
           <div className="hero-num muted" data-testid="status-total">—</div>
-          <p className="hero-line">아직 내 계좌 정보가 없어요. 가진 주식과 현금을 넣으면 총 자산과 수익률이 여기에 나옵니다.</p>
-          <Link to="/portfolio" className="btn primary" data-testid="status-setup">내 계좌 입력하기</Link>
+          <p className="hero-line">아직 내 계좌 정보가 없어요. 아래에서 가진 주식과 현금을 넣으면 총 자산과 수익률이 여기에 나옵니다.</p>
         </>
       ) : (
         <>
@@ -86,67 +83,6 @@ export function MyStatus({ cash, cashEntered }: { cash: number | null; cashEnter
         )}
       </div>
     </section>
-  );
-}
-
-// ------------------------------------------------------------------ ② 이번 달 할 일 (summary)
-/** The one action this month in a sentence: what, how much, by when. The list unfolds below on a tap. */
-export function routineAction(x: Routine): { what: string; how: string | null } {
-  const buys = (x.buy ?? []).filter((b) => b.status === "OK" || b.status === "CASH" || b.status === undefined).filter((b) => b.shares);
-  const sells = x.sell ?? [];
-  if (x.state !== "ACT" || (!buys.length && !sells.length)) return { what: (x.headline ?? "").replace(/^이번 달 할 일:\s*/, "") || "이번 달 목록을 준비하고 있습니다", how: x.when ?? null };
-  const parts = [sells.length ? `${sells.length}종목 팔기` : null, buys.length ? `${buys.length}종목 사기` : null].filter(Boolean);
-  const slot = x.account?.slot;
-  const how = buys.length ? `${slot != null ? `종목마다 약 ${price(slot)}씩` : "종목마다 같은 금액씩"}${x.funding ? ` · 합계 약 ${price(x.funding.planned)}` : ""}` : null;
-  return { what: parts.join(" · "), how };
-}
-
-/** "접기" (owner 2026-10-11: between two changes the card has nothing to act on and only takes room): folded per month — the
- * month's list date is stored, so the next month's new list opens by itself. Per device (browser storage). */
-const FOLD_KEY = "ml.todoFolded";
-function readFold(): string | null { try { return localStorage.getItem(FOLD_KEY); } catch { return null; } }
-function writeFold(v: string | null): void { try { if (v) localStorage.setItem(FOLD_KEY, v); else localStorage.removeItem(FOLD_KEY); } catch { /* not stored: folds for this visit only */ } }
-
-export function RoutineSummary() {
-  const [open, setOpen] = useState(false);
-  const [foldedFor, setFoldedFor] = useState<string | null>(readFold);
-  const r = useSettling<Routine>("/routine");
-  const x = r.data;
-  const act = x ? routineAction(x) : null;
-  const clash = new Set((x?.conflicts ?? []).map((c) => c.ticker)).size;  // a stop or a take-profit of my own rules must not hide behind the fold
-  const month = x?.rebalance_day ?? x?.next_rebalance ?? "-";
-  const folded = !!x && foldedFor === month;
-  const next = x?.next_rebalance ? `${Number(x.next_rebalance.slice(5, 7))}월 ${Number(x.next_rebalance.slice(8, 10))}일` : null;
-  const fold = (on: boolean) => { const v = on ? month : null; writeFold(v); setFoldedFor(v); if (on) setOpen(false); };
-  if (folded) return (
-    <section className="todo-folded enter" data-testid="routine-folded" aria-label="이번 달 할 일 (접힘)">
-      <span className="t">이번 달 할 일</span>
-      <span className="muted">{next ? `다음 목록 ${next}${x?.days_to_next != null ? ` (${x.days_to_next}일 남음)` : ""}` : "접어 두었습니다"}</span>
-      {clash > 0 && <span className="todo-clash" data-testid="todo-clash">⚠ {clash}종목은 내 규칙과 엇갈림</span>}
-      <button type="button" className="sm ghost" data-testid="routine-unfold-card" onClick={() => fold(false)}>펼치기 ▾</button>
-    </section>
-  );
-  return (
-    <>
-      <section className="hero-card todo-card enter" data-testid="routine-summary" aria-labelledby="todo-h">
-        <div className="hero-kicker" id="todo-h">이번 달 할 일
-          <span className="row tight">{x?.days_to_next != null ? <span className="dday">다음 교체까지 {x.days_to_next}일</span> : null}
-            <button type="button" className="sm ghost todo-fold" data-testid="routine-fold" title="다음 달 목록이 나올 때까지 한 줄로 접어 둡니다" onClick={() => fold(true)}>접기 ▴</button></span>
-        </div>
-        <div className="todo-what" data-testid="todo-what">{act ? act.what : r.error ? "이번 달 목록을 불러오지 못했습니다" : "불러오는 중…"}</div>
-        {act?.how && <div className="todo-how">{act.how}</div>}
-        <div className="todo-why">
-          <Term k="routine_rule">왜 이 종목들?</Term> 지난 1년 가장 많이 오른 큰 회사 20곳<span className="todo-next">{next ? ` · 다음 목록 ${next}` : ""}</span>
-        </div>
-        <div className="todo-foot">
-          <button type="button" className="sm" data-testid="routine-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>{open ? "목록 접기 ▴" : "목록 펼치기 ▾"}</button>
-          {clash > 0
-            ? <span className="todo-clash" data-testid="todo-clash">⚠ {clash}종목은 내 규칙과 엇갈림</span>
-            : <span className="muted">주문은 증권사 앱에서 직접 하세요</span>}
-        </div>
-      </section>
-      {open && <div className="routine-unfold" data-testid="routine-unfold"><RoutineCard /></div>}
-    </>
   );
 }
 
@@ -204,37 +140,4 @@ export function randomLine(e: Evidence): string {
   const k = Math.round(e.random!.routine_beats_share * n);
   const who = k === n ? `${n}번 모두` : `${n}번 중 ${k}번`;
   return `${k >= n / 2 ? "✓" : "✗"} 같은 규칙으로 종목만 제비뽑기한 ${who}보다 연평균이 높았어요 (제비뽑기 가운데 ${pct(e.random!.median_run.cagr, 1)}, 최고 ${pct(e.random!.cagr.max, 1)}).`;
-}
-
-export function EvidenceCard() {
-  const q = useEvidence();
-  const e = q.data;
-  const ok = !!e?.available && !!e.routine && !!e.spy && !!e.deposit && !!e.random;
-  const years = e?.period ? `${e.period.start.slice(0, 4)}년 ${Number(e.period.start.slice(5, 7))}월 ~ ${e.period.end.slice(0, 4)}년 ${Number(e.period.end.slice(5, 7))}월` : "";
-  return (
-    <section className="card ev-card enter" data-testid="evidence" aria-labelledby="ev-h">
-      <div className="card-head">
-        <div style={{ minWidth: 0 }}>
-          <h2 className="t-card" id="ev-h">왜 이 방법인가요? 과거 성적표</h2>
-          <div className="explain">이 루틴을 {years || "과거"} 동안 그대로 따랐다고 계산한 결과입니다 (<Term k="backtest">과거 시뮬레이션</Term>). 실제로 번 돈이 아닙니다.</div>
-        </div>
-        <Link to="/evidence" className="row tight" data-testid="ev-more">계산 방법·연도별 보기 →</Link>
-      </div>
-      {!e ? <div className="caption">{q.error ? "과거 성적을 불러오지 못했습니다." : "불러오는 중…"}</div>
-        : !ok ? <div className="caption">{e.reason ?? "과거 성적이 아직 없습니다."}</div>
-        : (
-          <>
-            <EvidenceTable e={e} />
-            <div className="ev-points">
-              <div data-testid="ev-random-note">{randomLine(e)}</div>
-              <div>✓ 처음에 $1,000을 넣었다면 지금 약 {usd0(1000 * (1 + e.routine!.total_return))}입니다 (S&P 500은 약 {usd0(1000 * (1 + e.spy!.total_return))}). 거래 수수료는 뺐고, 세금과 환전 비용은 반영하지 않은 값입니다.</div>
-            </div>
-            <div className="ev-risk" role="note" data-testid="ev-risk">
-              <b>⚠ 최악의 경우도 꼭 보세요.</b> {worstLine(e)} 1년 사이 가장 크게 잃은 때는 {pct(e.routine!.worst_12m?.return, 0)}였습니다. <Term k="swing">출렁임 크기</Term>는 S&P 500의 약 {(e.routine!.volatility / e.spy!.volatility).toFixed(1)}배입니다.
-            </div>
-            <div className="caption ev-disclaim">과거 결과가 앞으로도 그렇다는 보장은 없습니다. 앱 자체 검증 기준 6개 중 2개(출렁임 대비 수익, 몇몇 종목에 기댄 정도)를 통과하지 못한 규칙입니다.</div>
-          </>
-        )}
-    </section>
-  );
 }

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Action, Quality, Stmt } from "./components/ui";
-import { DetailOnly, ViewModeProvider, ViewModeSwitch, plainKo, useViewMode } from "./viewMode";
+import { ViewModeProvider, plainKo } from "./viewMode";
 import { stamp, stampEt } from "./format";
 
 afterEach(cleanup);
@@ -30,17 +30,6 @@ describe("쉽게 보기 / 자세히 보기", () => {
     expect(screen.getByTestId("action-expired").querySelector("s")?.textContent).toBe("매수");
   });
 
-  it("switches to detail, shows the codes and remembers the choice", () => {
-    const { unmount } = render(<ViewModeProvider><ViewModeSwitch /><Action a="WAIT" /><DetailOnly><span>근거 원본</span></DetailOnly></ViewModeProvider>);
-    expect(screen.queryByText("근거 원본")).toBeNull();
-    fireEvent.click(screen.getByText("자세히 보기"));
-    expect(screen.getByText("대기(WAIT)")).toBeTruthy();
-    expect(screen.getByText("근거 원본")).toBeTruthy();
-    unmount();
-    render(<ViewModeProvider><Action a="WAIT" /></ViewModeProvider>);
-    expect(screen.getByText("대기(WAIT)")).toBeTruthy();
-  });
-
   it("a statement in easy mode is the sentence and why — no kind tag or source line", () => {
     const it_ = { kind: "CALC", text: "매출 성장률 33%", why: "업종 기준보다 높습니다", source: "재무", when: "2026-10-01" };
     render(<ViewModeProvider initial="easy"><Stmt it={it_} /></ViewModeProvider>);
@@ -59,14 +48,10 @@ describe("쉽게 보기 / 자세히 보기", () => {
 describe("시각 표기", () => {
   const iso = "2026-09-25T15:00:00Z"; // 11:00 in New York, midnight in Seoul
 
-  it("easy view shows Korea time only; detail and pages outside the app keep both clocks", () => {
-    // like the app shell, a component reading the mode re-renders on a switch
-    function Stamp() { useViewMode(); return <span data-testid="t">{stamp(iso)} | {stampEt(iso)}</span>; }
-    const { unmount } = render(<ViewModeProvider><ViewModeSwitch /><Stamp /></ViewModeProvider>);
+  it("a basic screen (easy) shows Korea time only; screens under 고급 기능 keep both clocks", () => {
+    function Stamp() { return <span data-testid="t">{stamp(iso)} | {stampEt(iso)}</span>; }
+    const { unmount } = render(<ViewModeProvider><Stamp /></ViewModeProvider>);
     expect(screen.getByTestId("t").textContent).toBe("2026-09-26 00:00 (한국 시간) | 09-26(토) 00:00 한국 시간");
-    fireEvent.click(screen.getByText("자세히 보기"));
-    expect(screen.getByTestId("t").textContent).toBe("2026-09-25 11:00 ET (2026-09-26 00:00 KST) | 09-25(금) 11:00 ET");
-    fireEvent.click(screen.getByText("쉽게 보기"));
     unmount();
     expect(stamp(iso)).toBe("2026-09-25 11:00 ET (2026-09-26 00:00 KST)");
   });

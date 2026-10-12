@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import stockFixture from "../__fixtures__/stock_mock.json";
-import { StatusBar, StatusProvider, usePageTime } from "../components/status";
+import { ProblemLine, StatusProvider } from "../components/status";
 import { StaleData, StatePanel, Term, type StateKind } from "../components/ui";
 import type { OppRow, StockDetail as SD } from "../types";
 import Dashboard, { riskLine, scopeLine, splitCandidates } from "./Dashboard";
@@ -137,49 +137,27 @@ describe("first screen: candidates", () => {
   });
 });
 
-function StatusHarness({ page }: { page?: Parameters<typeof usePageTime>[0] }) {
-  usePageTime(page ?? null);
-  return null;
-}
-
-describe("status bar", () => {
+describe("problem line (replaces the status bar)", () => {
   const base = (mode: "MOCK" | "LIVE", extra: Route_[] = []) => serve([...extra, [/\/system/, system(mode, "PREMARKET")], [/\/readiness/, { mode, recommendation_readiness: mode === "MOCK" ? "PAPER ONLY" : "FULL", readiness_reasons: [], scanner_status: "SCANNER_READY", scanner_reasons: [], progress: {}, sync: {}, categories: [] }],
     [/\/scan\/status/, { state: { scan_id: 3, status: "COMPLETE", started_at: "2026-09-28T14:00:00Z", saved: 40, total: 40 }, coverage: null }], [/\/sync\/status/, { job: null }], [/\/health/, { providers: [], llm: { provider: "none", available: false, status: "DOWN" } }]]);
 
-  it("tells MOCK from LIVE and shows the backend's session with New York and Korea time", async () => {
-    base("MOCK");
-    const { unmount } = render(<MemoryRouter><StatusProvider><StatusBar /></StatusProvider></MemoryRouter>);
-    expect((await screen.findByTestId("sb-mode")).textContent).toContain("MOCK");
-    const ses = screen.getByTestId("sb-session").textContent ?? "";
-    expect(ses).toContain("프리마켓");
-    expect(ses).toContain("뉴욕");
-    expect(ses).toContain("한국");
+  // owner spec 2026-10-12 "미니멀 개편": no clocks, session or feed indicators — one line only when something is wrong
+  it("a healthy LIVE app shows no line at all; mock data says so in one line", async () => {
+    base("LIVE");
+    const { unmount } = render(<MemoryRouter><StatusProvider><ProblemLine /></StatusProvider></MemoryRouter>);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId("problem-line")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/뉴욕|한국|미국장/);
     unmount();
-    base("LIVE");
-    render(<MemoryRouter><StatusProvider><StatusBar /></StatusProvider></MemoryRouter>);
-    await waitFor(() => expect(screen.getByTestId("sb-mode").textContent).toContain("LIVE"));
-  });
-
-  it("shows the price time of the page (not the time the screen fetched it) and how old it is", async () => {
-    base("LIVE");
-    render(<MemoryRouter><StatusProvider><StatusBar /><StatusHarness page={{ label: "NVDA", priceTs: "2026-09-25T20:00:00Z", priceSession: "CLOSED", quality: "STALE", analysedAt: "2026-09-26T01:00:00Z" }} /></StatusProvider></MemoryRouter>);
-    const p = await screen.findByTestId("sb-price-time");
-    await waitFor(() => expect(p.textContent).toContain("09-25(금) 16:00 ET"));
-    expect(p.textContent).toContain("일 전");
-    expect(p.textContent).toContain("오래됨");
-    expect(p.className).toContain("tone-warn");
+    base("MOCK");
+    render(<MemoryRouter><StatusProvider><ProblemLine /></StatusProvider></MemoryRouter>);
+    expect((await screen.findByTestId("problem-line")).textContent).toContain("모의 데이터");
   });
 
   it("names providers that are down (LIVE)", async () => {
     base("LIVE", [[/\/health/, { providers: [{ name: "polygon", kind: "price_history", mode: "LIVE", status: "DOWN", last_error: "HTTP 429", last_failure: null }], llm: { provider: "none", available: false, status: "DOWN" } }]]);
-    render(<MemoryRouter><StatusProvider><StatusBar /></StatusProvider></MemoryRouter>);
-    await waitFor(() => expect(screen.getByTestId("sb-providers").textContent).toContain("1곳 중단"));
-  });
-
-  it("says the server is unreachable instead of showing a normal state", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("network"); }));
-    render(<MemoryRouter><StatusProvider><StatusBar /></StatusProvider></MemoryRouter>);
-    await waitFor(() => expect(screen.getByTestId("sb-disconnected").textContent).toContain("연결 끊김"), { timeout: 6000 });
+    render(<MemoryRouter><StatusProvider><ProblemLine /></StatusProvider></MemoryRouter>);
+    expect((await screen.findByTestId("problem-line")).textContent).toContain("1곳을 받지 못하고");
   });
 });
 
